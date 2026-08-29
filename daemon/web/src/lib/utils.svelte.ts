@@ -46,10 +46,44 @@ export function gps_mode_label(mode: GpsMode | undefined | null): string {
     }
 }
 
+/**
+ * Per-state color overrides for the device's own display, as `#rrggbb` strings.
+ * A `null` field means "use Rayhunter's built-in color for this state".
+ */
+export interface DisplayColors {
+    paused: string | null;
+    recording: string | null;
+    warning_low: string | null;
+    warning_medium: string | null;
+    warning_high: string | null;
+}
+
+export type DisplayColorKey = keyof DisplayColors;
+
+/**
+ * The built-in color for each display state, used both as the starting value
+ * for the color pickers and to preview what "unset" looks like. `recording`
+ * depends on whether colorblind mode is enabled, so it is resolved separately
+ * by `default_recording_color`.
+ */
+export const DISPLAY_COLOR_DEFAULTS: Record<DisplayColorKey, string> = {
+    paused: '#ffffff',
+    recording: '#00ff00',
+    warning_low: '#ffff00',
+    warning_medium: '#ffa500',
+    warning_high: '#ff0000',
+};
+
+/** The recording color Rayhunter uses when no override is set. */
+export function default_recording_color(colorblind_mode: boolean): string {
+    return colorblind_mode ? '#0000ff' : DISPLAY_COLOR_DEFAULTS.recording;
+}
+
 export interface Config {
     device: string;
     ui_level: number;
     colorblind_mode: boolean;
+    display_colors: DisplayColors;
     key_input_mode: number;
     ntfy_url: string | null;
     enabled_notifications: enabled_notifications[];

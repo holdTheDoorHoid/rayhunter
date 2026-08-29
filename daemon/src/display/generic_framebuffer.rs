@@ -7,7 +7,7 @@ use crate::config::{self, UiLevel};
 use crate::display::DisplayState;
 use rayhunter::analysis::analyzer::EventType;
 
-use log::{error, info};
+use log::{error, info, warn};
 use tokio::sync::mpsc::Receiver;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
@@ -29,7 +29,7 @@ pub enum LinePattern {
 }
 
 #[allow(dead_code)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Color {
     Red,
     Green,
@@ -40,6 +40,8 @@ pub enum Color {
     Yellow,
     Pink,
     Orange,
+    /// An arbitrary color, used for the user's `display_colors` overrides.
+    Rgb(u8, u8, u8),
 }
 
 impl Color {
@@ -54,31 +56,60 @@ impl Color {
             Color::Yellow => (0xff, 0xff, 0),
             Color::Pink => (0xfe, 0x24, 0xff),
             Color::Orange => (0xff, 0xa5, 0),
+            Color::Rgb(r, g, b) => (r, g, b),
         }
     }
 }
 
-fn display_style_from_state(state: DisplayState, colorblind_mode: bool) -> (Color, LinePattern) {
+/// Apply a user override from the config, falling back to `default` when the
+/// override is unset or isn't a valid `#rrggbb` string.
+fn override_or(override_hex: &Option<String>, default: Color) -> Color {
+    match override_hex {
+        Some(hex) => match config::parse_hex_color(hex) {
+            Some((r, g, b)) => Color::Rgb(r, g, b),
+            None => {
+                warn!("ignoring invalid display color {hex:?}, using built-in color");
+                default
+            }
+        },
+        None => default,
+    }
+}
+
+fn display_style_from_state(
+    state: DisplayState,
+    colorblind_mode: bool,
+    colors: &config::DisplayColors,
+) -> (Color, LinePattern) {
+    // The built-in color for an active recording, which doubles as the color
+    // for informational events.
+    let recording_default = if colorblind_mode {
+        Color::Blue
+    } else {
+        Color::Green
+    };
+    let recording = override_or(&colors.recording, recording_default);
+
     match state {
-        DisplayState::Paused => (Color::White, LinePattern::Solid),
-        DisplayState::Recording => {
-            if colorblind_mode {
-                (Color::Blue, LinePattern::Solid)
-            } else {
-                (Color::Green, LinePattern::Solid)
-            }
-        }
+        DisplayState::Paused => (
+            override_or(&colors.paused, Color::White),
+            LinePattern::Solid,
+        ),
+        DisplayState::Recording => (recording, LinePattern::Solid),
         DisplayState::WarningDetected { event_type } => match event_type {
-            EventType::Informational => {
-                if colorblind_mode {
-                    (Color::Blue, LinePattern::Solid)
-                } else {
-                    (Color::Green, LinePattern::Solid)
-                }
-            }
-            EventType::Low => (Color::Yellow, LinePattern::Dotted),
-            EventType::Medium => (Color::Orange, LinePattern::Dashed),
-            EventType::High => (Color::Red, LinePattern::Solid),
+            EventType::Informational => (recording, LinePattern::Solid),
+            EventType::Low => (
+                override_or(&colors.warning_low, Color::Yellow),
+                LinePattern::Dotted,
+            ),
+            EventType::Medium => (
+                override_or(&colors.warning_medium, Color::Orange),
+                LinePattern::Dashed,
+            ),
+            EventType::High => (
+                override_or(&colors.warning_high, Color::Red),
+                LinePattern::Solid,
+            ),
         },
     }
 }
@@ -182,7 +213,9 @@ pub fn update_ui(
     }
 
     let colorblind_mode = config.colorblind_mode;
-    let mut display_style = display_style_from_state(DisplayState::Recording, colorblind_mode);
+    let display_colors = config.display_colors.clone();
+    let mut display_style =
+        display_style_from_state(DisplayState::Recording, colorblind_mode, &display_colors);
 
     task_tracker.spawn(async move {
         // this feels wrong, is there a more rusty way to do this?
@@ -209,7 +242,8 @@ pub fn update_ui(
             }
             match ui_update_rx.try_recv() {
                 Ok(state) => {
-                    display_style = display_style_from_state(state, colorblind_mode);
+                    display_style =
+                        display_style_from_state(state, colorblind_mode, &display_colors);
                 }
                 Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
                 Err(e) => error!("error receiving framebuffer update message: {e}"),
@@ -238,4 +272,104 @@ pub fn update_ui(
             tokio::time::sleep(Duration::from_millis(REFRESH_RATE)).await;
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Color, LinePattern, display_style_from_state};
+    use crate::config::DisplayColors;
+    use crate::display::DisplayState;
+    use rayhunter::analysis::analyzer::EventType;
+
+    /// Colors chosen by the user take precedence over the built-in ones.
+    #[test]
+    fn custom_colors_override_defaults() {
+        let colors = DisplayColors {
+            recording: Some("#123456".to_string()),
+            warning_high: Some("#abcdef".to_string()),
+            ..Default::default()
+        };
+
+        let (color, _) = display_style_from_state(DisplayState::Recording, false, &colors);
+        assert_eq!(color, Color::Rgb(0x12, 0x34, 0x56));
+
+        let (color, _) = display_style_from_state(
+            DisplayState::WarningDetected {
+                event_type: EventType::High,
+            },
+            false,
+            &colors,
+        );
+        assert_eq!(color, Color::Rgb(0xab, 0xcd, 0xef));
+    }
+
+    /// States the user hasn't customized keep their built-in colors, including
+    /// the colorblind green-to-blue substitution.
+    #[test]
+    fn unset_colors_fall_back_to_builtins() {
+        let colors = DisplayColors {
+            warning_low: Some("#ffffff".to_string()),
+            ..Default::default()
+        };
+
+        let (color, _) = display_style_from_state(DisplayState::Recording, false, &colors);
+        assert_eq!(color, Color::Green);
+
+        let (color, _) = display_style_from_state(DisplayState::Recording, true, &colors);
+        assert_eq!(color, Color::Blue);
+
+        let (color, _) = display_style_from_state(DisplayState::Paused, false, &colors);
+        assert_eq!(color, Color::White);
+    }
+
+    /// A custom recording color wins even when colorblind mode is on, so the
+    /// picker never appears to do nothing.
+    #[test]
+    fn custom_recording_color_wins_over_colorblind_mode() {
+        let colors = DisplayColors {
+            recording: Some("#00ffff".to_string()),
+            ..Default::default()
+        };
+        let (color, _) = display_style_from_state(DisplayState::Recording, true, &colors);
+        assert_eq!(color, Color::Rgb(0, 0xff, 0xff));
+    }
+
+    /// A malformed color must not blank the display; it falls back instead.
+    #[test]
+    fn invalid_colors_fall_back_to_builtins() {
+        let colors = DisplayColors {
+            warning_medium: Some("not-a-color".to_string()),
+            ..Default::default()
+        };
+        let (color, pattern) = display_style_from_state(
+            DisplayState::WarningDetected {
+                event_type: EventType::Medium,
+            },
+            false,
+            &colors,
+        );
+        assert_eq!(color, Color::Orange);
+        assert!(matches!(pattern, LinePattern::Dashed));
+    }
+
+    /// Line patterns convey severity without color, so they must not change
+    /// when colors are customized.
+    #[test]
+    fn patterns_are_unaffected_by_custom_colors() {
+        let colors = DisplayColors {
+            warning_low: Some("#111111".to_string()),
+            warning_medium: Some("#222222".to_string()),
+            warning_high: Some("#333333".to_string()),
+            ..Default::default()
+        };
+        let pattern_for = |event_type| {
+            display_style_from_state(DisplayState::WarningDetected { event_type }, false, &colors).1
+        };
+        assert!(matches!(pattern_for(EventType::Low), LinePattern::Dotted));
+        assert!(matches!(
+            pattern_for(EventType::Medium),
+            LinePattern::Dashed
+        ));
+        assert!(matches!(pattern_for(EventType::High), LinePattern::Solid));
+    }
 }

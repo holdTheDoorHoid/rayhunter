@@ -13,6 +13,7 @@
     } from '../utils.svelte';
     import Modal from './Modal.svelte';
     import ExpandableInput from './ExpandableInput.svelte';
+    import DeviceColorSettings from './DeviceColorSettings.svelte';
 
     let { shown = $bindable() }: { shown: boolean } = $props();
     let config = $state<Config | null>(null);
@@ -34,6 +35,17 @@
         try {
             loading = true;
             config = await get_config();
+            // A daemon older than this UI won't send display_colors at all, so
+            // fill in an empty set rather than letting the color pickers read
+            // properties of undefined.
+            const colors = config.display_colors;
+            config.display_colors = {
+                paused: colors?.paused ?? null,
+                recording: colors?.recording ?? null,
+                warning_low: colors?.warning_low ?? null,
+                warning_medium: colors?.warning_medium ?? null,
+                warning_high: colors?.warning_high ?? null,
+            };
             dnsServersInput = config.dns_servers ? config.dns_servers.join(', ') : '';
             message = '';
             messageType = null;
@@ -204,13 +216,23 @@
                             id="colorblind_mode"
                             type="checkbox"
                             bind:checked={config.colorblind_mode}
+                            aria-describedby="colorblind_mode_description"
                             class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
                         />
                         <label for="colorblind_mode" class="ml-2 block text-sm text-gray-700">
                             Colorblind Mode
                         </label>
                     </div>
+                    <p id="colorblind_mode_description" class="text-xs text-gray-500">
+                        Changes the status line on the device's own screen from green to blue for
+                        recording and informational events. Warning colors (yellow, orange, red) are
+                        unchanged &mdash; but warning severity is also shown by line pattern (dotted
+                        for low, dashed for medium, solid for high), which stays readable regardless
+                        of color. This does not affect the colors on this page.
+                    </p>
                 </div>
+
+                <DeviceColorSettings bind:config />
 
                 <div class="border-t border-gray-200 pt-4 mt-6 space-y-3">
                     <h3 class="text-lg font-semibold text-gray-800 mb-4">Notification Settings</h3>

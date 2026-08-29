@@ -37,6 +37,43 @@ pub enum KeyInputMode {
 }
 use crate::notifications::NotificationType;
 
+/// User-supplied overrides for the colors drawn on the device's own display.
+///
+/// Each field is an `#rrggbb` hex string. A field left as `None` keeps
+/// Rayhunter's built-in color for that state, including the green-to-blue
+/// substitution performed by `colorblind_mode`. Colors only apply to devices
+/// with a color-capable display; one-bit displays (e.g. the TP-Link M7350)
+/// draw status icons instead and ignore these values.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct DisplayColors {
+    /// Color drawn while recording is paused (built-in default: white)
+    pub paused: Option<String>,
+    /// Color drawn while recording, and for informational events
+    /// (built-in default: green, or blue when colorblind_mode is enabled)
+    pub recording: Option<String>,
+    /// Color drawn for low-severity warnings (built-in default: yellow)
+    pub warning_low: Option<String>,
+    /// Color drawn for medium-severity warnings (built-in default: orange)
+    pub warning_medium: Option<String>,
+    /// Color drawn for high-severity warnings (built-in default: red)
+    pub warning_high: Option<String>,
+}
+
+/// Parse an `#rrggbb` (or `rrggbb`) hex color into its red, green and blue
+/// components. Returns `None` for any string that isn't exactly six hex digits,
+/// so that a malformed value falls back to the built-in color rather than
+/// preventing the display from drawing at all.
+pub fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
+    let hex = hex.strip_prefix('#').unwrap_or(hex);
+    if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let component = |range: std::ops::Range<usize>| u8::from_str_radix(&hex[range], 16).ok();
+    Some((component(0..2)?, component(2..4)?, component(4..6)?))
+}
+
 /// The structure of a valid rayhunter configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
@@ -54,6 +91,8 @@ pub struct Config {
     pub ui_level: UiLevel,
     /// Colorblind mode
     pub colorblind_mode: bool,
+    /// Per-state color overrides for the device display
+    pub display_colors: DisplayColors,
     /// Key input mode
     pub key_input_mode: KeyInputMode,
     /// ntfy.sh URL
@@ -132,6 +171,7 @@ impl Default for Config {
             device: Device::Orbic,
             ui_level: UiLevel::Subtle,
             colorblind_mode: false,
+            display_colors: DisplayColors::default(),
             key_input_mode: KeyInputMode::Disabled,
             analyzers: AnalyzerConfig::default(),
             ntfy_url: None,
@@ -232,5 +272,30 @@ pub fn parse_args() -> Args {
     }
     Args {
         config_path: args[1].clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_hex_color;
+
+    #[test]
+    fn parses_hex_colors_with_and_without_leading_hash() {
+        assert_eq!(parse_hex_color("#ff0000"), Some((0xff, 0, 0)));
+        assert_eq!(parse_hex_color("00ff00"), Some((0, 0xff, 0)));
+        assert_eq!(parse_hex_color("#0000FF"), Some((0, 0, 0xff)));
+        assert_eq!(parse_hex_color("#ffa500"), Some((0xff, 0xa5, 0)));
+    }
+
+    #[test]
+    fn rejects_malformed_hex_colors() {
+        // Wrong length: shorthand and overlong forms are not supported.
+        assert_eq!(parse_hex_color("#fff"), None);
+        assert_eq!(parse_hex_color("#ff00000"), None);
+        assert_eq!(parse_hex_color(""), None);
+        // Non-hex characters, including a stray inner '#'.
+        assert_eq!(parse_hex_color("#gggggg"), None);
+        assert_eq!(parse_hex_color("#ff 000"), None);
+        assert_eq!(parse_hex_color("##ff000"), None);
     }
 }
