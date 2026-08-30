@@ -16,6 +16,7 @@
     import { AnalysisManager } from '$lib/analysisManager.svelte';
     import SystemStatsTable from '$lib/components/SystemStatsTable.svelte';
     import CellInfoView from '$lib/components/CellInfoView.svelte';
+    import DemoButton from '$lib/components/DemoButton.svelte';
     import { get_cell_info, type CellInfo } from '$lib/cellInfo';
     import DeleteAllButton from '$lib/components/DeleteAllButton.svelte';
     import RecordingControls from '$lib/components/RecordingControls.svelte';
@@ -38,6 +39,7 @@
     let gps_mode: GpsMode = $state(GpsMode.Disabled);
     let update_status: UpdateStatus | null = $state(null);
     let cell_info: CellInfo | null = $state(null);
+    let demo_mode: boolean = $state(false);
     $effect(() => {
         const interval = setInterval(async () => {
             try {
@@ -72,6 +74,7 @@
                 }
                 const config = await get_config();
                 gps_mode = config.gps_mode;
+                demo_mode = config.demo_mode ?? false;
                 gps_data = await get_gps();
                 update_error = undefined;
                 loaded = true;
@@ -294,12 +297,17 @@
     {#if loaded}
         <div class="flex flex-col lg:flex-row gap-4">
             {#if current_entry}
-                <Card
-                    entry={current_entry}
-                    current={true}
-                    server_is_recording={!!current_entry}
-                    {manager}
-                />
+                <div class="flex flex-1 flex-col gap-2">
+                    <Card
+                        entry={current_entry}
+                        current={true}
+                        server_is_recording={!!current_entry}
+                        {manager}
+                    />
+                    {#if demo_mode}
+                        <DemoButton />
+                    {/if}
+                </div>
             {:else}
                 <div
                     class="bg-red-100 dark:bg-red-950 border-red-100 dark:border-red-900 drop-shadow-sm p-4 flex flex-col gap-2 border rounded-md flex-1 justify-between"

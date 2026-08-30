@@ -50,9 +50,38 @@ impl AnalysisWriter {
         &mut self,
         container: MessagesContainer,
     ) -> Result<EventType, std::io::Error> {
+        self.analyze_container_inner(container, None).await
+    }
+
+    /// Analyse a container whose messages were injected for a demonstration,
+    /// prefixing every event it produces.
+    ///
+    /// The prefix goes on here rather than into the synthetic message, because
+    /// the warning text comes from whichever detector fires and we do not get
+    /// to choose it. Marking at the point of writing is what makes a demo
+    /// warning recognisable later, in the history and in the analysis file, by
+    /// somebody who was not present when it was made.
+    pub async fn analyze_demo_container(
+        &mut self,
+        container: MessagesContainer,
+        prefix: &str,
+    ) -> Result<EventType, std::io::Error> {
+        self.analyze_container_inner(container, Some(prefix)).await
+    }
+
+    async fn analyze_container_inner(
+        &mut self,
+        container: MessagesContainer,
+        prefix: Option<&str>,
+    ) -> Result<EventType, std::io::Error> {
         let mut max_type = EventType::Informational;
 
-        for row in self.harness.analyze_qmdl_messages(container) {
+        for mut row in self.harness.analyze_qmdl_messages(container) {
+            if let Some(prefix) = prefix {
+                for event in row.events.iter_mut().flatten() {
+                    event.message.insert_str(0, prefix);
+                }
+            }
             if !row.is_empty() {
                 self.write(&row).await?;
             }

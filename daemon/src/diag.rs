@@ -42,6 +42,9 @@ use crate::stats::DiskStats;
 const DISK_CHECK_BYTES_INTERVAL: usize = 256 * 1024;
 
 pub enum DiagDeviceCtrlMessage {
+    /// Inject a synthetic, clearly labelled warning for demonstration.
+    /// Only reachable when demo_mode is enabled in the config.
+    InjectDemo,
     StopRecording,
     StartRecording {
         response_tx: Option<oneshot::Sender<Result<(), RecordingStoreError>>>,
@@ -335,6 +338,27 @@ impl DiagTask {
         qmdl_store: &mut RecordingStore,
         container: MessagesContainer,
     ) {
+        self.process_container_inner(qmdl_store, container, false)
+            .await
+    }
+
+    /// Process a container of synthetic demo messages. Identical to the real
+    /// path, except every event it produces is labelled as a demo.
+    async fn process_demo_container(
+        &mut self,
+        qmdl_store: &mut RecordingStore,
+        container: MessagesContainer,
+    ) {
+        self.process_container_inner(qmdl_store, container, true)
+            .await
+    }
+
+    async fn process_container_inner(
+        &mut self,
+        qmdl_store: &mut RecordingStore,
+        container: MessagesContainer,
+        demo: bool,
+    ) {
         if container.data_type != DataType::UserSpace {
             debug!("skipping non-userspace diag messages...");
             return;
@@ -425,7 +449,14 @@ impl DiagTask {
 
             let container_bytes: usize = container.messages.iter().map(|m| m.data.len()).sum();
             self.bytes_since_space_check += container_bytes;
-            let max_type = match analysis_writer.analyze_container(container).await {
+            let analysis = if demo {
+                analysis_writer
+                    .analyze_demo_container(container, crate::demo::DEMO_PREFIX)
+                    .await
+            } else {
+                analysis_writer.analyze_container(container).await
+            };
+            let max_type = match analysis {
                 Ok(t) => t,
                 Err(e) => {
                     warn!("failed to analyze container: {e}");
@@ -622,6 +653,19 @@ pub fn run_diag_read_thread(
                         Some(DiagDeviceCtrlMessage::StopRecording) => {
                             let mut qmdl_store = qmdl_store_lock.write().await;
                             diag_task.stop(qmdl_store.deref_mut(), None).await;
+                        },
+                        Some(DiagDeviceCtrlMessage::InjectDemo) => {
+                            // Fed through exactly the path a real container
+                            // takes, so it is written to the recording and
+                            // analysed like anything off the air.
+                            match crate::demo::demo_container() {
+                                Some(container) => {
+                                    info!("injecting a demo container (synthetic, clearly labelled)");
+                                    let mut qmdl_store = qmdl_store_lock.write().await;
+                                    diag_task.process_demo_container(qmdl_store.deref_mut(), container).await;
+                                }
+                                None => error!("failed to build the demo container"),
+                            }
                         },
                         // None means all the Senders have been dropped, so it's
                         // time to go

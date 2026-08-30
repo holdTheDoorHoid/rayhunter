@@ -147,6 +147,10 @@ pub struct Config {
     pub display_gifs: DisplayGifs,
     /// Directory holding the GIFs named by `display_gifs`
     pub gif_store_path: String,
+    /// Enables the demo control in the web UI, which injects a synthetic
+    /// warning for showing Rayhunter to an audience. Off unless deliberately
+    /// switched on, since it writes clearly labelled fake data into a recording.
+    pub demo_mode: bool,
     /// Key input mode
     pub key_input_mode: KeyInputMode,
     /// ntfy.sh URL
@@ -225,6 +229,7 @@ impl Default for Config {
             device: Device::Orbic,
             ui_level: UiLevel::Subtle,
             colorblind_mode: false,
+            demo_mode: false,
             display_colors: DisplayColors::default(),
             status_bar_height: None,
             display_gifs: DisplayGifs::default(),

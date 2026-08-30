@@ -37,6 +37,8 @@ chrono = { version = "0.4.31", features = ["serde"] }
 tokio-stream = { version = "0.1.14", default-features = false, features = ["io-util"] }
 futures = { version = "0.3.32", default-features = false, features = ["std"] }
 serde_json = "1.0.114"
+deku = "0.20.0"
+pycrate-rs = { git = "https://github.com/EFForg/pycrate-rs" }
 image = { version =  "0.25.1", default-features = false, features = ["png", "gif"] }
 tempfile = "3.10.2"
 async_zip = { version = "0.0.17", features = ["tokio"] }

@@ -137,6 +137,67 @@ pub async fn serve_static(
     }
 }
 
+/// Inject a synthetic, clearly labelled warning, for demonstrating Rayhunter.
+///
+/// The message is fed into the diag stream ahead of analysis, so it is written
+/// to the recording and passes through the real detectors rather than being
+/// faked further down. That is what makes a demo show how Rayhunter actually
+/// works instead of just painting a warning on the screen.
+///
+/// Refused unless demo_mode is on in the config. A fake surveillance detection
+/// is the sort of thing that gets screenshotted and passed off as real, so it
+/// should never be a single unguarded request away.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/demo-warning",
+    tag = "Demo",
+    responses(
+        (status = StatusCode::ACCEPTED, description = "Demo warning injected"),
+        (status = StatusCode::FORBIDDEN, description = "Demo mode is not enabled"),
+        (status = StatusCode::SERVICE_UNAVAILABLE, description = "Recording is not running"),
+    ),
+    summary = "Inject a demo warning",
+))]
+pub async fn trigger_demo_warning(
+    State(state): State<Arc<ServerState>>,
+) -> Result<(StatusCode, String), (StatusCode, String)> {
+    if !state.config.demo_mode {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "demo mode is not enabled; switch it on in the configuration first".to_string(),
+        ));
+    }
+
+    // Without a recording there is nothing to inject into, and the warning
+    // would vanish with no explanation.
+    let recording = {
+        let store = state.qmdl_store_lock.read().await;
+        store.current_entry.is_some()
+    };
+    if !recording {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "start a recording first: the demo warning is written into it".to_string(),
+        ));
+    }
+
+    state
+        .diag_device_ctrl_sender
+        .send(DiagDeviceCtrlMessage::InjectDemo)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to reach the recording thread".to_string(),
+            )
+        })?;
+
+    Ok((
+        StatusCode::ACCEPTED,
+        "injected a demo warning; it will appear in the history shortly".to_string(),
+    ))
+}
+
 /// What the radio currently sees on the air.
 ///
 /// Only updates while a recording is running, since it comes from the modem

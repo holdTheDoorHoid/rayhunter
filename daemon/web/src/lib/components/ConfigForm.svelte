@@ -262,6 +262,50 @@
 
                 <div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3">
                     <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
+                        Demonstration
+                    </h3>
+                    <div class="flex items-center">
+                        <input
+                            id="demo_mode"
+                            type="checkbox"
+                            bind:checked={config.demo_mode}
+                            aria-describedby="demo_mode_description"
+                            class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
+                        />
+                        <label
+                            for="demo_mode"
+                            class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                        >
+                            Enable the demo warning button
+                        </label>
+                    </div>
+                    <Explainer
+                        summary="Adds a button to the main page that fakes a surveillance detection, for showing Rayhunter to an audience."
+                    >
+                        <p>
+                            The button injects a synthetic message into the recording that looks to
+                            Rayhunter like a tower switching encryption off, which is one of the
+                            clearest signs of a fake base station. It goes through the real
+                            detectors, so the warning appears in the history and turns the device
+                            red exactly as a genuine one would. That is the point: it demonstrates
+                            how Rayhunter actually works rather than painting a warning on screen.
+                        </p>
+                        <p>
+                            <strong>The fake message is written into your recording.</strong> Every warning
+                            it produces is labelled as a demo in its own text, so it can be recognised
+                            later by somebody who was not present. Even so, do not send a recording containing
+                            demo data to EFF or treat it as evidence.
+                        </p>
+                        <p>
+                            Leave this off when you are actually hunting. It only adds a button, and
+                            the device refuses the request entirely while this is unchecked, but
+                            there is no reason to have it available by accident.
+                        </p>
+                    </Explainer>
+                </div>
+
+                <div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3">
+                    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
                         Notification Settings
                     </h3>
 

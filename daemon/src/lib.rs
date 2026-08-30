@@ -3,6 +3,7 @@ pub mod battery;
 pub mod cell_info;
 pub mod config;
 pub mod crypto_provider;
+pub mod demo;
 pub mod diag;
 pub mod display;
 pub mod error;

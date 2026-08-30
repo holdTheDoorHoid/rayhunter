@@ -119,6 +119,7 @@ export interface Config {
     device: string;
     ui_level: number;
     colorblind_mode: boolean;
+    demo_mode: boolean;
     display_colors: DisplayColors;
     status_bar_height: number | null;
     display_gifs: DisplayGifs;
@@ -225,6 +226,17 @@ export async function set_config(config: Config): Promise<void> {
         const error = await response.text();
         throw new Error(error);
     }
+}
+
+/**
+ * Inject a synthetic, clearly labelled warning for demonstrating Rayhunter.
+ * Refused by the daemon unless demo mode is enabled in the config.
+ */
+export async function trigger_demo_warning(): Promise<string> {
+    const response = await fetch('/api/demo-warning', { method: 'POST' });
+    const body = await response.text();
+    if (!response.ok) throw new Error(body);
+    return body;
 }
 
 export async function test_notification(): Promise<void> {

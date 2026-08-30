@@ -3,6 +3,7 @@ mod battery;
 mod cell_info;
 mod config;
 mod crypto_provider;
+mod demo;
 mod diag;
 mod display;
 mod error;
@@ -32,6 +33,7 @@ use crate::server::{
     MAX_GIF_BYTES, ServerState, debug_set_display_state, delete_display_gif, get_cell_info,
     get_config, get_display_gif, get_qmdl, get_time, get_wifi_status, get_zip, scan_wifi,
     serve_static, set_config, set_display_gif, set_time_offset, test_notification,
+    trigger_demo_warning,
 };
 use crate::stats::{get_qmdl_manifest, get_system_stats, get_update_status};
 use crate::update::{UpdateStatus, run_update_check_worker};
@@ -80,6 +82,7 @@ fn get_router() -> AppRouter {
         .route("/api/analysis", get(get_analysis_status))
         .route("/api/analysis/{name}", post(start_analysis))
         .route("/api/cell-info", get(get_cell_info))
+        .route("/api/demo-warning", post(trigger_demo_warning))
         .route("/api/config", get(get_config))
         .route("/api/config", post(set_config))
         .route(

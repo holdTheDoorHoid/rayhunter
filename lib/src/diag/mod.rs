@@ -9,7 +9,8 @@ use thiserror::Error;
 
 pub mod diaglog;
 
-use diaglog::{LogBody, Timestamp};
+use diaglog::LogBody;
+pub use diaglog::Timestamp;
 
 pub const MESSAGE_TERMINATOR: u8 = 0x7e;
 pub const MESSAGE_ESCAPE_CHAR: u8 = 0x7d;
