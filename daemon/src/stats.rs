@@ -24,6 +24,10 @@ pub struct SystemStats {
     pub runtime_metadata: RuntimeMetadata,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub battery_status: Option<BatteryState>,
+    /// How hard the device is working, and how long it has been up. Absent on
+    /// platforms that do not expose these, rather than reported as zero.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub health: Option<HealthStats>,
 }
 
 impl SystemStats {
@@ -32,6 +36,7 @@ impl SystemStats {
             disk_stats: DiskStats::new(qmdl_path)?,
             memory_stats: MemoryStats::new(device).await?,
             runtime_metadata: RuntimeMetadata::new(),
+            health: HealthStats::read(),
             battery_status: match get_battery_status(device).await {
                 Ok(status) => Some(status),
                 Err(RayhunterError::FunctionNotSupportedForDeviceError) => None,
@@ -42,6 +47,107 @@ impl SystemStats {
             },
         })
     }
+}
+
+/// Load, uptime and temperature, read from the kernel.
+///
+/// These matter for a device that is meant to run unattended. A silent reboot
+/// leaves a gap in coverage that nothing else would reveal, and a device that
+/// cannot keep up may drop radio messages, which would make a missed detection
+/// look like a quiet night.
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct HealthStats {
+    /// Seconds since the device booted.
+    pub uptime_secs: u64,
+    /// Load average over one, five and fifteen minutes.
+    pub load_avg: [f32; 3],
+    /// How many cores that load is spread across. One on these devices, which
+    /// is why a load above 1 means work is queuing rather than merely busy.
+    pub cpu_count: usize,
+    /// Warmest processor sensor, in degrees Celsius.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_temp_c: Option<f32>,
+    /// Warmest power amplifier sensor. These track how hard the radio is
+    /// transmitting rather than how busy the processor is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub radio_temp_c: Option<f32>,
+}
+
+impl HealthStats {
+    pub fn read() -> Option<Self> {
+        let uptime_secs = std::fs::read_to_string("/proc/uptime")
+            .ok()?
+            .split_whitespace()
+            .next()?
+            .parse::<f64>()
+            .ok()? as u64;
+
+        let loadavg = std::fs::read_to_string("/proc/loadavg").ok()?;
+        let mut fields = loadavg.split_whitespace();
+        let load_avg = [
+            fields.next()?.parse().ok()?,
+            fields.next()?.parse().ok()?,
+            fields.next()?.parse().ok()?,
+        ];
+
+        let cpu_count = std::fs::read_to_string("/proc/cpuinfo")
+            .map(|s| s.lines().filter(|l| l.starts_with("processor")).count())
+            .unwrap_or(0)
+            .max(1);
+
+        let (cpu_temp_c, radio_temp_c) = read_temperatures();
+
+        Some(Self {
+            uptime_secs,
+            load_avg,
+            cpu_count,
+            cpu_temp_c,
+            radio_temp_c,
+        })
+    }
+}
+
+/// Warmest processor sensor and warmest power amplifier sensor.
+///
+/// Sensor naming varies by platform, so this groups by name rather than
+/// assuming an index: `pa_therm` is a power amplifier, and anything else that
+/// reports a plausible temperature is treated as a processor sensor. Values are
+/// millidegrees on some platforms and degrees on others, so anything above 200
+/// is scaled down.
+fn read_temperatures() -> (Option<f32>, Option<f32>) {
+    let Ok(entries) = std::fs::read_dir("/sys/class/thermal") else {
+        return (None, None);
+    };
+    let mut cpu: Option<f32> = None;
+    let mut radio: Option<f32> = None;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(raw) = std::fs::read_to_string(path.join("temp")) else {
+            continue;
+        };
+        let Ok(value) = raw.trim().parse::<f32>() else {
+            continue;
+        };
+        let celsius = if value.abs() > 200.0 {
+            value / 1000.0
+        } else {
+            value
+        };
+        // Discard obvious nonsense rather than reporting it.
+        if !(-40.0..=150.0).contains(&celsius) {
+            continue;
+        }
+        let name = std::fs::read_to_string(path.join("type")).unwrap_or_default();
+        let slot = if name.contains("pa_therm") {
+            &mut radio
+        } else {
+            &mut cpu
+        };
+        *slot = Some(slot.map_or(celsius, |c: f32| c.max(celsius)));
+    }
+    (cpu, radio)
 }
 
 /// Device storage information
