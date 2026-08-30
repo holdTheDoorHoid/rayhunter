@@ -28,9 +28,9 @@ use crate::notifications::{NotificationService, run_notification_worker};
 use crate::pcap::get_pcap;
 use crate::qmdl_store::RecordingStore;
 use crate::server::{
-    MAX_GIF_BYTES, ServerState, debug_set_display_state, delete_display_gif, get_config, get_qmdl,
-    get_time, get_wifi_status, get_zip, scan_wifi, serve_static, set_config, set_display_gif,
-    set_time_offset, test_notification,
+    MAX_GIF_BYTES, ServerState, debug_set_display_state, delete_display_gif, get_config,
+    get_display_gif, get_qmdl, get_time, get_wifi_status, get_zip, scan_wifi, serve_static,
+    set_config, set_display_gif, set_time_offset, test_notification,
 };
 use crate::stats::{get_qmdl_manifest, get_system_stats, get_update_status};
 use crate::update::{UpdateStatus, run_update_check_worker};
@@ -82,7 +82,9 @@ fn get_router() -> AppRouter {
         .route("/api/config", post(set_config))
         .route(
             "/api/display-gif/{state}",
-            post(set_display_gif).layer(DefaultBodyLimit::max(MAX_GIF_BYTES)),
+            get(get_display_gif)
+                .post(set_display_gif)
+                .layer(DefaultBodyLimit::max(MAX_GIF_BYTES)),
         )
         .route("/api/display-gif/{state}/delete", post(delete_display_gif))
         .route("/api/test-notification", post(test_notification))

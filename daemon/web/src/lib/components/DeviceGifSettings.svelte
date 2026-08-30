@@ -34,10 +34,18 @@
 
     let busy = $state<Record<string, boolean>>({});
     let errors = $state<Record<string, string>>({});
-    // Object URLs for locally previewing a just-picked GIF. The device does not
-    // serve stored GIFs back, so this is the only preview we can offer.
-    let previews = $state<Record<string, string>>({});
     let notices = $state<Record<string, string>>({});
+    // Bumped after an upload so the preview refetches. The URL is stable per
+    // state, so without this the browser would keep showing the replaced GIF.
+    let versions = $state<Record<string, number>>({});
+    // States whose stored GIF could not be fetched, so a broken image is
+    // replaced by an honest label rather than a browser placeholder.
+    let unfetchable = $state<Record<string, boolean>>({});
+
+    function preview_url(key: DisplayColorKey): string {
+        const v = versions[key] ?? 0;
+        return `/api/display-gif/${key}?v=${v}`;
+    }
 
     function human_size(bytes: number): string {
         return bytes < 1024 * 1024
@@ -108,8 +116,8 @@
         try {
             await set_display_gif(key, file);
             config.display_gifs[key] = `${key}.gif`;
-            if (previews[key]) URL.revokeObjectURL(previews[key]);
-            previews[key] = URL.createObjectURL(file);
+            unfetchable[key] = false;
+            versions[key] = (versions[key] ?? 0) + 1;
         } catch (e) {
             errors[key] = `Upload failed: ${e}`;
         } finally {
@@ -125,10 +133,7 @@
         try {
             await delete_display_gif(key);
             config.display_gifs[key] = null;
-            if (previews[key]) {
-                URL.revokeObjectURL(previews[key]);
-                delete previews[key];
-            }
+            unfetchable[key] = false;
         } catch (e) {
             errors[key] = `Could not remove: ${e}`;
         } finally {
@@ -158,11 +163,12 @@
                 <div
                     class="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-sm bg-black"
                 >
-                    {#if previews[row.key]}
+                    {#if uploaded && !unfetchable[row.key]}
                         <img
-                            src={previews[row.key]}
-                            alt=""
+                            src={preview_url(row.key)}
+                            alt="Animation currently set for {row.label}"
                             class="max-h-full max-w-full object-contain"
+                            onerror={() => (unfetchable[row.key] = true)}
                         />
                     {:else if uploaded}
                         <span class="text-[10px] text-gray-400">stored</span>

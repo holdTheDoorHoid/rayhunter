@@ -285,6 +285,64 @@ pub async fn set_display_gif(
     Ok((StatusCode::OK, format!("stored GIF for {display_state}")))
 }
 
+/// Serve back the GIF stored for one display state, so the web UI can preview
+/// what is actually on the device rather than only what was uploaded this
+/// session.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    get,
+    path = "/api/display-gif/{state}",
+    tag = "Configuration",
+    responses(
+        (status = StatusCode::OK, description = "The stored GIF", content_type = "image/gif"),
+        (status = StatusCode::BAD_REQUEST, description = "Unknown display state"),
+        (status = StatusCode::NOT_FOUND, description = "No GIF stored for this state"),
+    ),
+    summary = "Download a display GIF",
+))]
+pub async fn get_display_gif(
+    State(state): State<Arc<ServerState>>,
+    Path(display_state): Path<String>,
+) -> Result<Response, (StatusCode, String)> {
+    // Only known state names are accepted, so the filename can never be
+    // steered outside the GIF directory.
+    if !crate::config::DISPLAY_STATE_KEYS.contains(&display_state.as_str()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("unknown display state {display_state:?}"),
+        ));
+    }
+
+    let path =
+        crate::display::generic_framebuffer::gif_path(&state.config.gif_store_path, &display_state);
+    let bytes = tokio::fs::read(&path).await.map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            (
+                StatusCode::NOT_FOUND,
+                format!("no GIF stored for {display_state}"),
+            )
+        } else {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to read {path}: {err}"),
+            )
+        }
+    })?;
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, HeaderValue::from_static("image/gif")),
+            // The URL is stable per state, so a replaced GIF would otherwise
+            // keep showing the old one from cache.
+            (
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("no-cache, must-revalidate"),
+            ),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
 /// Remove the GIF for one display state, reverting it to the colored line.
 /// As with upload, the config is updated by the ordinary config save.
 #[cfg_attr(feature = "apidocs", utoipa::path(
