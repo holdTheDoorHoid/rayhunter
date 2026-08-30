@@ -233,6 +233,8 @@ pub async fn set_config(
 /// memory at playback time.
 pub const MAX_GIF_BYTES: usize = 2 * 1024 * 1024;
 
+use crate::display::generic_framebuffer::{MAX_GIF_DIMENSION, gif_dimensions};
+
 fn is_gif(bytes: &[u8]) -> bool {
     bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a")
 }
@@ -285,6 +287,36 @@ pub async fn set_display_gif(
             StatusCode::BAD_REQUEST,
             "file is not a GIF (expected a GIF87a or GIF89a header)".to_string(),
         ));
+    }
+
+    // Size on disk says nothing about size in memory, so check the declared
+    // canvas before this ever reaches a decoder.
+    match gif_dimensions(&body) {
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "GIF is truncated: no image dimensions in the header".to_string(),
+            ));
+        }
+        Some((width, height)) => {
+            if width == 0 || height == 0 {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    format!("GIF declares an empty canvas ({width} by {height})"),
+                ));
+            }
+            if width > MAX_GIF_DIMENSION || height > MAX_GIF_DIMENSION {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    format!(
+                        "GIF is {width} by {height} pixels, over the {MAX_GIF_DIMENSION} pixel \
+                         limit. A large canvas expands enormously in memory when played, however \
+                         small the file is, and this device has very little to spare. The screen \
+                         is 128 pixels square, so resize it before uploading."
+                    ),
+                ));
+            }
+        }
     }
 
     let dir = &state.config.gif_store_path;
@@ -352,6 +384,15 @@ pub async fn get_display_gif(
     Ok((
         [
             (header::CONTENT_TYPE, HeaderValue::from_static("image/gif")),
+            // This serves bytes somebody uploaded, from the same origin as the
+            // web UI. A file can be a valid GIF and valid HTML at once, so
+            // forbid content sniffing: without this a browser that second
+            // guessed the declared type could run it as a page with full
+            // access to the API.
+            (
+                header::X_CONTENT_TYPE_OPTIONS,
+                HeaderValue::from_static("nosniff"),
+            ),
             // The URL is stable per state, so a replaced GIF would otherwise
             // keep showing the old one from cache.
             (

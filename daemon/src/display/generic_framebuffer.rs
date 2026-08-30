@@ -188,6 +188,24 @@ pub trait GenericFramebuffer: Send + 'static {
         // cheap) off this task, while the channel's small bound is what caps
         // memory: at most a couple of expanded frames exist at once, however
         // long the animation is.
+        // Belt and braces with the upload check: a file could reach the disk
+        // some other way, or predate that check. Decoding is where the memory
+        // is actually spent, so refusing here is what protects the daemon.
+        match gif_dimensions(img_buffer) {
+            Some((width, height)) if width > MAX_GIF_DIMENSION || height > MAX_GIF_DIMENSION => {
+                error!(
+                    "refusing to play a {width}x{height} GIF: over the {MAX_GIF_DIMENSION} pixel \
+                     limit and would likely exhaust memory"
+                );
+                return false;
+            }
+            None => {
+                error!("refusing to play a GIF with no readable dimensions");
+                return false;
+            }
+            _ => {}
+        }
+
         let bytes = img_buffer.to_vec();
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(DynamicImage, u64)>(2);
         let decoder_task = tokio::task::spawn_blocking(move || {
@@ -396,6 +414,31 @@ pub fn update_ui(
     });
 }
 
+/// Largest picture we will play, per side.
+///
+/// The screens involved are 128 pixels square, so this is already generous.
+/// The limit exists because GIF compresses flat colour extremely well: a 13KB
+/// file can declare a 4000 by 4000 canvas that expands to 61MB per frame, and
+/// these devices run with around 20MB of RAM free. Playing one would get the
+/// daemon killed, which would stop detection while still looking like
+/// Rayhunter was running. Checked here rather than only in the browser, since
+/// the API can be called directly.
+pub const MAX_GIF_DIMENSION: u16 = 512;
+
+/// The canvas size a GIF declares in its header, without decoding it.
+///
+/// Bytes 6 to 9 of every GIF are the logical screen width and height, little
+/// endian, so this costs nothing and happens before any allocation.
+pub fn gif_dimensions(bytes: &[u8]) -> Option<(u16, u16)> {
+    if bytes.len() < 10 {
+        return None;
+    }
+    Some((
+        u16::from_le_bytes([bytes[6], bytes[7]]),
+        u16::from_le_bytes([bytes[8], bytes[9]]),
+    ))
+}
+
 /// Where the GIF for `state` is stored on disk.
 pub fn gif_path(gif_store_path: &str, state: &str) -> String {
     format!("{gif_store_path}/{state}.gif")
@@ -601,5 +644,61 @@ mod gif_tests {
         };
         assert_eq!(gifs.get("not_a_state"), None);
         assert_eq!(gifs.get(""), None);
+    }
+}
+
+#[cfg(test)]
+mod gif_safety_tests {
+    use super::{MAX_GIF_DIMENSION, gif_dimensions};
+
+    /// A GIF header carries the canvas size at a fixed offset, so an enormous
+    /// canvas can be rejected before a decoder allocates anything for it.
+    fn header(width: u16, height: u16) -> Vec<u8> {
+        let mut v = b"GIF89a".to_vec();
+        v.extend_from_slice(&width.to_le_bytes());
+        v.extend_from_slice(&height.to_le_bytes());
+        v
+    }
+
+    #[test]
+    fn reads_the_declared_canvas_size() {
+        assert_eq!(gif_dimensions(&header(128, 128)), Some((128, 128)));
+        assert_eq!(gif_dimensions(&header(4000, 4000)), Some((4000, 4000)));
+    }
+
+    #[test]
+    fn a_truncated_header_yields_nothing_rather_than_garbage() {
+        assert_eq!(gif_dimensions(b"GIF89a"), None);
+        assert_eq!(gif_dimensions(b""), None);
+        assert_eq!(gif_dimensions(b"GIF89a\x01"), None);
+    }
+
+    /// The case that matters: GIF compresses flat colour so well that a file of
+    /// a few kilobytes can declare a canvas needing tens of megabytes per frame,
+    /// which would exhaust a device that has around 20MB free and take the
+    /// daemon down with it. Size on disk is no guide at all.
+    #[test]
+    fn a_decompression_bomb_is_over_the_limit() {
+        let (width, height) = gif_dimensions(&header(4000, 4000)).unwrap();
+        assert!(width > MAX_GIF_DIMENSION && height > MAX_GIF_DIMENSION);
+        // What that canvas would actually cost, expanded.
+        let bytes_per_frame = 4000u64 * 4000 * 4;
+        assert!(bytes_per_frame > 60 * 1024 * 1024);
+    }
+
+    #[test]
+    fn the_device_screen_size_is_comfortably_allowed() {
+        let (width, height) = gif_dimensions(&header(128, 128)).unwrap();
+        assert!(width <= MAX_GIF_DIMENSION && height <= MAX_GIF_DIMENSION);
+    }
+
+    #[test]
+    fn the_limit_leaves_a_frame_small_enough_to_be_safe() {
+        let worst = MAX_GIF_DIMENSION as u64 * MAX_GIF_DIMENSION as u64 * 4;
+        // Two frames are held at once by the playback channel.
+        assert!(
+            worst * 2 < 4 * 1024 * 1024,
+            "worst case frame pair too large"
+        );
     }
 }
