@@ -15,6 +15,8 @@
     import ExpandableInput from './ExpandableInput.svelte';
     import DeviceColorSettings from './DeviceColorSettings.svelte';
     import DeviceGifSettings from './DeviceGifSettings.svelte';
+    import Explainer from './Explainer.svelte';
+    import { HEURISTICS } from '../heuristics';
 
     let { shown = $bindable() }: { shown: boolean } = $props();
     let config = $state<Config | null>(null);
@@ -675,113 +677,54 @@
                 {/if}
 
                 <div class="border-t border-gray-200 pt-4 mt-6">
-                    <h3 class="text-lg font-semibold text-gray-800 mb-4">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-2">
                         Analyzer Heuristic Settings
                     </h3>
-                    <div class="space-y-3">
-                        <div class="flex items-center">
-                            <input
-                                id="imsi_requested"
-                                type="checkbox"
-                                bind:checked={config.analyzers.imsi_requested}
-                                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
-                            />
-                            <label for="imsi_requested" class="ml-2 block text-sm text-gray-700">
-                                IMSI Requested Heuristic
-                            </label>
-                        </div>
-
-                        <div class="flex items-center">
-                            <input
-                                id="connection_redirect_2g_downgrade"
-                                type="checkbox"
-                                bind:checked={config.analyzers.connection_redirect_2g_downgrade}
-                                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
-                            />
-                            <label
-                                for="connection_redirect_2g_downgrade"
-                                class="ml-2 block text-sm text-gray-700"
-                            >
-                                Connection Redirect 2G Downgrade Heuristic
-                            </label>
-                        </div>
-
-                        <div class="flex items-center">
-                            <input
-                                id="lte_sib6_and_7_downgrade"
-                                type="checkbox"
-                                bind:checked={config.analyzers.lte_sib6_and_7_downgrade}
-                                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
-                            />
-                            <label
-                                for="lte_sib6_and_7_downgrade"
-                                class="ml-2 block text-sm text-gray-700"
-                            >
-                                LTE SIB6 and SIB7 Downgrade Heuristic
-                            </label>
-                        </div>
-
-                        <div class="flex items-center">
-                            <input
-                                id="null_cipher"
-                                type="checkbox"
-                                bind:checked={config.analyzers.null_cipher}
-                                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
-                            />
-                            <label for="null_cipher" class="ml-2 block text-sm text-gray-700">
-                                Null Cipher Heuristic
-                            </label>
-                        </div>
-
-                        <div class="flex items-center">
-                            <input
-                                id="nas_null_cipher"
-                                type="checkbox"
-                                bind:checked={config.analyzers.nas_null_cipher}
-                                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
-                            />
-                            <label for="nas_null_cipher" class="ml-2 block text-sm text-gray-700">
-                                NAS Null Cipher Heuristic
-                            </label>
-                        </div>
-
-                        <div class="flex items-center">
-                            <input
-                                id="incomplete_sib"
-                                type="checkbox"
-                                bind:checked={config.analyzers.incomplete_sib}
-                                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
-                            />
-                            <label for="incomplete_sib" class="ml-2 block text-sm text-gray-700">
-                                Incomplete SIB Heuristic
-                            </label>
-                        </div>
-
-                        <div class="flex items-center">
-                            <input
-                                id="test_analyzer"
-                                type="checkbox"
-                                bind:checked={config.analyzers.test_analyzer}
-                                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
-                            />
-                            <label for="test_analyzer" class="ml-2 block text-sm text-gray-700">
-                                Test Heuristic (noisy!)
-                            </label>
-                        </div>
-                        <div class="flex items-center">
-                            <input
-                                id="diagnostic_analyzer"
-                                type="checkbox"
-                                bind:checked={config.analyzers.diagnostic_analyzer}
-                                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
-                            />
-                            <label
-                                for="diagnostic_analyzer"
-                                class="ml-2 block text-sm text-gray-700"
-                            >
-                                Diagnostic Analyzer
-                            </label>
-                        </div>
+                    <p class="text-xs text-gray-500 mb-4">
+                        Each of these watches for a different sign that a tower is not behaving the
+                        way a real one should. Leaving them on costs you nothing except the
+                        occasional false alarm. Open any entry to read what it looks for and why it
+                        matters.
+                    </p>
+                    <div class="space-y-4">
+                        {#each HEURISTICS as h (h.key)}
+                            <div>
+                                <div class="flex items-center">
+                                    <input
+                                        id={h.key}
+                                        type="checkbox"
+                                        bind:checked={config.analyzers[h.key]}
+                                        class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
+                                    />
+                                    <label
+                                        for={h.key}
+                                        class="ml-2 block text-sm font-medium text-gray-700"
+                                    >
+                                        {h.title}
+                                    </label>
+                                    {#if h.tag === 'noisy'}
+                                        <span
+                                            class="ml-2 rounded-sm bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
+                                            >very noisy</span
+                                        >
+                                    {:else if h.tag === 'informational'}
+                                        <span
+                                            class="ml-2 rounded-sm bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600"
+                                            >notes only</span
+                                        >
+                                    {/if}
+                                </div>
+                                <div class="ml-6">
+                                    <Explainer summary={h.summary}>
+                                        <p><strong>What it looks for.</strong> {h.detects}</p>
+                                        <p><strong>Why it matters.</strong> {h.matters}</p>
+                                        {#if h.noise}
+                                            <p><strong>Worth knowing.</strong> {h.noise}</p>
+                                        {/if}
+                                    </Explainer>
+                                </div>
+                            </div>
+                        {/each}
                     </div>
                 </div>
 
