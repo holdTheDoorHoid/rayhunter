@@ -28,8 +28,9 @@ use crate::notifications::{NotificationService, run_notification_worker};
 use crate::pcap::get_pcap;
 use crate::qmdl_store::RecordingStore;
 use crate::server::{
-    ServerState, debug_set_display_state, get_config, get_qmdl, get_time, get_wifi_status, get_zip,
-    scan_wifi, serve_static, set_config, set_time_offset, test_notification,
+    MAX_GIF_BYTES, ServerState, debug_set_display_state, delete_display_gif, get_config, get_qmdl,
+    get_time, get_wifi_status, get_zip, scan_wifi, serve_static, set_config, set_display_gif,
+    set_time_offset, test_notification,
 };
 use crate::stats::{get_qmdl_manifest, get_system_stats, get_update_status};
 use crate::update::{UpdateStatus, run_update_check_worker};
@@ -40,6 +41,7 @@ use analysis::{
     AnalysisCtrlMessage, AnalysisStatus, get_analysis_status, run_analysis_thread, start_analysis,
 };
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
 use axum::response::Redirect;
 use axum::routing::{get, post};
 use diag::{
@@ -78,6 +80,11 @@ fn get_router() -> AppRouter {
         .route("/api/analysis/{name}", post(start_analysis))
         .route("/api/config", get(get_config))
         .route("/api/config", post(set_config))
+        .route(
+            "/api/display-gif/{state}",
+            post(set_display_gif).layer(DefaultBodyLimit::max(MAX_GIF_BYTES)),
+        )
+        .route("/api/display-gif/{state}/delete", post(delete_display_gif))
         .route("/api/test-notification", post(test_notification))
         .route("/api/wifi-status", get(get_wifi_status))
         .route("/api/wifi-scan", post(scan_wifi))

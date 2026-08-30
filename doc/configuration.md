@@ -24,6 +24,17 @@ Through web UI you can set:
   ```
 
   Omit a key to keep the built-in color for that state. An unparseable value is ignored (a warning is written to the log) and the built-in color is used instead.
+
+  In the web UI this section only appears for the *Subtle mode* and *High visibility* UI levels, since those are the levels that draw a colored status line.
+- **Device Display GIFs** appear when *Device UI Level* is set to *Custom GIF*, and let you upload your own animation for each of the five display states. GIFs are uploaded with `POST /api/display-gif/{state}` (state being one of `paused`, `recording`, `warning_low`, `warning_medium`, `warning_high`) and stored in `gif_store_path` (default `/data/rayhunter/gifs`) as `<state>.gif`; `POST /api/display-gif/{state}/delete` removes one. Uploading stores the file immediately but does not restart Rayhunter — the change applies when the configuration is next saved, so several GIFs can be uploaded in one go. The `[display_gifs]` table records which states have a GIF:
+
+  ```toml
+  [display_gifs]
+  recording = "recording.gif"
+  warning_high = "warning_high.gif"
+  ```
+
+  A state with no GIF falls back to drawing its colored status line, so the display is never blank. Uploads must be GIFs (checked by header) and at most 2MB. Note the device screen is small — 128x128 on the Orbic RC400L — and larger GIFs are scaled down on the device, so authoring at the native size gives the best result. Frames are decoded one at a time during playback rather than all at once, which keeps memory use flat regardless of how long the animation is. A change of state interrupts a playing GIF between frames, so a long animation never delays a warning from being shown.
 - **Automatically check for software updates** enables periodic checks against the Rayhunter GitHub releases page. When a newer release is found, the web UI shows a notice and, if ntfy update notifications are enabled, a notification is sent.
 - **ntfy URL**, which allows setting a [ntfy](https://ntfy.sh/) URL to which notifications of new detections will be sent. The topic should be unique to your device, e.g., `https://ntfy.sh/rayhunter_notifications_ba9di7ie` or `https://myserver.example.com/rayhunter_notifications_ba9di7ie`. The ntfy Android and iOS apps can then be used to receive notifications. More information can be found in the [ntfy docs](https://docs.ntfy.sh/).
 - **Enabled Notification Types** allows enabling or disabling the following types of notifications:

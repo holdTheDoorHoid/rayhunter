@@ -25,6 +25,8 @@ pub enum UiLevel {
     Demo = 2,
     EffLogo = 3,
     HighVisibility = 4,
+    /// Play a user-uploaded GIF per display state. See [`DisplayGifs`].
+    CustomGif = 5,
     TransFlag = 128,
 }
 
@@ -61,6 +63,49 @@ pub struct DisplayColors {
     pub warning_high: Option<String>,
 }
 
+/// The display states that can carry a user-chosen color or GIF. Kept as one
+/// list so the colors and the GIFs stay in step with each other.
+pub const DISPLAY_STATE_KEYS: [&str; 5] = [
+    "paused",
+    "recording",
+    "warning_low",
+    "warning_medium",
+    "warning_high",
+];
+
+/// User-uploaded GIFs to play per display state, used when `ui_level` is
+/// [`UiLevel::CustomGif`].
+///
+/// Each field holds the *original* filename of the upload, kept only so the web
+/// UI can show what was uploaded. The GIF data itself lives in
+/// `gif_store_path` under a name derived from the state, so a state with a
+/// value here always has exactly one file on disk. A state left as `None` falls
+/// back to drawing that state's colored status line instead.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct DisplayGifs {
+    pub paused: Option<String>,
+    pub recording: Option<String>,
+    pub warning_low: Option<String>,
+    pub warning_medium: Option<String>,
+    pub warning_high: Option<String>,
+}
+
+impl DisplayGifs {
+    /// The stored filename for `state`, if one has been uploaded.
+    pub fn get(&self, state: &str) -> Option<&String> {
+        match state {
+            "paused" => self.paused.as_ref(),
+            "recording" => self.recording.as_ref(),
+            "warning_low" => self.warning_low.as_ref(),
+            "warning_medium" => self.warning_medium.as_ref(),
+            "warning_high" => self.warning_high.as_ref(),
+            _ => None,
+        }
+    }
+}
+
 /// Parse an `#rrggbb` (or `rrggbb`) hex color into its red, green and blue
 /// components. Returns `None` for any string that isn't exactly six hex digits,
 /// so that a malformed value falls back to the built-in color rather than
@@ -93,6 +138,10 @@ pub struct Config {
     pub colorblind_mode: bool,
     /// Per-state color overrides for the device display
     pub display_colors: DisplayColors,
+    /// Per-state user-uploaded GIFs, used when ui_level is CustomGif
+    pub display_gifs: DisplayGifs,
+    /// Directory holding the GIFs named by `display_gifs`
+    pub gif_store_path: String,
     /// Key input mode
     pub key_input_mode: KeyInputMode,
     /// ntfy.sh URL
@@ -172,6 +221,8 @@ impl Default for Config {
             ui_level: UiLevel::Subtle,
             colorblind_mode: false,
             display_colors: DisplayColors::default(),
+            display_gifs: DisplayGifs::default(),
+            gif_store_path: "/data/rayhunter/gifs".to_string(),
             key_input_mode: KeyInputMode::Disabled,
             analyzers: AnalyzerConfig::default(),
             ntfy_url: None,

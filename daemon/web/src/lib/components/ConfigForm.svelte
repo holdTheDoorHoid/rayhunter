@@ -14,6 +14,7 @@
     import Modal from './Modal.svelte';
     import ExpandableInput from './ExpandableInput.svelte';
     import DeviceColorSettings from './DeviceColorSettings.svelte';
+    import DeviceGifSettings from './DeviceGifSettings.svelte';
 
     let { shown = $bindable() }: { shown: boolean } = $props();
     let config = $state<Config | null>(null);
@@ -38,6 +39,14 @@
             // A daemon older than this UI won't send display_colors at all, so
             // fill in an empty set rather than letting the color pickers read
             // properties of undefined.
+            const gifs = config.display_gifs;
+            config.display_gifs = {
+                paused: gifs?.paused ?? null,
+                recording: gifs?.recording ?? null,
+                warning_low: gifs?.warning_low ?? null,
+                warning_medium: gifs?.warning_medium ?? null,
+                warning_high: gifs?.warning_high ?? null,
+            };
             const colors = config.display_colors;
             config.display_colors = {
                 paused: colors?.paused ?? null,
@@ -183,15 +192,24 @@
                     >
                         <option value={0}>Invisible mode</option>
                         <option value={1}>Subtle mode (colored line)</option>
+                        <option value={4}>High visibility (full screen color)</option>
+                        <option value={5}>Custom GIF</option>
                         <option value={2}>Demo mode (orca gif)</option>
                         <option value={3}>EFF logo</option>
-                        <option value={4}>High visibility (full screen color)</option>
                     </select>
                     <p class="text-xs text-gray-500 mt-1">
                         Note: Rayhunter draws over the device's native UI, so some flickering is
                         expected
                     </p>
                 </div>
+
+                {#if config.ui_level === 1 || config.ui_level === 4}
+                    <DeviceColorSettings bind:config />
+                {/if}
+
+                {#if config.ui_level === 5}
+                    <DeviceGifSettings bind:config />
+                {/if}
 
                 <div>
                     <label
@@ -231,8 +249,6 @@
                         of color. This does not affect the colors on this page.
                     </p>
                 </div>
-
-                <DeviceColorSettings bind:config />
 
                 <div class="border-t border-gray-200 pt-4 mt-6 space-y-3">
                     <h3 class="text-lg font-semibold text-gray-800 mb-4">Notification Settings</h3>

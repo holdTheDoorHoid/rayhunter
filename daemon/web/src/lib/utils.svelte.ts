@@ -79,11 +79,48 @@ export function default_recording_color(colorblind_mode: boolean): string {
     return colorblind_mode ? '#0000ff' : DISPLAY_COLOR_DEFAULTS.recording;
 }
 
+/**
+ * Filenames of the GIFs uploaded per display state, used when ui_level is
+ * Custom GIF (5). `null` means that state falls back to its colored line.
+ */
+export interface DisplayGifs {
+    paused: string | null;
+    recording: string | null;
+    warning_low: string | null;
+    warning_medium: string | null;
+    warning_high: string | null;
+}
+
+/** Largest GIF the device accepts. Must match MAX_GIF_BYTES in the daemon. */
+export const MAX_GIF_BYTES = 2 * 1024 * 1024;
+
+/** The device screen is square and small; GIFs are scaled to fit this. */
+export const DEVICE_SCREEN_PX = 128;
+
+export async function set_display_gif(state: DisplayColorKey, file: File): Promise<void> {
+    const response = await fetch(`/api/display-gif/${state}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'image/gif' },
+        body: file,
+    });
+    if (!response.ok) {
+        throw new Error(await response.text());
+    }
+}
+
+export async function delete_display_gif(state: DisplayColorKey): Promise<void> {
+    const response = await fetch(`/api/display-gif/${state}/delete`, { method: 'POST' });
+    if (!response.ok) {
+        throw new Error(await response.text());
+    }
+}
+
 export interface Config {
     device: string;
     ui_level: number;
     colorblind_mode: boolean;
     display_colors: DisplayColors;
+    display_gifs: DisplayGifs;
     key_input_mode: number;
     ntfy_url: string | null;
     enabled_notifications: enabled_notifications[];

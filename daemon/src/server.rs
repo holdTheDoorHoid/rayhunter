@@ -206,6 +206,120 @@ pub async fn set_config(
     ))
 }
 
+/// Largest GIF we accept, in bytes. These devices have only tens of megabytes
+/// of RAM free, and the decoder expands each frame to roughly 64KB at 128x128,
+/// so accepting arbitrarily large uploads risks pushing the daemon out of
+/// memory at playback time.
+pub const MAX_GIF_BYTES: usize = 2 * 1024 * 1024;
+
+fn is_gif(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a")
+}
+
+/// Store a GIF for one display state.
+///
+/// This only writes the file. Recording it in `display_gifs` is left to the
+/// ordinary config save, so uploading several GIFs doesn't restart the daemon
+/// once per file and drop the connection mid-sequence.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/display-gif/{state}",
+    tag = "Configuration",
+    responses(
+        (status = StatusCode::OK, description = "GIF stored; save the config to apply it"),
+        (status = StatusCode::BAD_REQUEST, description = "Unknown state, not a GIF, or too large"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to write the GIF"),
+    ),
+    summary = "Upload a display GIF",
+    description = "Upload a GIF to play for one display state when ui_level is CustomGif."
+))]
+pub async fn set_display_gif(
+    State(state): State<Arc<ServerState>>,
+    Path(display_state): Path<String>,
+    body: axum::body::Bytes,
+) -> Result<(StatusCode, String), (StatusCode, String)> {
+    if !crate::config::DISPLAY_STATE_KEYS.contains(&display_state.as_str()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "unknown display state {display_state:?}, expected one of {:?}",
+                crate::config::DISPLAY_STATE_KEYS
+            ),
+        ));
+    }
+    if body.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "no GIF data received".to_string()));
+    }
+    if body.len() > MAX_GIF_BYTES {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "GIF is {} bytes, which is over the {MAX_GIF_BYTES} byte limit",
+                body.len()
+            ),
+        ));
+    }
+    if !is_gif(&body) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "file is not a GIF (expected a GIF87a or GIF89a header)".to_string(),
+        ));
+    }
+
+    let dir = &state.config.gif_store_path;
+    tokio::fs::create_dir_all(dir).await.map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to create GIF directory {dir}: {err}"),
+        )
+    })?;
+
+    let path = crate::display::generic_framebuffer::gif_path(dir, &display_state);
+    write(&path, &body).await.map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to write GIF to {path}: {err}"),
+        )
+    })?;
+
+    Ok((StatusCode::OK, format!("stored GIF for {display_state}")))
+}
+
+/// Remove the GIF for one display state, reverting it to the colored line.
+/// As with upload, the config is updated by the ordinary config save.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/display-gif/{state}/delete",
+    tag = "Configuration",
+    responses(
+        (status = StatusCode::OK, description = "GIF removed; save the config to apply it"),
+        (status = StatusCode::BAD_REQUEST, description = "Unknown display state"),
+    ),
+    summary = "Delete a display GIF",
+))]
+pub async fn delete_display_gif(
+    State(state): State<Arc<ServerState>>,
+    Path(display_state): Path<String>,
+) -> Result<(StatusCode, String), (StatusCode, String)> {
+    if !crate::config::DISPLAY_STATE_KEYS.contains(&display_state.as_str()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("unknown display state {display_state:?}"),
+        ));
+    }
+
+    let path =
+        crate::display::generic_framebuffer::gif_path(&state.config.gif_store_path, &display_state);
+    // A missing file is fine: we only need to end up with no GIF for this state.
+    if let Err(err) = tokio::fs::remove_file(&path).await
+        && err.kind() != std::io::ErrorKind::NotFound
+    {
+        warn!("failed to remove {path}: {err}");
+    }
+
+    Ok((StatusCode::OK, format!("removed GIF for {display_state}")))
+}
+
 #[cfg_attr(feature = "apidocs", utoipa::path(
     post,
     path = "/api/test-notification",

@@ -1,7 +1,7 @@
 use rayhunter::analysis::analyzer::EventType;
 use serde::{Deserialize, Serialize};
 
-mod generic_framebuffer;
+pub mod generic_framebuffer;
 
 pub mod headless;
 pub mod orbic;
