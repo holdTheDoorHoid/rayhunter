@@ -124,6 +124,50 @@ pub struct CellObservation {
     pub best_rsrp_dbm: f32,
 }
 
+/// Which cipher is protecting traffic right now.
+///
+/// Rayhunter already decodes this to decide whether encryption is absent, but
+/// only ever spoke up in that worst case. Showing the algorithm in use turns a
+/// silent assumption into something a person can check.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct EncryptionStatus {
+    /// Cipher agreed for the radio link, as its 3GPP name.
+    pub rrc_cipher: Option<String>,
+    pub last_seen: DateTime<Local>,
+}
+
+/// The 3GPP name for an LTE ciphering algorithm.
+///
+/// EEA0 means no encryption at all: everything between the phone and the tower
+/// travels in the clear.
+pub fn cipher_name(algorithm: u8) -> &'static str {
+    match algorithm {
+        0 => "EEA0 (none)",
+        1 => "EEA1 (SNOW 3G)",
+        2 => "EEA2 (AES)",
+        3 => "EEA3 (ZUC)",
+        _ => "reserved",
+    }
+}
+
+/// Whether Rayhunter is actually understanding the traffic it sees.
+///
+/// A detector that has gone blind looks exactly like a quiet night, so the
+/// share of messages it could not decode is the difference between "nothing is
+/// wrong" and "I cannot tell". Counts are for the current run.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct DetectionHealth {
+    /// Diag messages seen since the daemon started.
+    pub messages_seen: u64,
+    /// Of those, how many could not be decoded far enough to analyse.
+    pub messages_skipped: u64,
+    /// When a message last arrived. A stream that has stalled leaves this
+    /// behind while everything else still looks healthy.
+    pub last_message: Option<DateTime<Local>>,
+}
+
 /// Everything the UI needs in one response.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
@@ -131,6 +175,9 @@ pub struct CellInfo {
     pub serving: Option<ServingCell>,
     pub neighbors: Vec<NeighborCell>,
     pub history: Vec<CellObservation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encryption: Option<EncryptionStatus>,
+    pub health: DetectionHealth,
     /// False when no measurement has arrived yet, which is the normal state
     /// while recording is stopped. Lets the UI explain the emptiness rather
     /// than looking broken.
@@ -143,6 +190,8 @@ pub struct CellTracker {
     serving: Option<ServingCell>,
     neighbors: Vec<NeighborCell>,
     history: VecDeque<CellObservation>,
+    encryption: Option<EncryptionStatus>,
+    health: DetectionHealth,
 }
 
 /// Map an EARFCN to its LTE band, for the FDD downlink ranges.
@@ -252,6 +301,32 @@ impl CellTracker {
         self.record_observation(pci, earfcn, signal.rsrp_dbm, now);
     }
 
+    /// Record the cipher agreed on the radio link.
+    pub fn update_rrc_cipher(&mut self, algorithm: u8) {
+        let name = cipher_name(algorithm).to_string();
+        match self.encryption.as_mut() {
+            Some(e) => {
+                e.rrc_cipher = Some(name);
+                e.last_seen = Local::now();
+            }
+            None => {
+                self.encryption = Some(EncryptionStatus {
+                    rrc_cipher: Some(name),
+                    last_seen: Local::now(),
+                })
+            }
+        }
+    }
+
+    /// Note messages passing through, and how many could not be decoded.
+    pub fn record_messages(&mut self, seen: u64, skipped: u64) {
+        self.health.messages_seen += seen;
+        self.health.messages_skipped += skipped;
+        if seen > 0 {
+            self.health.last_message = Some(Local::now());
+        }
+    }
+
     /// Record a timing advance from a random access response.
     pub fn update_timing_advance(&mut self, ta: u16) {
         if let Some(serving) = self.serving.as_mut() {
@@ -322,6 +397,8 @@ impl CellTracker {
         });
 
         CellInfo {
+            encryption: self.encryption.clone(),
+            health: self.health.clone(),
             has_data: self.serving.is_some() || !history.is_empty(),
             serving: self.serving.clone(),
             neighbors,
@@ -338,6 +415,43 @@ fn digit_char(value: u8) -> char {
     } else {
         '?'
     }
+}
+
+/// The ciphering algorithm a tower has just told the phone to use.
+///
+/// Read from the RRC security mode command, the same message the null cipher
+/// detector inspects. That detector only asks whether the answer is "none";
+/// this reports whatever it is.
+pub fn rrc_cipher_from_information_element(ie: &InformationElement) -> Option<u8> {
+    use rayhunter::telcom_parser::lte_rrc::{
+        DL_DCCH_MessageType, DL_DCCH_MessageType_c1, SecurityModeCommandCriticalExtensions,
+        SecurityModeCommandCriticalExtensions_c1,
+    };
+
+    let InformationElement::LTE(lte) = ie else {
+        return None;
+    };
+    let LteInformationElement::DlDcch(dcch) = &**lte else {
+        return None;
+    };
+    let DL_DCCH_MessageType::C1(c1) = &dcch.message else {
+        return None;
+    };
+    let DL_DCCH_MessageType_c1::SecurityModeCommand(command) = c1 else {
+        return None;
+    };
+    let SecurityModeCommandCriticalExtensions::C1(inner) = &command.critical_extensions else {
+        return None;
+    };
+    let SecurityModeCommandCriticalExtensions_c1::SecurityModeCommand_r8(r8) = inner else {
+        return None;
+    };
+    Some(
+        r8.security_config_smc
+            .security_algorithm_config
+            .ciphering_algorithm
+            .0,
+    )
 }
 
 /// Pull the globally unique identity out of a tower's SIB1 broadcast.
@@ -539,6 +653,70 @@ mod tests {
         ]);
         let pcis: Vec<_> = t.snapshot().neighbors.iter().map(|n| n.pci).collect();
         assert_eq!(pcis, vec![2, 3, 1]);
+    }
+
+    /// EEA0 means no encryption at all, so the name has to say so plainly
+    /// rather than leaving somebody to know what EEA0 means.
+    #[test]
+    fn cipher_names_say_when_there_is_no_encryption() {
+        assert!(cipher_name(0).contains("none"));
+        assert!(cipher_name(1).contains("SNOW"));
+        assert!(cipher_name(2).contains("AES"));
+        assert!(cipher_name(3).contains("ZUC"));
+        assert_eq!(cipher_name(7), "reserved");
+    }
+
+    #[test]
+    fn tracks_the_radio_link_cipher() {
+        let mut t = CellTracker::new();
+        t.update_rrc_cipher(2);
+        assert!(
+            t.snapshot()
+                .encryption
+                .unwrap()
+                .rrc_cipher
+                .unwrap()
+                .contains("AES")
+        );
+        t.update_rrc_cipher(0);
+        assert!(
+            t.snapshot()
+                .encryption
+                .unwrap()
+                .rrc_cipher
+                .unwrap()
+                .contains("none")
+        );
+    }
+
+    /// The point of counting: a detector understanding nothing must be
+    /// distinguishable from one seeing nothing.
+    #[test]
+    fn detection_health_reports_what_share_was_missed() {
+        let mut t = CellTracker::new();
+        t.record_messages(100, 5);
+        let h = t.snapshot().health;
+        assert_eq!(h.messages_seen, 100);
+        assert_eq!(h.messages_skipped, 5);
+        assert!(h.last_message.is_some());
+    }
+
+    #[test]
+    fn detection_health_starts_clean() {
+        let h = CellTracker::new().snapshot().health;
+        assert_eq!(h.messages_seen, 0);
+        assert!(h.last_message.is_none());
+    }
+
+    /// Counts accumulate across containers rather than reporting the last one.
+    #[test]
+    fn detection_health_accumulates() {
+        let mut t = CellTracker::new();
+        t.record_messages(10, 1);
+        t.record_messages(10, 3);
+        let h = t.snapshot().health;
+        assert_eq!(h.messages_seen, 20);
+        assert_eq!(h.messages_skipped, 4);
     }
 
     #[test]

@@ -6,6 +6,10 @@ import {
     split_cell_id,
     reading_age,
     is_stale,
+    is_unencrypted,
+    skipped_percent,
+    health_verdict,
+    tracking_area_changes,
 } from './cellInfo';
 
 describe('rsrp_quality', () => {
@@ -94,5 +98,88 @@ describe('reading age', () => {
 
     it('never reports a negative age from clock skew', () => {
         expect(reading_age(at(-30), base)).toBe('just now');
+    });
+});
+
+describe('encryption', () => {
+    it('recognises the absence of encryption from the cipher name', () => {
+        expect(is_unencrypted('EEA0 (none)')).toBe(true);
+        expect(is_unencrypted('EEA2 (AES)')).toBe(false);
+        expect(is_unencrypted(null)).toBe(false);
+        expect(is_unencrypted(undefined)).toBe(false);
+    });
+});
+
+describe('detection health', () => {
+    const health = (seen: number, skipped: number, last: string | null = null) => ({
+        messages_seen: seen,
+        messages_skipped: skipped,
+        last_message: last,
+    });
+    const now = new Date('2026-08-30T12:00:00Z').getTime();
+    const ago = (s: number) => new Date(now - s * 1000).toISOString();
+
+    it('computes the share missed without dividing by zero', () => {
+        expect(skipped_percent(health(0, 0))).toBe(0);
+        expect(skipped_percent(health(100, 5))).toBe(5);
+    });
+
+    /**
+     * The distinction the whole feature exists for: understanding nothing must
+     * not look like seeing nothing untoward.
+     */
+    it('separates a healthy quiet night from a blind detector', () => {
+        expect(health_verdict(health(1000, 5, ago(5)), 120, now)).toBe('good');
+        expect(health_verdict(health(1000, 200, ago(5)), 120, now)).toBe('degraded');
+        expect(health_verdict(health(1000, 800, ago(5)), 120, now)).toBe('blind');
+    });
+
+    it('calls out a stream that has stopped arriving', () => {
+        expect(health_verdict(health(1000, 0, ago(600)), 120, now)).toBe('stalled');
+    });
+
+    it('says it is starting rather than healthy before anything arrives', () => {
+        expect(health_verdict(health(0, 0), 120, now)).toBe('starting');
+    });
+});
+
+describe('tracking_area_changes', () => {
+    const obs = (tac: number | null, first: string) => ({
+        pci: 1,
+        earfcn: 100,
+        identity: tac === null ? null : { mcc: '001', mnc: '01', cell_id: 1, tac },
+        first_seen: first,
+        last_seen: first,
+        best_rsrp_dbm: -90,
+    });
+
+    it('reports each crossing, oldest first', () => {
+        const changes = tracking_area_changes([
+            obs(200, '2026-08-30T12:02:00Z'),
+            obs(100, '2026-08-30T12:00:00Z'),
+            obs(300, '2026-08-30T12:04:00Z'),
+        ]);
+        expect(changes.map((c) => [c.from, c.to])).toEqual([
+            [100, 200],
+            [200, 300],
+        ]);
+    });
+
+    it('reports nothing when the area never changed', () => {
+        expect(
+            tracking_area_changes([
+                obs(100, '2026-08-30T12:00:00Z'),
+                obs(100, '2026-08-30T12:02:00Z'),
+            ])
+        ).toEqual([]);
+    });
+
+    it('ignores cells whose identity was never captured', () => {
+        expect(
+            tracking_area_changes([
+                obs(null, '2026-08-30T12:00:00Z'),
+                obs(null, '2026-08-30T12:02:00Z'),
+            ])
+        ).toEqual([]);
     });
 });

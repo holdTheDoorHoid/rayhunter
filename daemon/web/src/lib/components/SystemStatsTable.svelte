@@ -1,7 +1,6 @@
 <script lang="ts">
     import {
         type SystemStats,
-        load_per_core,
         cpu_state,
         format_uptime,
         hours_until_full,

@@ -7,6 +7,10 @@
         split_cell_id,
         reading_age,
         is_stale,
+        is_unencrypted,
+        skipped_percent,
+        health_verdict,
+        tracking_area_changes,
         type CellInfo,
     } from '../cellInfo';
     import {
@@ -53,6 +57,10 @@
     });
 
     let stale = $derived(serving ? is_stale(serving.last_seen, now) : false);
+    let encryption = $derived(info?.encryption ?? null);
+    let unencrypted = $derived(is_unencrypted(encryption?.rrc_cipher));
+    let verdict = $derived(info ? health_verdict(info.health, 120, now) : 'starting');
+    let tacChanges = $derived(info ? tracking_area_changes(info.history) : []);
     let quality = $derived(serving ? rsrp_quality(serving.signal.rsrp_dbm) : null);
     let bandInfo = $derived(serving ? band_for_earfcn(serving.earfcn) : null);
     let dl = $derived(serving ? downlink_mhz(serving.earfcn) : null);
@@ -120,7 +128,22 @@
 
 <div class="border border-gray-300 dark:border-gray-700 rounded-md p-4">
     <div class="flex items-baseline justify-between gap-2">
-        <h2 class="text-xl">Cell Site</h2>
+        <h2 class="text-xl">
+            Cell Site
+            {#if verdict === 'blind' || verdict === 'stalled'}
+                <span
+                    class="ml-1 rounded-sm bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-800 dark:bg-red-950 dark:text-red-300"
+                >
+                    {verdict === 'stalled' ? 'no messages arriving' : 'mostly undecodable'}
+                </span>
+            {:else if verdict === 'degraded'}
+                <span
+                    class="ml-1 rounded-sm bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                >
+                    partial coverage
+                </span>
+            {/if}
+        </h2>
         {#if serving}
             <span
                 class="text-xs {stale
@@ -185,6 +208,45 @@
                 actively working, so an attached device sitting idle stops sending them. The values
                 below are the last ones seen, not live.
             </p>
+        {/if}
+
+        {#if encryption}
+            <div
+                class="mt-3 rounded-md border p-2 {unencrypted
+                    ? 'border-red-500 bg-red-100 dark:border-red-800 dark:bg-red-950'
+                    : 'border-gray-200 dark:border-gray-700'}"
+            >
+                <div class="text-xs text-gray-500 dark:text-gray-400">Encryption in use</div>
+                <div
+                    class="text-sm {unencrypted
+                        ? 'font-medium text-red-700 dark:text-red-300'
+                        : ''}"
+                >
+                    {#if encryption.rrc_cipher}Radio link: {encryption.rrc_cipher}{/if}
+                </div>
+                {#if unencrypted}
+                    <p class="mt-1 text-xs text-red-700 dark:text-red-300">
+                        Traffic is not being encrypted. Anyone within range can read it. Real
+                        networks essentially never do this.
+                    </p>
+                {/if}
+                <Explainer
+                    summary="Which cipher is protecting what passes between your device and the network."
+                >
+                    <p>
+                        The <strong>radio link</strong> cipher protects everything between your
+                        device and the tower. The <strong>core network</strong> cipher protects signalling
+                        with the operator behind it. EEA1, EEA2 and EEA3 are real encryption; EEA0 means
+                        none at all.
+                    </p>
+                    <p>
+                        Fake base stations commonly select no encryption, because they do not hold
+                        the keys real encryption would need. Rayhunter raises a warning when that
+                        happens, but seeing which cipher is in use lets you check rather than
+                        assume.
+                    </p>
+                </Explainer>
+            </div>
         {/if}
 
         <Explainer
@@ -367,11 +429,69 @@
                         </tbody>
                     </table>
                 </div>
+                {#if tacChanges.length > 0}
+                    <div class="mt-3 border-t border-gray-200 dark:border-gray-700 pt-2">
+                        <div class="text-xs font-medium text-gray-700 dark:text-gray-200">
+                            Tracking area changes ({tacChanges.length})
+                        </div>
+                        <ul class="mt-1 space-y-0.5">
+                            {#each tacChanges as change (change.at)}
+                                <li class="text-xs text-gray-500 dark:text-gray-400">
+                                    {clock(change.at)} &mdash; area
+                                    <span class="font-mono">{change.from}</span> to
+                                    <span class="font-mono">{change.to}</span>
+                                </li>
+                            {/each}
+                        </ul>
+                        <Explainer summary="Why a change of tracking area is worth noticing.">
+                            <p>
+                                A tracking area is the group of towers the network uses to find your
+                                phone when someone calls. Crossing between them makes your device
+                                announce itself, which is one of the few moments equipment listening
+                                nearby can rely on hearing from a phone that would otherwise stay
+                                quiet.
+                            </p>
+                            <p>
+                                Changes are ordinary when you are travelling. Repeated changes while
+                                you have not moved are not, and are worth looking at alongside the
+                                warnings.
+                            </p>
+                        </Explainer>
+                    </div>
+                {/if}
+
                 <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
                     Every cell this device has attached to since Rayhunter started. Moving through a
                     city produces a long list; sitting still and seeing many is more interesting.
                 </p>
             </details>
+        {/if}
+
+        {#if info.health.messages_seen > 0}
+            <div class="mt-3 border-t border-gray-200 dark:border-gray-700 pt-2">
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                    Understood {(100 - skipped_percent(info.health)).toFixed(1)}% of
+                    {info.health.messages_seen.toLocaleString()} messages this run.
+                    {#if verdict === 'stalled'}
+                        Nothing has arrived recently, so nothing is currently being examined.
+                    {:else if verdict === 'blind' || verdict === 'degraded'}
+                        A quiet screen is less reassuring than usual while this figure is low.
+                    {/if}
+                </p>
+                <Explainer summary="Why this number matters more than it looks.">
+                    <p>
+                        Rayhunter can only warn about traffic it can decode. If it is understanding
+                        very little, or nothing is arriving at all, an absence of warnings means it
+                        cannot tell rather than that nothing is wrong. Those two look identical
+                        otherwise, which is why the figure is here.
+                    </p>
+                    <p>
+                        Some messages are always skipped. Encrypted signalling and message types
+                        Rayhunter does not parse are both normal, so a small share is expected and
+                        not a fault.
+                    </p>
+                </Explainer>
+            </div>
         {/if}
     {/if}
 </div>

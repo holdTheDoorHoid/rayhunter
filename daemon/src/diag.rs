@@ -16,6 +16,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::cell_info::{
     CellTracker, NeighborCell, SignalMeasurements, identity_from_information_element,
+    rrc_cipher_from_information_element,
 };
 use crate::gps::GpsRecord;
 use rayhunter::analysis::information_element::InformationElement;
@@ -507,8 +508,14 @@ async fn update_cell_info(cell_tracker: &Arc<RwLock<CellTracker>>, container: &M
     let mut neighbors: Option<Vec<NeighborCell>> = None;
     let mut timing_advance: Option<u16> = None;
     let mut rrc_messages: Vec<Message> = Vec::new();
+    let mut seen: u64 = 0;
+    let mut skipped: u64 = 0;
 
     for message in container.messages() {
+        seen += 1;
+        if message.is_err() {
+            skipped += 1;
+        }
         let Ok(Message::Log {
             body,
             pending_msgs,
@@ -594,6 +601,7 @@ async fn update_cell_info(cell_tracker: &Arc<RwLock<CellTracker>>, container: &M
     }
 
     let mut tracker = cell_tracker.write().await;
+    tracker.record_messages(seen, skipped);
     if let Some((pci, earfcn, signal, search_threshold)) = serving {
         tracker.update_serving(pci, earfcn, signal, search_threshold);
     }
@@ -604,24 +612,24 @@ async fn update_cell_info(cell_tracker: &Arc<RwLock<CellTracker>>, container: &M
         tracker.update_timing_advance(ta);
     }
 
-    // Only decode RRC while this cell's identity is still unknown. Once it is
-    // known it stays put until the cell changes, so this stops being work.
-    if tracker
+    // RRC is decoded for two things: the cell identity, which is only needed
+    // until it is known, and the agreed cipher, which can change at any time.
+    let need_identity = tracker
         .snapshot()
         .serving
-        .is_some_and(|s| s.identity.is_none())
-    {
-        for message in rrc_messages {
-            let Ok(Some((_, gsmtap))) = rayhunter::gsmtap::parser::parse(message) else {
-                continue;
-            };
-            let Ok(element) = InformationElement::try_from(&gsmtap) else {
-                continue;
-            };
-            if let Some(identity) = identity_from_information_element(&element) {
-                tracker.update_identity(identity);
-                break;
-            }
+        .is_some_and(|s| s.identity.is_none());
+    for message in rrc_messages {
+        let Ok(Some((_, gsmtap))) = rayhunter::gsmtap::parser::parse(message) else {
+            continue;
+        };
+        let Ok(element) = InformationElement::try_from(&gsmtap) else {
+            continue;
+        };
+        if need_identity && let Some(identity) = identity_from_information_element(&element) {
+            tracker.update_identity(identity);
+        }
+        if let Some(algorithm) = rrc_cipher_from_information_element(&element) {
+            tracker.update_rrc_cipher(algorithm);
         }
     }
 }

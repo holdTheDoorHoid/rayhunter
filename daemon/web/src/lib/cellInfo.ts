@@ -65,7 +65,22 @@ export interface CellObservation {
     best_rsrp_dbm: number;
 }
 
+export interface EncryptionStatus {
+    /** Cipher agreed for the radio link, as its 3GPP name. */
+    rrc_cipher: string | null;
+    last_seen: string;
+}
+
+/** Whether Rayhunter is understanding the traffic it sees. */
+export interface DetectionHealth {
+    messages_seen: number;
+    messages_skipped: number;
+    last_message: string | null;
+}
+
 export interface CellInfo {
+    encryption?: EncryptionStatus;
+    health: DetectionHealth;
     serving: ServingCell | null;
     neighbors: NeighborCell[];
     history: CellObservation[];
@@ -170,4 +185,68 @@ export const STALE_AFTER_SECONDS = 120;
 
 export function is_stale(iso: string, now: number = Date.now()): boolean {
     return (now - new Date(iso).getTime()) / 1000 > STALE_AFTER_SECONDS;
+}
+
+/** True when a cipher name reports no encryption at all. */
+export function is_unencrypted(cipher: string | null | undefined): boolean {
+    return cipher !== null && cipher !== undefined && cipher.includes('none');
+}
+
+/** Share of messages Rayhunter could not decode, 0 to 100. */
+export function skipped_percent(health: DetectionHealth): number {
+    if (!health.messages_seen) return 0;
+    return (health.messages_skipped / health.messages_seen) * 100;
+}
+
+export type HealthVerdict = 'good' | 'degraded' | 'blind' | 'stalled' | 'starting';
+
+/**
+ * How much to trust a quiet screen.
+ *
+ * A detector understanding almost nothing looks identical to one seeing
+ * nothing untoward, so the distinction has to be drawn explicitly. A stream
+ * that has stopped arriving is worse still: everything else keeps looking
+ * healthy while nothing is being examined at all.
+ */
+export function health_verdict(
+    health: DetectionHealth,
+    stalledAfterSeconds = 120,
+    now: number = Date.now()
+): HealthVerdict {
+    if (!health.messages_seen) return 'starting';
+    if (health.last_message) {
+        const age = (now - new Date(health.last_message).getTime()) / 1000;
+        if (age > stalledAfterSeconds) return 'stalled';
+    }
+    const missed = skipped_percent(health);
+    if (missed > 50) return 'blind';
+    if (missed > 10) return 'degraded';
+    return 'good';
+}
+
+/**
+ * Moments where the tracking area changed between consecutive observations.
+ *
+ * Crossing a tracking area boundary makes a phone announce itself to the
+ * network, which is one of the few moments surveillance equipment can rely on
+ * hearing from a device that would otherwise stay quiet.
+ */
+export function tracking_area_changes(
+    history: CellObservation[]
+): { at: string; from: number | null; to: number | null }[] {
+    // History arrives newest first; walk it oldest first so changes read forwards.
+    const ordered = [...history].sort(
+        (a, b) => new Date(a.first_seen).getTime() - new Date(b.first_seen).getTime()
+    );
+    const changes: { at: string; from: number | null; to: number | null }[] = [];
+    let previous: number | null | undefined;
+    for (const entry of ordered) {
+        const tac = entry.identity?.tac ?? null;
+        if (tac === null) continue;
+        if (previous !== undefined && previous !== tac) {
+            changes.push({ at: entry.first_seen, from: previous, to: tac });
+        }
+        previous = tac;
+    }
+    return changes;
 }
