@@ -7,7 +7,7 @@
         split_cell_id,
         reading_age,
         is_stale,
-        is_unencrypted,
+        missing_protections,
         skipped_percent,
         health_verdict,
         tracking_area_changes,
@@ -58,7 +58,8 @@
 
     let stale = $derived(serving ? is_stale(serving.last_seen, now) : false);
     let encryption = $derived(info?.encryption ?? null);
-    let unencrypted = $derived(is_unencrypted(encryption?.rrc_cipher));
+    let missing = $derived(missing_protections(encryption));
+    let unencrypted = $derived(missing.length > 0);
     let verdict = $derived(info ? health_verdict(info.health, 120, now) : 'starting');
     let tacChanges = $derived(info ? tracking_area_changes(info.history) : []);
     let quality = $derived(serving ? rsrp_quality(serving.signal.rsrp_dbm) : null);
@@ -216,18 +217,33 @@
                     ? 'border-red-500 bg-red-100 dark:border-red-800 dark:bg-red-950'
                     : 'border-gray-200 dark:border-gray-700'}"
             >
-                <div class="text-xs text-gray-500 dark:text-gray-400">Encryption in use</div>
-                <div
-                    class="text-sm {unencrypted
-                        ? 'font-medium text-red-700 dark:text-red-300'
-                        : ''}"
-                >
-                    {#if encryption.rrc_cipher}Radio link: {encryption.rrc_cipher}{/if}
+                <div class="text-xs text-gray-500 dark:text-gray-400">Protection in use</div>
+                <div class="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                    {#if encryption.rrc_cipher || encryption.rrc_integrity}
+                        <div class="col-span-2 text-xs text-gray-500 dark:text-gray-400">
+                            Radio link, between your device and the tower
+                        </div>
+                        <div>Encryption: {encryption.rrc_cipher ?? 'not seen'}</div>
+                        <div>Integrity: {encryption.rrc_integrity ?? 'not seen'}</div>
+                    {/if}
+                    {#if encryption.nas_cipher || encryption.nas_integrity}
+                        <div class="col-span-2 mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            Core network, signalling with your operator
+                        </div>
+                        <div>Encryption: {encryption.nas_cipher ?? 'not seen'}</div>
+                        <div>Integrity: {encryption.nas_integrity ?? 'not seen'}</div>
+                    {/if}
                 </div>
-                {#if unencrypted}
-                    <p class="mt-1 text-xs text-red-700 dark:text-red-300">
-                        Traffic is not being encrypted. Anyone within range can read it. Real
-                        networks essentially never do this.
+                {#if missing.length > 0}
+                    <p class="mt-2 text-xs font-medium text-red-700 dark:text-red-300">
+                        Missing: {missing.join(', ')}.
+                        {#if missing.some((m) => m.includes('encryption'))}
+                            Traffic without encryption can be read by anything within range.
+                        {/if}
+                        {#if missing.some((m) => m.includes('integrity'))}
+                            Signalling without integrity protection can be altered or forged in
+                            transit.
+                        {/if}
                     </p>
                 {/if}
                 <Explainer

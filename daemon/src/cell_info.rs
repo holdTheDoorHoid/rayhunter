@@ -134,6 +134,14 @@ pub struct CellObservation {
 pub struct EncryptionStatus {
     /// Cipher agreed for the radio link, as its 3GPP name.
     pub rrc_cipher: Option<String>,
+    /// Integrity algorithm for the radio link. Integrity protection is what
+    /// stops messages being altered in flight, as distinct from read.
+    pub rrc_integrity: Option<String>,
+    /// Cipher agreed with the core network, protecting signalling with the
+    /// operator rather than the link to the tower.
+    pub nas_cipher: Option<String>,
+    /// Integrity algorithm for that signalling.
+    pub nas_integrity: Option<String>,
     pub last_seen: DateTime<Local>,
 }
 
@@ -147,6 +155,22 @@ pub fn cipher_name(algorithm: u8) -> &'static str {
         1 => "EEA1 (SNOW 3G)",
         2 => "EEA2 (AES)",
         3 => "EEA3 (ZUC)",
+        _ => "reserved",
+    }
+}
+
+/// The 3GPP name for an LTE integrity algorithm.
+///
+/// Integrity protection is a different guarantee from encryption: it stops
+/// messages being altered or forged in flight, rather than read. EIA0 means
+/// none, which leaves signalling open to being rewritten by anything in the
+/// path, and is even less expected than an absent cipher.
+pub fn integrity_name(algorithm: u8) -> &'static str {
+    match algorithm {
+        0 => "EIA0 (none)",
+        1 => "EIA1 (SNOW 3G)",
+        2 => "EIA2 (AES)",
+        3 => "EIA3 (ZUC)",
         _ => "reserved",
     }
 }
@@ -301,21 +325,32 @@ impl CellTracker {
         self.record_observation(pci, earfcn, signal.rsrp_dbm, now);
     }
 
-    /// Record the cipher agreed on the radio link.
-    pub fn update_rrc_cipher(&mut self, algorithm: u8) {
-        let name = cipher_name(algorithm).to_string();
-        match self.encryption.as_mut() {
-            Some(e) => {
-                e.rrc_cipher = Some(name);
-                e.last_seen = Local::now();
-            }
-            None => {
-                self.encryption = Some(EncryptionStatus {
-                    rrc_cipher: Some(name),
-                    last_seen: Local::now(),
-                })
-            }
-        }
+    /// Record the algorithms agreed for the radio link.
+    pub fn update_rrc_security(&mut self, cipher: u8, integrity: u8) {
+        let e = self.encryption.get_or_insert_with(|| EncryptionStatus {
+            rrc_cipher: None,
+            rrc_integrity: None,
+            nas_cipher: None,
+            nas_integrity: None,
+            last_seen: Local::now(),
+        });
+        e.rrc_cipher = Some(cipher_name(cipher).to_string());
+        e.rrc_integrity = Some(integrity_name(integrity).to_string());
+        e.last_seen = Local::now();
+    }
+
+    /// Record the algorithms agreed with the core network.
+    pub fn update_nas_security(&mut self, cipher: u8, integrity: u8) {
+        let e = self.encryption.get_or_insert_with(|| EncryptionStatus {
+            rrc_cipher: None,
+            rrc_integrity: None,
+            nas_cipher: None,
+            nas_integrity: None,
+            last_seen: Local::now(),
+        });
+        e.nas_cipher = Some(cipher_name(cipher).to_string());
+        e.nas_integrity = Some(integrity_name(integrity).to_string());
+        e.last_seen = Local::now();
     }
 
     /// Note messages passing through, and how many could not be decoded.
@@ -422,7 +457,7 @@ fn digit_char(value: u8) -> char {
 /// Read from the RRC security mode command, the same message the null cipher
 /// detector inspects. That detector only asks whether the answer is "none";
 /// this reports whatever it is.
-pub fn rrc_cipher_from_information_element(ie: &InformationElement) -> Option<u8> {
+pub fn rrc_security_from_information_element(ie: &InformationElement) -> Option<(u8, u8)> {
     use rayhunter::telcom_parser::lte_rrc::{
         DL_DCCH_MessageType, DL_DCCH_MessageType_c1, SecurityModeCommandCriticalExtensions,
         SecurityModeCommandCriticalExtensions_c1,
@@ -446,12 +481,49 @@ pub fn rrc_cipher_from_information_element(ie: &InformationElement) -> Option<u8
     let SecurityModeCommandCriticalExtensions_c1::SecurityModeCommand_r8(r8) = inner else {
         return None;
     };
-    Some(
-        r8.security_config_smc
-            .security_algorithm_config
-            .ciphering_algorithm
-            .0,
-    )
+    let config = &r8.security_config_smc.security_algorithm_config;
+    Some((
+        config.ciphering_algorithm.0,
+        config.integrity_prot_algorithm.0,
+    ))
+}
+
+/// The algorithms the core network has just told the phone to use.
+///
+/// Read from the NAS security mode command, the same message the NAS null
+/// cipher detector inspects. That detector only asks whether the cipher is
+/// absent; this reports both algorithms whatever they are.
+pub fn nas_security_from_information_element(ie: &InformationElement) -> Option<(u8, u8)> {
+    use pycrate_rs::nas::NASMessage;
+    use pycrate_rs::nas::emm::EMMMessage;
+    use pycrate_rs::nas::generated::emm::emm_security_mode_command::{
+        NASSecAlgoCiphAlgo, NASSecAlgoIntegAlgo,
+    };
+
+    let InformationElement::LTE(lte) = ie else {
+        return None;
+    };
+    let LteInformationElement::NAS(payload) = &**lte else {
+        return None;
+    };
+    let NASMessage::EMMMessage(EMMMessage::EMMSecurityModeCommand(command)) = payload else {
+        return None;
+    };
+
+    let cipher = match command.nas_sec_algo.inner.ciph_algo {
+        NASSecAlgoCiphAlgo::EPSEncryptionAlgorithmEEA0Null => 0,
+        NASSecAlgoCiphAlgo::EPSEncryptionAlgorithm128EEA1SNOW => 1,
+        NASSecAlgoCiphAlgo::EPSEncryptionAlgorithm128EEA2AES => 2,
+        NASSecAlgoCiphAlgo::EPSEncryptionAlgorithm128EEA3ZUC => 3,
+        _ => 255,
+    };
+    let integrity = match command.nas_sec_algo.inner.integ_algo {
+        NASSecAlgoIntegAlgo::EPSIntegrityAlgorithmEIA0Null => 0,
+        NASSecAlgoIntegAlgo::EPSIntegrityAlgorithm128EIA1SNOW => 1,
+        NASSecAlgoIntegAlgo::EPSIntegrityAlgorithm128EIA2AES => 2,
+        _ => 255,
+    };
+    Some((cipher, integrity))
 }
 
 /// Pull the globally unique identity out of a tower's SIB1 broadcast.
@@ -667,26 +739,36 @@ mod tests {
     }
 
     #[test]
-    fn tracks_the_radio_link_cipher() {
+    fn names_say_plainly_when_a_protection_is_absent() {
+        assert!(cipher_name(0).contains("none"));
+        assert!(integrity_name(0).contains("none"));
+        assert!(integrity_name(2).contains("AES"));
+        assert_eq!(integrity_name(9), "reserved");
+    }
+
+    /// The radio link and the core network are separate agreements, and one
+    /// being sound says nothing about the other.
+    #[test]
+    fn tracks_the_two_layers_independently() {
         let mut t = CellTracker::new();
-        t.update_rrc_cipher(2);
-        assert!(
-            t.snapshot()
-                .encryption
-                .unwrap()
-                .rrc_cipher
-                .unwrap()
-                .contains("AES")
-        );
-        t.update_rrc_cipher(0);
-        assert!(
-            t.snapshot()
-                .encryption
-                .unwrap()
-                .rrc_cipher
-                .unwrap()
-                .contains("none")
-        );
+        t.update_rrc_security(2, 2);
+        t.update_nas_security(0, 1);
+        let e = t.snapshot().encryption.unwrap();
+        assert!(e.rrc_cipher.unwrap().contains("AES"));
+        assert!(e.rrc_integrity.unwrap().contains("AES"));
+        assert!(e.nas_cipher.unwrap().contains("none"));
+        assert!(e.nas_integrity.unwrap().contains("SNOW"));
+    }
+
+    /// Recording one layer must not blank the other.
+    #[test]
+    fn recording_one_layer_leaves_the_other_alone() {
+        let mut t = CellTracker::new();
+        t.update_nas_security(2, 2);
+        t.update_rrc_security(1, 1);
+        let e = t.snapshot().encryption.unwrap();
+        assert!(e.nas_cipher.is_some());
+        assert!(e.rrc_cipher.is_some());
     }
 
     /// The point of counting: a detector understanding nothing must be

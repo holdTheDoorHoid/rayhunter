@@ -6,7 +6,8 @@ import {
     split_cell_id,
     reading_age,
     is_stale,
-    is_unencrypted,
+    is_unprotected,
+    missing_protections,
     skipped_percent,
     health_verdict,
     tracking_area_changes,
@@ -101,12 +102,48 @@ describe('reading age', () => {
     });
 });
 
-describe('encryption', () => {
-    it('recognises the absence of encryption from the cipher name', () => {
-        expect(is_unencrypted('EEA0 (none)')).toBe(true);
-        expect(is_unencrypted('EEA2 (AES)')).toBe(false);
-        expect(is_unencrypted(null)).toBe(false);
-        expect(is_unencrypted(undefined)).toBe(false);
+describe('protection', () => {
+    const status = (
+        rrc_cipher: string | null,
+        rrc_integrity: string | null,
+        nas_cipher: string | null,
+        nas_integrity: string | null
+    ) => ({
+        rrc_cipher,
+        rrc_integrity,
+        nas_cipher,
+        nas_integrity,
+        last_seen: '2026-08-30T12:00:00Z',
+    });
+
+    it('recognises the absence of a protection from its name', () => {
+        expect(is_unprotected('EEA0 (none)')).toBe(true);
+        expect(is_unprotected('EIA0 (none)')).toBe(true);
+        expect(is_unprotected('EEA2 (AES)')).toBe(false);
+        expect(is_unprotected(null)).toBe(false);
+        expect(is_unprotected(undefined)).toBe(false);
+    });
+
+    it('says nothing is missing when all four are real', () => {
+        expect(
+            missing_protections(status('EEA2 (AES)', 'EIA2 (AES)', 'EEA2 (AES)', 'EIA2 (AES)'))
+        ).toEqual([]);
+    });
+
+    /**
+     * The two layers are separate agreements, and integrity is a different
+     * guarantee from encryption, so each has to be reported on its own rather
+     * than collapsed into one verdict.
+     */
+    it('names exactly which protections are absent', () => {
+        expect(
+            missing_protections(status('EEA2 (AES)', 'EIA0 (none)', 'EEA0 (none)', 'EIA2 (AES)'))
+        ).toEqual(['radio link integrity', 'core network encryption']);
+    });
+
+    it('treats a value not yet seen as unknown rather than missing', () => {
+        expect(missing_protections(status(null, null, null, null))).toEqual([]);
+        expect(missing_protections(null)).toEqual([]);
     });
 });
 

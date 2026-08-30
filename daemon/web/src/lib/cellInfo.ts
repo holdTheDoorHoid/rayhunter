@@ -68,6 +68,12 @@ export interface CellObservation {
 export interface EncryptionStatus {
     /** Cipher agreed for the radio link, as its 3GPP name. */
     rrc_cipher: string | null;
+    /** Integrity algorithm for the radio link. */
+    rrc_integrity: string | null;
+    /** Cipher agreed with the core network. */
+    nas_cipher: string | null;
+    /** Integrity algorithm for core network signalling. */
+    nas_integrity: string | null;
     last_seen: string;
 }
 
@@ -187,9 +193,26 @@ export function is_stale(iso: string, now: number = Date.now()): boolean {
     return (now - new Date(iso).getTime()) / 1000 > STALE_AFTER_SECONDS;
 }
 
-/** True when a cipher name reports no encryption at all. */
-export function is_unencrypted(cipher: string | null | undefined): boolean {
-    return cipher !== null && cipher !== undefined && cipher.includes('none');
+/** True when an algorithm name reports no protection at all. */
+export function is_unprotected(algorithm: string | null | undefined): boolean {
+    return algorithm !== null && algorithm !== undefined && algorithm.includes('none');
+}
+
+/** Kept for readability where the value is specifically a cipher. */
+export const is_unencrypted = is_unprotected;
+
+/**
+ * Anything absent across both layers, named so a person can see what is
+ * missing rather than having to compare four values themselves.
+ */
+export function missing_protections(status: EncryptionStatus | null | undefined): string[] {
+    if (!status) return [];
+    const missing: string[] = [];
+    if (is_unprotected(status.rrc_cipher)) missing.push('radio link encryption');
+    if (is_unprotected(status.rrc_integrity)) missing.push('radio link integrity');
+    if (is_unprotected(status.nas_cipher)) missing.push('core network encryption');
+    if (is_unprotected(status.nas_integrity)) missing.push('core network integrity');
+    return missing;
 }
 
 /** Share of messages Rayhunter could not decode, 0 to 100. */

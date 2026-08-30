@@ -16,7 +16,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::cell_info::{
     CellTracker, NeighborCell, SignalMeasurements, identity_from_information_element,
-    rrc_cipher_from_information_element,
+    nas_security_from_information_element, rrc_security_from_information_element,
 };
 use crate::gps::GpsRecord;
 use rayhunter::analysis::information_element::InformationElement;
@@ -575,10 +575,10 @@ async fn update_cell_info(cell_tracker: &Arc<RwLock<CellTracker>>, container: &M
                     }
                 }
             }
-            LogBody::LteRrcOtaMessage { .. } => {
-                // Kept aside rather than parsed here: decoding RRC is the
-                // expensive part, and it is only needed until this cell's
-                // identity is known.
+            LogBody::LteRrcOtaMessage { .. } | LogBody::Nas4GMessage { .. } => {
+                // Kept aside rather than decoded inline: these carry the cell
+                // identity and the agreed security algorithms, and decoding is
+                // the expensive part.
                 rrc_messages.push(Message::Log {
                     pending_msgs,
                     outer_length,
@@ -628,8 +628,11 @@ async fn update_cell_info(cell_tracker: &Arc<RwLock<CellTracker>>, container: &M
         if need_identity && let Some(identity) = identity_from_information_element(&element) {
             tracker.update_identity(identity);
         }
-        if let Some(algorithm) = rrc_cipher_from_information_element(&element) {
-            tracker.update_rrc_cipher(algorithm);
+        if let Some((cipher, integrity)) = rrc_security_from_information_element(&element) {
+            tracker.update_rrc_security(cipher, integrity);
+        }
+        if let Some((cipher, integrity)) = nas_security_from_information_element(&element) {
+            tracker.update_nas_security(cipher, integrity);
         }
     }
 }
