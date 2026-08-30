@@ -15,6 +15,8 @@
     import type { SystemStats } from '$lib/systemStats';
     import { AnalysisManager } from '$lib/analysisManager.svelte';
     import SystemStatsTable from '$lib/components/SystemStatsTable.svelte';
+    import CellInfoView from '$lib/components/CellInfoView.svelte';
+    import { get_cell_info, type CellInfo } from '$lib/cellInfo';
     import DeleteAllButton from '$lib/components/DeleteAllButton.svelte';
     import RecordingControls from '$lib/components/RecordingControls.svelte';
     import ConfigForm from '$lib/components/ConfigForm.svelte';
@@ -35,6 +37,7 @@
     let gps_data: GpsData | null = $state(null);
     let gps_mode: GpsMode = $state(GpsMode.Disabled);
     let update_status: UpdateStatus | null = $state(null);
+    let cell_info: CellInfo | null = $state(null);
     $effect(() => {
         const interval = setInterval(async () => {
             try {
@@ -59,6 +62,13 @@
                 } catch (error) {
                     console.error('Error fetching update status:', error);
                     update_status = null;
+                }
+                // Allowed to fail: a daemon older than this UI has no such
+                // endpoint, and the rest of the page should still work.
+                try {
+                    cell_info = await get_cell_info();
+                } catch {
+                    cell_info = null;
                 }
                 const config = await get_config();
                 gps_mode = config.gps_mode;
@@ -323,6 +333,7 @@
                 </div>
             {/if}
             <SystemStatsTable stats={system_stats!} {gps_data} {gps_mode} />
+            <CellInfoView info={cell_info} recording={!!current_entry} />
         </div>
         <div class="flex flex-col gap-2">
             <div class="flex flex-row gap-2">

@@ -35,10 +35,15 @@ const HISTORY_LIMIT: usize = 256;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
 pub struct CellIdentity {
-    /// Mobile Country Code, e.g. 310 for the United States.
-    pub mcc: Option<u16>,
-    /// Mobile Network Code, identifying the operator within that country.
-    pub mnc: Option<u16>,
+    /// Mobile Country Code, e.g. "310" for the United States. Kept as digits
+    /// rather than a number because leading zeros are significant.
+    pub mcc: Option<String>,
+    /// Mobile Network Code identifying the operator within that country.
+    ///
+    /// Also digits, and for a stronger reason: an MNC may be two or three
+    /// digits and the length is part of the identity, so "30" and "030" are
+    /// different networks. Storing a number would silently merge them.
+    pub mnc: Option<String>,
     /// The 28 bit cell identity from SIB1. Globally unique within the operator.
     pub cell_id: Option<u32>,
     /// Tracking area code, the grouping the network uses to page your phone.
@@ -283,6 +288,16 @@ impl CellTracker {
     }
 }
 
+/// One decimal digit as a character. Values outside 0 to 9 cannot occur in a
+/// well formed PLMN, and become '?' rather than nonsense.
+fn digit_char(value: u8) -> char {
+    if value < 10 {
+        (b'0' + value) as char
+    } else {
+        '?'
+    }
+}
+
 /// Pull the globally unique identity out of a tower's SIB1 broadcast.
 ///
 /// SIB1 is the only place this is available, and only for a cell the device
@@ -321,17 +336,10 @@ pub fn identity_from_information_element(ie: &InformationElement) -> Option<Cell
     // meaningful, so both are folded into a single number the same way they are
     // written down.
     let plmn = info.plmn_identity_list.0.first().map(|p| &p.plmn_identity);
-    let mcc = plmn.and_then(|p| p.mcc.as_ref()).map(|mcc| {
-        mcc.0
-            .iter()
-            .fold(0u16, |acc, digit| acc * 10 + digit.0 as u16)
-    });
-    let mnc = plmn.map(|p| {
-        p.mnc
-            .0
-            .iter()
-            .fold(0u16, |acc, digit| acc * 10 + digit.0 as u16)
-    });
+    let mcc = plmn
+        .and_then(|p| p.mcc.as_ref())
+        .map(|mcc| mcc.0.iter().map(|d| digit_char(d.0)).collect::<String>());
+    let mnc = plmn.map(|p| p.mnc.0.iter().map(|d| digit_char(d.0)).collect::<String>());
 
     Some(CellIdentity {
         mcc,
@@ -380,15 +388,15 @@ mod tests {
         let mut t = CellTracker::new();
         t.update_serving(160, 2050, sig(-85.0));
         t.update_identity(CellIdentity {
-            mcc: Some(310),
-            mnc: Some(260),
+            mcc: Some("310".into()),
+            mnc: Some("260".into()),
             cell_id: Some(0x1234567),
             tac: Some(42),
         });
         t.update_serving(160, 2050, sig(-83.0));
 
         let identity = t.snapshot().serving.unwrap().identity.unwrap();
-        assert_eq!(identity.mcc, Some(310));
+        assert_eq!(identity.mcc.as_deref(), Some("310"));
         assert_eq!(identity.cell_id, Some(0x1234567));
     }
 
@@ -399,8 +407,8 @@ mod tests {
         let mut t = CellTracker::new();
         t.update_serving(160, 2050, sig(-85.0));
         t.update_identity(CellIdentity {
-            mcc: Some(310),
-            mnc: Some(260),
+            mcc: Some("310".into()),
+            mnc: Some("260".into()),
             cell_id: Some(1),
             tac: Some(42),
         });
