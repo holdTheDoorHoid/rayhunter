@@ -99,6 +99,26 @@ pub mod serving_cell {
         pub fn get_meas_rsrq(&self) -> f32 {
             decode_rsrq(self.meas_rsrq)
         }
+
+        /// Averaged RSRP, which the modem smooths over several measurements.
+        /// Steadier than the instantaneous value and better for spotting a
+        /// trend than a single sample.
+        pub fn get_avg_rsrp(&self) -> f32 {
+            decode_rsrp(self.avg_rsrp)
+        }
+
+        /// Receive level used for cell selection, in the units 3GPP defines
+        /// for it.
+        pub fn get_rxlev(&self) -> u32 {
+            self.rxlev
+        }
+
+        /// The threshold below which the modem starts hunting for a better
+        /// cell. Worth watching next to the current level: a cell close to its
+        /// own search threshold is one the device is about to leave.
+        pub fn get_s_search(&self) -> u32 {
+            self.s_search
+        }
     }
 }
 
@@ -131,6 +151,14 @@ pub mod neighbor_cells {
     }
 
     impl MeasurementsHeader {
+        /// Minimum receive level the network requires on this frequency.
+        pub fn get_q_rxlevmin(&self) -> u8 {
+            match self {
+                MeasurementsHeader::V4 { q_rxlevmin, .. } => *q_rxlevmin,
+                MeasurementsHeader::V5 { q_rxlevmin, .. } => *q_rxlevmin,
+            }
+        }
+
         fn get_n_cells(&self) -> usize {
             match self {
                 MeasurementsHeader::V4 { n_cells, .. } => *n_cells as usize,
@@ -190,6 +218,23 @@ pub mod neighbor_cells {
 
         pub fn get_meas_rsrq(&self) -> f32 {
             decode_rsrq(self.meas_rsrq)
+        }
+
+        /// Averaged RSRP for this neighbour.
+        pub fn get_avg_rsrp(&self) -> f32 {
+            decode_rsrp(self.avg_rsrp)
+        }
+
+        /// Averaged RSRQ for this neighbour.
+        pub fn get_avg_rsrq(&self) -> f32 {
+            decode_rsrq(self.avg_rsrq)
+        }
+
+        /// Cell selection receive level, S-RxLev. How much margin this
+        /// neighbour has over the minimum the network will accept: the higher
+        /// it is, the more viable a reselection target the cell is.
+        pub fn get_s_rxlev(&self) -> u8 {
+            self.s_rxlev
         }
     }
 }

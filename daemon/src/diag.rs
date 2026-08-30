@@ -503,7 +503,7 @@ impl DiagTask {
 async fn update_cell_info(cell_tracker: &Arc<RwLock<CellTracker>>, container: &MessagesContainer) {
     use rayhunter::diag::diaglog::LogBody;
 
-    let mut serving: Option<(u16, u32, SignalMeasurements)> = None;
+    let mut serving: Option<(u16, u32, SignalMeasurements, Option<u32>)> = None;
     let mut neighbors: Option<Vec<NeighborCell>> = None;
     let mut timing_advance: Option<u16> = None;
     let mut rrc_messages: Vec<Message> = Vec::new();
@@ -529,7 +529,11 @@ async fn update_cell_info(cell_tracker: &Arc<RwLock<CellTracker>>, container: &M
                         rsrp_dbm: data.get_meas_rsrp(),
                         rsrq_db: data.get_meas_rsrq(),
                         rssi_dbm: data.get_meas_rssi(),
+                        avg_rsrp_dbm: Some(data.get_avg_rsrp()),
+                        // The serving cell report carries no averaged quality.
+                        avg_rsrq_db: None,
                     },
+                    Some(data.get_s_search()),
                 ));
             }
             LogBody::LteMl1NeighborCellsMeasurements { data } => {
@@ -544,7 +548,10 @@ async fn update_cell_info(cell_tracker: &Arc<RwLock<CellTracker>>, container: &M
                                 rsrp_dbm: cell.get_meas_rsrp(),
                                 rsrq_db: cell.get_meas_rsrq(),
                                 rssi_dbm: cell.get_meas_rssi(),
+                                avg_rsrp_dbm: Some(cell.get_avg_rsrp()),
+                                avg_rsrq_db: Some(cell.get_avg_rsrq()),
                             },
+                            s_rxlev: Some(cell.get_s_rxlev()),
                         })
                         .collect(),
                 );
@@ -587,8 +594,8 @@ async fn update_cell_info(cell_tracker: &Arc<RwLock<CellTracker>>, container: &M
     }
 
     let mut tracker = cell_tracker.write().await;
-    if let Some((pci, earfcn, signal)) = serving {
-        tracker.update_serving(pci, earfcn, signal);
+    if let Some((pci, earfcn, signal, search_threshold)) = serving {
+        tracker.update_serving(pci, earfcn, signal, search_threshold);
     }
     if let Some(neighbors) = neighbors {
         tracker.update_neighbors(neighbors);

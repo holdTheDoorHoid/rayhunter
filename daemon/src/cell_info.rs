@@ -61,12 +61,21 @@ pub struct SignalMeasurements {
     pub rsrq_db: f32,
     /// Total received power including noise and interference, in dBm.
     pub rssi_dbm: f32,
+    /// RSRP averaged by the modem over several measurements. Steadier than the
+    /// instantaneous figure, and the better one for judging a trend.
+    pub avg_rsrp_dbm: Option<f32>,
+    /// RSRQ averaged the same way. Only reported for neighbours.
+    pub avg_rsrq_db: Option<f32>,
 }
 
 /// The cell currently serving this device.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
 pub struct ServingCell {
+    /// Threshold below which the modem starts looking for a better cell. A
+    /// serving cell sitting near its own search threshold is one the device is
+    /// about to leave.
+    pub search_threshold: Option<u32>,
     /// Physical cell identity. Local to a frequency, not globally unique.
     pub pci: u16,
     /// The frequency channel number this cell is on.
@@ -96,6 +105,10 @@ pub struct NeighborCell {
     pub pci: u16,
     pub earfcn: u32,
     pub signal: SignalMeasurements,
+    /// Cell selection receive level: how much margin this neighbour has over
+    /// the minimum the network accepts. Higher means a more viable target if
+    /// the device reselects.
+    pub s_rxlev: Option<u8>,
 }
 
 /// One entry in the record of cells seen during this run.
@@ -203,7 +216,13 @@ impl CellTracker {
     }
 
     /// Record a serving cell measurement.
-    pub fn update_serving(&mut self, pci: u16, earfcn: u32, signal: SignalMeasurements) {
+    pub fn update_serving(
+        &mut self,
+        pci: u16,
+        earfcn: u32,
+        signal: SignalMeasurements,
+        search_threshold: Option<u32>,
+    ) {
         let now = Local::now();
 
         // Carry the identity across measurements of the same cell, since it
@@ -221,6 +240,7 @@ impl CellTracker {
         };
 
         self.serving = Some(ServingCell {
+            search_threshold,
             pci,
             earfcn,
             band: band_for_earfcn(earfcn),
@@ -375,11 +395,23 @@ pub fn identity_from_information_element(ie: &InformationElement) -> Option<Cell
 mod tests {
     use super::*;
 
+    /// Shorthand for the tests, which do not care about the search threshold.
+    trait TestTracker {
+        fn update_serving_t(&mut self, pci: u16, earfcn: u32, signal: SignalMeasurements);
+    }
+    impl TestTracker for CellTracker {
+        fn update_serving_t(&mut self, pci: u16, earfcn: u32, signal: SignalMeasurements) {
+            self.update_serving(pci, earfcn, signal, None);
+        }
+    }
+
     fn sig(rsrp: f32) -> SignalMeasurements {
         SignalMeasurements {
             rsrp_dbm: rsrp,
             rsrq_db: -10.0,
             rssi_dbm: -60.0,
+            avg_rsrp_dbm: None,
+            avg_rsrq_db: None,
         }
     }
 
@@ -394,7 +426,7 @@ mod tests {
     #[test]
     fn tracks_the_serving_cell() {
         let mut t = CellTracker::new();
-        t.update_serving(160, 2050, sig(-85.0));
+        t.update_serving_t(160, 2050, sig(-85.0));
         let snap = t.snapshot();
         let serving = snap.serving.unwrap();
         assert_eq!(serving.pci, 160);
@@ -408,14 +440,14 @@ mod tests {
     #[test]
     fn identity_survives_later_measurements_of_the_same_cell() {
         let mut t = CellTracker::new();
-        t.update_serving(160, 2050, sig(-85.0));
+        t.update_serving_t(160, 2050, sig(-85.0));
         t.update_identity(CellIdentity {
             mcc: Some("310".into()),
             mnc: Some("260".into()),
             cell_id: Some(0x1234567),
             tac: Some(42),
         });
-        t.update_serving(160, 2050, sig(-83.0));
+        t.update_serving_t(160, 2050, sig(-83.0));
 
         let identity = t.snapshot().serving.unwrap().identity.unwrap();
         assert_eq!(identity.mcc.as_deref(), Some("310"));
@@ -427,23 +459,23 @@ mod tests {
     #[test]
     fn identity_is_dropped_when_the_cell_changes() {
         let mut t = CellTracker::new();
-        t.update_serving(160, 2050, sig(-85.0));
+        t.update_serving_t(160, 2050, sig(-85.0));
         t.update_identity(CellIdentity {
             mcc: Some("310".into()),
             mnc: Some("260".into()),
             cell_id: Some(1),
             tac: Some(42),
         });
-        t.update_serving(200, 2050, sig(-90.0));
+        t.update_serving_t(200, 2050, sig(-90.0));
         assert!(t.snapshot().serving.unwrap().identity.is_none());
     }
 
     #[test]
     fn history_accumulates_distinct_cells_and_keeps_the_best_signal() {
         let mut t = CellTracker::new();
-        t.update_serving(160, 2050, sig(-95.0));
-        t.update_serving(160, 2050, sig(-80.0));
-        t.update_serving(200, 2050, sig(-100.0));
+        t.update_serving_t(160, 2050, sig(-95.0));
+        t.update_serving_t(160, 2050, sig(-80.0));
+        t.update_serving_t(200, 2050, sig(-100.0));
 
         let history = t.snapshot().history;
         assert_eq!(history.len(), 2);
@@ -455,7 +487,7 @@ mod tests {
     fn history_is_bounded() {
         let mut t = CellTracker::new();
         for pci in 0..(HISTORY_LIMIT + 50) {
-            t.update_serving(pci as u16, 2050, sig(-90.0));
+            t.update_serving_t(pci as u16, 2050, sig(-90.0));
         }
         assert_eq!(t.snapshot().history.len(), HISTORY_LIMIT);
     }
@@ -469,11 +501,13 @@ mod tests {
             pci: 1,
             earfcn: 2050,
             signal: sig(-90.0),
+            s_rxlev: None,
         }]);
         t.update_neighbors(vec![NeighborCell {
             pci: 2,
             earfcn: 2050,
             signal: sig(-95.0),
+            s_rxlev: None,
         }]);
         let n = t.snapshot().neighbors;
         assert_eq!(n.len(), 1);
@@ -488,16 +522,19 @@ mod tests {
                 pci: 1,
                 earfcn: 2050,
                 signal: sig(-110.0),
+                s_rxlev: None,
             },
             NeighborCell {
                 pci: 2,
                 earfcn: 2050,
                 signal: sig(-75.0),
+                s_rxlev: None,
             },
             NeighborCell {
                 pci: 3,
                 earfcn: 2050,
                 signal: sig(-95.0),
+                s_rxlev: None,
             },
         ]);
         let pcis: Vec<_> = t.snapshot().neighbors.iter().map(|n| n.pci).collect();

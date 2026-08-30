@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { rsrp_quality, operator_name, format_plmn, split_cell_id } from './cellInfo';
+import {
+    rsrp_quality,
+    operator_name,
+    format_plmn,
+    split_cell_id,
+    reading_age,
+    is_stale,
+} from './cellInfo';
 
 describe('rsrp_quality', () => {
     it('describes signal strength in the usual LTE bands', () => {
@@ -60,5 +67,32 @@ describe('split_cell_id', () => {
         const b = split_cell_id(25316667);
         expect(a.enodeb_id).toBe(b.enodeb_id);
         expect(a.sector_id).not.toBe(b.sector_id);
+    });
+});
+
+describe('reading age', () => {
+    const base = new Date('2026-08-30T12:00:00Z').getTime();
+    const at = (secondsAgo: number) => new Date(base - secondsAgo * 1000).toISOString();
+
+    it('describes how old a reading is in words', () => {
+        expect(reading_age(at(0), base)).toBe('just now');
+        expect(reading_age(at(30), base)).toBe('30 seconds ago');
+        expect(reading_age(at(60), base)).toBe('1 minute ago');
+        expect(reading_age(at(600), base)).toBe('10 minutes ago');
+        expect(reading_age(at(7200), base)).toBe('2 hours ago');
+    });
+
+    /**
+     * Measurement reports stop while a modem sits idle, so a reading can be
+     * genuinely old. Saying so is what stops the panel looking stalled.
+     */
+    it('calls a reading stale only once it really is', () => {
+        expect(is_stale(at(10), base)).toBe(false);
+        expect(is_stale(at(119), base)).toBe(false);
+        expect(is_stale(at(300), base)).toBe(true);
+    });
+
+    it('never reports a negative age from clock skew', () => {
+        expect(reading_age(at(-30), base)).toBe('just now');
     });
 });

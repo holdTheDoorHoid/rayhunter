@@ -24,9 +24,15 @@ export interface SignalMeasurements {
     rsrp_dbm: number;
     rsrq_db: number;
     rssi_dbm: number;
+    /** RSRP the modem averaged over several samples. Steadier than the raw one. */
+    avg_rsrp_dbm: number | null;
+    /** RSRQ averaged the same way. Reported for neighbours only. */
+    avg_rsrq_db: number | null;
 }
 
 export interface ServingCell {
+    /** Level below which the modem starts hunting for a better cell. */
+    search_threshold: number | null;
     pci: number;
     earfcn: number;
     band: number | null;
@@ -46,6 +52,8 @@ export interface NeighborCell {
     pci: number;
     earfcn: number;
     signal: SignalMeasurements;
+    /** Margin this neighbour has over the minimum level the network accepts. */
+    s_rxlev: number | null;
 }
 
 export interface CellObservation {
@@ -137,4 +145,29 @@ export function format_plmn(mcc: string | null, mnc: string | null): string | nu
  */
 export function split_cell_id(cell_id: number): { enodeb_id: number; sector_id: number } {
     return { enodeb_id: Math.floor(cell_id / 256), sector_id: cell_id % 256 };
+}
+
+/**
+ * How long ago a reading was taken, in words.
+ *
+ * Measurement reports only arrive while the modem is doing something, so a
+ * reading can legitimately sit unchanged for a long time. Showing a bare
+ * timestamp makes that look like a stalled page; showing its age makes it
+ * clear the figure is real but old.
+ */
+export function reading_age(iso: string, now: number = Date.now()): string {
+    const seconds = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
+    if (seconds < 10) return 'just now';
+    if (seconds < 60) return `${seconds} seconds ago`;
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+    const hours = Math.round(minutes / 60);
+    return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+}
+
+/** Readings older than this are called out as stale rather than current. */
+export const STALE_AFTER_SECONDS = 120;
+
+export function is_stale(iso: string, now: number = Date.now()): boolean {
+    return (now - new Date(iso).getTime()) / 1000 > STALE_AFTER_SECONDS;
 }

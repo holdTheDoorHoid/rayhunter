@@ -5,6 +5,8 @@
         operator_name,
         format_plmn,
         split_cell_id,
+        reading_age,
+        is_stale,
         type CellInfo,
     } from '../cellInfo';
     import {
@@ -43,6 +45,14 @@
     let split = $derived(identity?.cell_id != null ? split_cell_id(identity.cell_id) : null);
     let carrier = $derived(operator_name(identity?.mcc ?? null, identity?.mnc ?? null));
     let plmn = $derived(format_plmn(identity?.mcc ?? null, identity?.mnc ?? null));
+    // Ticks so the age text counts up rather than freezing at render time.
+    let now = $state(Date.now());
+    $effect(() => {
+        const t = setInterval(() => (now = Date.now()), 5000);
+        return () => clearInterval(t);
+    });
+
+    let stale = $derived(serving ? is_stale(serving.last_seen, now) : false);
     let quality = $derived(serving ? rsrp_quality(serving.signal.rsrp_dbm) : null);
     let bandInfo = $derived(serving ? band_for_earfcn(serving.earfcn) : null);
     let dl = $derived(serving ? downlink_mhz(serving.earfcn) : null);
@@ -83,6 +93,17 @@
         rows.push({ label: 'RSRP', value: `${serving.signal.rsrp_dbm.toFixed(1)} dBm` });
         rows.push({ label: 'RSRQ', value: `${serving.signal.rsrq_db.toFixed(1)} dB` });
         rows.push({ label: 'RSSI', value: `${serving.signal.rssi_dbm.toFixed(1)} dBm` });
+        rows.push({
+            label: 'RSRP (averaged)',
+            value:
+                serving.signal.avg_rsrp_dbm !== null && serving.signal.avg_rsrp_dbm !== undefined
+                    ? `${serving.signal.avg_rsrp_dbm.toFixed(1)} dBm`
+                    : unknown,
+        });
+        rows.push({
+            label: 'Reselection search threshold',
+            value: serving.search_threshold?.toString() ?? unknown,
+        });
         rows.push({ label: 'Signal bars', value: `${bars} of 4` });
         rows.push({ label: 'ASU', value: asu?.toString() ?? unknown });
         rows.push({
@@ -101,8 +122,12 @@
     <div class="flex items-baseline justify-between gap-2">
         <h2 class="text-xl">Cell Site</h2>
         {#if serving}
-            <span class="text-xs text-gray-500 dark:text-gray-400">
-                updated {clock(serving.last_seen)}
+            <span
+                class="text-xs {stale
+                    ? 'text-amber-600 dark:text-amber-400'
+                    : 'text-gray-500 dark:text-gray-400'}"
+            >
+                measured {reading_age(serving.last_seen, now)}
             </span>
         {/if}
     </div>
@@ -153,6 +178,14 @@
                 {/if}
             </div>
         </div>
+
+        {#if stale}
+            <p class="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                This reading is not current. The modem only reports measurements while it is
+                actively working, so an attached device sitting idle stops sending them. The values
+                below are the last ones seen, not live.
+            </p>
+        {/if}
 
         <Explainer
             summary="You are connected to this tower. These are the readings your modem reports for it."
@@ -253,7 +286,8 @@
                                 <th class="pr-4 pb-1 font-normal">Signal ref.</th>
                                 <th class="pr-4 pb-1 font-normal">Channel</th>
                                 <th class="pr-4 pb-1 font-normal">RSRP</th>
-                                <th class="pb-1 font-normal">RSRQ</th>
+                                <th class="pr-4 pb-1 font-normal">RSRQ</th>
+                                <th class="pb-1 font-normal">Margin</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -266,7 +300,8 @@
                                             rsrp_quality(n.signal.rsrp_dbm)
                                         ]}">{dbm(n.signal.rsrp_dbm)}</td
                                     >
-                                    <td class="py-1">{db(n.signal.rsrq_db)}</td>
+                                    <td class="py-1 pr-4">{db(n.signal.rsrq_db)}</td>
+                                    <td class="py-1">{n.s_rxlev ?? '—'}</td>
                                 </tr>
                             {/each}
                         </tbody>
