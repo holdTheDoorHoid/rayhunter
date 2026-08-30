@@ -19,6 +19,10 @@ const REFRESH_RATE: u64 = 1000; //how often in milliseconds to refresh the displ
 // is picked up promptly rather than waiting out a full refresh interval.
 const FRAME_YIELD: u64 = 50;
 
+// Height of the status line when the user hasn't chosen one. Deliberately thin:
+// Rayhunter draws over the device's own UI, so the default stays out of the way.
+const DEFAULT_STATUS_BAR_HEIGHT: u32 = 2;
+
 #[derive(Copy, Clone)]
 pub struct Dimensions {
     pub height: u32,
@@ -270,6 +274,7 @@ pub fn update_ui(
 
     let colorblind_mode = config.colorblind_mode;
     let display_colors = config.display_colors.clone();
+    let configured_bar_height = config.status_bar_height;
     let display_gifs = config.display_gifs.clone();
     let gif_store_path = config.gif_store_path.clone();
 
@@ -339,7 +344,11 @@ pub fn update_ui(
                 }
             }
 
-            let mut status_bar_height = 2;
+            // A height copied from a device with a taller screen would
+            // otherwise draw past the end of the framebuffer.
+            let mut status_bar_height = configured_bar_height
+                .unwrap_or(DEFAULT_STATUS_BAR_HEIGHT)
+                .clamp(1, fb.dimensions().height);
             match display_level {
                 UiLevel::Demo => {
                     fb.draw_gif_interruptible(img.unwrap(), &ui_update_rx).await;

@@ -138,6 +138,11 @@ pub struct Config {
     pub colorblind_mode: bool,
     /// Per-state color overrides for the device display
     pub display_colors: DisplayColors,
+    /// Height in pixels of the colored status line. `None` keeps the built-in
+    /// 2px. Clamped to the display's height at draw time, so a value copied
+    /// between devices with different screens can't produce a broken display.
+    /// Ignored by `UiLevel::HighVisibility`, which always fills the screen.
+    pub status_bar_height: Option<u32>,
     /// Per-state user-uploaded GIFs, used when ui_level is CustomGif
     pub display_gifs: DisplayGifs,
     /// Directory holding the GIFs named by `display_gifs`
@@ -221,6 +226,7 @@ impl Default for Config {
             ui_level: UiLevel::Subtle,
             colorblind_mode: false,
             display_colors: DisplayColors::default(),
+            status_bar_height: None,
             display_gifs: DisplayGifs::default(),
             gif_store_path: "/data/rayhunter/gifs".to_string(),
             key_input_mode: KeyInputMode::Disabled,

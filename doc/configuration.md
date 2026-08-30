@@ -11,6 +11,7 @@ Through web UI you can set:
   - *Demo mode (orca gif)*, which shows image of orcas *and* colored line.
   - *EFF logo*, which shows EFF logo *and* colored line.
   - *High visibility (full screen color)*: fills the entire screen with the status color (green for recording, red for warnings, white for paused).
+  - *Custom GIF*: plays an animation you upload for each state; see *Device Display GIFs* below.
 - **Device Input Mode**, which defines behavior of built-in power button of the device. *Device Input Mode* could be:
   - *Disable button control*: built-in power button of the device is not used by Rayhunter.
   - *Double-tap power button to start new recording*: double clicking on a built-in power button of the device stops and immediately restarts the recording. This could be useful if Rayhunter's heuristics is triggered and you get the red line, and you want to "reset" the past warnings. Normally you can do that through web UI, but sometimes it is easier to double tap on power button.
@@ -25,7 +26,16 @@ Through web UI you can set:
 
   Omit a key to keep the built-in color for that state. An unparseable value is ignored (a warning is written to the log) and the built-in color is used instead.
 
-  In the web UI this section only appears for the *Subtle mode* and *High visibility* UI levels, since those are the levels that draw a colored status line.
+  In the web UI these live in a **Status Line** section shown for every UI level except *Invisible*, since a colored status line is drawn in all of them — as a thin line over the image in *Demo mode* and *EFF logo*, filling the screen in *High visibility*, and for any state without a GIF in *Custom GIF*. The *Colorblind Mode* checkbox sits in this section too, directly above the colors it changes.
+
+  The section warns (without blocking) when a chosen color is so dark it would be near-invisible on the device's black screen, when two warning severities are too similar to tell apart at a glance, and when colorblind mode is enabled but a custom *Recording* color is overriding it.
+- **Line height** sets how tall the status line is, from 1 pixel up to the full height of the display, and appears when the UI level is *Subtle mode*. It is stored as `status_bar_height`:
+
+  ```toml
+  status_bar_height = 48
+  ```
+
+  Omit it for the built-in 2 pixels. The value is clamped to the display's height when drawn, so a config copied between devices with different screens cannot produce a broken display. *High visibility* ignores it and always fills the screen — setting the slider to its maximum in *Subtle mode* produces the same result.
 - **Device Display GIFs** appear when *Device UI Level* is set to *Custom GIF*, and let you upload your own animation for each of the five display states. GIFs are uploaded with `POST /api/display-gif/{state}` (state being one of `paused`, `recording`, `warning_low`, `warning_medium`, `warning_high`) and stored in `gif_store_path` (default `/data/rayhunter/gifs`) as `<state>.gif`; `POST /api/display-gif/{state}/delete` removes one. Uploading stores the file immediately but does not restart Rayhunter — the change applies when the configuration is next saved, so several GIFs can be uploaded in one go. The `[display_gifs]` table records which states have a GIF:
 
   ```toml

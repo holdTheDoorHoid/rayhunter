@@ -203,7 +203,9 @@
                     </p>
                 </div>
 
-                {#if config.ui_level === 1 || config.ui_level === 4}
+                <!-- The status line is drawn in every mode but Invisible, so
+                     hiding these anywhere else would hide a live setting. -->
+                {#if config.ui_level !== 0}
                     <DeviceColorSettings bind:config />
                 {/if}
 
@@ -226,28 +228,6 @@
                         <option value={0}>Disable button control</option>
                         <option value={1}>Double-tap power button to start new recording</option>
                     </select>
-                </div>
-
-                <div class="space-y-3">
-                    <div class="flex items-center">
-                        <input
-                            id="colorblind_mode"
-                            type="checkbox"
-                            bind:checked={config.colorblind_mode}
-                            aria-describedby="colorblind_mode_description"
-                            class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
-                        />
-                        <label for="colorblind_mode" class="ml-2 block text-sm text-gray-700">
-                            Colorblind Mode
-                        </label>
-                    </div>
-                    <p id="colorblind_mode_description" class="text-xs text-gray-500">
-                        Changes the status line on the device's own screen from green to blue for
-                        recording and informational events. Warning colors (yellow, orange, red) are
-                        unchanged &mdash; but warning severity is also shown by line pattern (dotted
-                        for low, dashed for medium, solid for high), which stays readable regardless
-                        of color. This does not affect the colors on this page.
-                    </p>
                 </div>
 
                 <div class="border-t border-gray-200 pt-4 mt-6 space-y-3">

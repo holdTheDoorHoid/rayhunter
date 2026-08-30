@@ -120,6 +120,7 @@ export interface Config {
     ui_level: number;
     colorblind_mode: boolean;
     display_colors: DisplayColors;
+    status_bar_height: number | null;
     display_gifs: DisplayGifs;
     key_input_mode: number;
     ntfy_url: string | null;
