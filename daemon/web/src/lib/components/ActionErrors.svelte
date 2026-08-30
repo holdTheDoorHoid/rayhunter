@@ -20,13 +20,15 @@
 
 {#if action_errors.length > 0}
     <div
-        class="bg-red-100 border-red-100 drop-shadow-sm p-4 flex flex-col gap-2
+        class="bg-red-100 dark:bg-red-950 border-red-100 dark:border-red-900 drop-shadow-sm p-4 flex flex-col gap-2
         border rounded-md flex-1 justify-between fixed z-10 right-3 bottom-3 ml-3"
     >
         <div class="flex flex-row justify-between">
-            <span class="text-xl font-bold mb-2 mr-5 flex flex-row items-center gap-1 text-red-600">
+            <span
+                class="text-xl font-bold mb-2 mr-5 flex flex-row items-center gap-1 text-red-600 dark:text-red-400"
+            >
                 <svg
-                    class="w-6 h-6 text-red-600"
+                    class="w-6 h-6 text-red-600 dark:text-red-400"
                     aria-hidden="true"
                     xmlns="http://www.w3.org/2000/svg"
                     width="24"

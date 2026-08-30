@@ -50,16 +50,19 @@
         type="checkbox"
         checked={expanded}
         onchange={handle_checkbox_change}
-        class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
+        class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
     />
-    <label for={checkboxId} class="ml-2 block text-sm text-gray-700">
+    <label for={checkboxId} class="ml-2 block text-sm text-gray-700 dark:text-gray-200">
         {label}
     </label>
 </div>
 
 {#if expanded}
     <div>
-        <label for={inputId} class="block text-sm font-medium text-gray-700 mb-1">
+        <label
+            for={inputId}
+            class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+        >
             {inputLabel}
         </label>
         <input
@@ -69,10 +72,10 @@
             bind:value
             onblur={handle_input_blur}
             placeholder={inputPlaceholder}
-            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
         />
         {#if inputHelp}
-            <p class="text-xs text-gray-500 mt-1">
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 {inputHelp}
             </p>
         {/if}

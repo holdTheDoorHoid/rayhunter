@@ -39,30 +39,36 @@
 </script>
 
 <div
-    class="flex-1 drop-shadow-sm p-4 flex flex-col gap-2 border rounded-md bg-gray-100 border-gray-100"
+    class="flex-1 drop-shadow-sm p-4 flex flex-col gap-2 border rounded-md bg-gray-100 dark:bg-gray-800 border-gray-100 dark:border-gray-800"
 >
     <p class="text-xl mb-2">System Information</p>
     <table class="text-sm w-full">
         <tbody>
-            <tr class="border-b border-gray-200">
-                <td class="py-1 pr-4 text-gray-500 font-medium">Rayhunter Version</td>
+            <tr class="border-b border-gray-200 dark:border-gray-700">
+                <td class="py-1 pr-4 text-gray-500 dark:text-gray-400 font-medium"
+                    >Rayhunter Version</td
+                >
                 <td class="py-1">{stats.runtime_metadata.rayhunter_version}</td>
             </tr>
-            <tr class="border-b border-gray-200">
-                <td class="py-1 pr-4 text-gray-500 font-medium">Storage</td>
+            <tr class="border-b border-gray-200 dark:border-gray-700">
+                <td class="py-1 pr-4 text-gray-500 dark:text-gray-400 font-medium">Storage</td>
                 <td class="py-1">
                     {stats.disk_stats.used_percent} used ({stats.disk_stats.used_size} used / {stats
                         .disk_stats.available_size} available)
                 </td>
             </tr>
-            <tr class="border-b border-gray-200">
-                <td class="py-1 pr-4 text-gray-500 font-medium">Memory (RAM)</td>
+            <tr class="border-b border-gray-200 dark:border-gray-700">
+                <td class="py-1 pr-4 text-gray-500 dark:text-gray-400 font-medium">Memory (RAM)</td>
                 <td class="py-1">
                     Free: {stats.memory_stats.free}, Used: {stats.memory_stats.used}
                 </td>
             </tr>
-            <tr class={gps_mode !== GpsMode.Disabled ? 'border-b border-gray-200' : ''}>
-                <td class="py-1 pr-4 text-gray-500 font-medium">Battery</td>
+            <tr
+                class={gps_mode !== GpsMode.Disabled
+                    ? 'border-b border-gray-200 dark:border-gray-700'
+                    : ''}
+            >
+                <td class="py-1 pr-4 text-gray-500 dark:text-gray-400 font-medium">Battery</td>
                 <td class="py-1">
                     <svg
                         width="80"
@@ -115,23 +121,29 @@
                 </td>
             </tr>
             {#if gps_mode !== GpsMode.Disabled}
-                <tr class="border-b border-gray-200">
-                    <td class="py-1 pr-4 text-gray-500 font-medium">GPS Mode</td>
+                <tr class="border-b border-gray-200 dark:border-gray-700">
+                    <td class="py-1 pr-4 text-gray-500 dark:text-gray-400 font-medium">GPS Mode</td>
                     <td class="py-1">{gps_mode_label(gps_mode)}</td>
                 </tr>
                 {#if gps_data}
-                    <tr class="border-b border-gray-200">
-                        <td class="py-1 pr-4 text-gray-500 font-medium">Latitude</td>
+                    <tr class="border-b border-gray-200 dark:border-gray-700">
+                        <td class="py-1 pr-4 text-gray-500 dark:text-gray-400 font-medium"
+                            >Latitude</td
+                        >
                         <td class="py-1 font-mono">{gps_data.latitude.toFixed(6)}</td>
                     </tr>
                     <tr>
-                        <td class="py-1 pr-4 text-gray-500 font-medium">Longitude</td>
+                        <td class="py-1 pr-4 text-gray-500 dark:text-gray-400 font-medium"
+                            >Longitude</td
+                        >
                         <td class="py-1 font-mono">{gps_data.longitude.toFixed(6)}</td>
                     </tr>
                 {:else}
                     <tr>
-                        <td class="py-1 pr-4 text-gray-500 font-medium">GPS Data</td>
-                        <td class="py-1 text-gray-400">Awaiting GPS data...</td>
+                        <td class="py-1 pr-4 text-gray-500 dark:text-gray-400 font-medium"
+                            >GPS Data</td
+                        >
+                        <td class="py-1 text-gray-400 dark:text-gray-500">Awaiting GPS data...</td>
                     </tr>
                 {/if}
             {/if}

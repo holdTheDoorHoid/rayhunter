@@ -25,7 +25,7 @@
     } = $props();
 </script>
 
-<p class="text-xs text-gray-500">{summary}</p>
+<p class="text-xs text-gray-500 dark:text-gray-400">{summary}</p>
 <details class="group mt-1">
     <summary
         class="inline-flex cursor-pointer list-none items-center gap-1 text-xs text-rayhunter-blue underline marker:hidden focus-visible:outline-2 focus-visible:outline-offset-2"
@@ -42,7 +42,9 @@
         </svg>
         {label}
     </summary>
-    <div class="mt-1 space-y-2 border-l-2 border-gray-200 pl-3 text-xs text-gray-600">
+    <div
+        class="mt-1 space-y-2 border-l-2 border-gray-200 dark:border-gray-700 pl-3 text-xs text-gray-600 dark:text-gray-300"
+    >
         {@render children()}
     </div>
 </details>

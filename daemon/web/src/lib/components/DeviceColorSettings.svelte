@@ -129,10 +129,10 @@
     );
 </script>
 
-<div class="border-t border-gray-200 pt-4 mt-6 space-y-4">
-    <h3 class="text-lg font-semibold text-gray-800">Status Line</h3>
+<div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-4">
+    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100">Status Line</h3>
 
-    <p class="text-xs text-gray-500">
+    <p class="text-xs text-gray-500 dark:text-gray-400">
         The colored line Rayhunter draws on the device's own screen to show what it is doing. It
         appears in every mode except Invisible.
         {#if config.ui_level === CUSTOM_GIF}
@@ -144,11 +144,14 @@
     <!-- Height first: it governs the shape of everything previewed below. -->
     {#if config.ui_level === SUBTLE || height_locked}
         <div>
-            <label for="status_bar_height" class="block text-sm font-medium text-gray-700 mb-1">
+            <label
+                for="status_bar_height"
+                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+            >
                 Line height — {bar_height}
                 {bar_height === 1 ? 'pixel' : 'pixels'}
-                {#if bar_height >= DEVICE_SCREEN_PX}<span class="font-normal text-gray-500"
-                        >(full screen)</span
+                {#if bar_height >= DEVICE_SCREEN_PX}<span
+                        class="font-normal text-gray-500 dark:text-gray-400">(full screen)</span
                     >{/if}
             </label>
             <input
@@ -162,7 +165,10 @@
                 aria-describedby="status_bar_height_description"
                 class="w-full accent-rayhunter-blue disabled:opacity-50"
             />
-            <p id="status_bar_height_description" class="text-xs text-gray-500 mt-1">
+            <p
+                id="status_bar_height_description"
+                class="text-xs text-gray-500 dark:text-gray-400 mt-1"
+            >
                 {#if height_locked}
                     High visibility always fills the screen. Switch to Subtle mode to choose a
                     height.
@@ -172,7 +178,7 @@
                 {/if}
             </p>
             {#if !height_locked && bar_height <= 2}
-                <p class="text-xs text-amber-600 mt-1">
+                <p class="text-xs text-amber-600 dark:text-amber-400 mt-1">
                     A line this thin is easy to miss at a glance. It is the long-standing default,
                     but consider a taller line if you want to notice warnings across a room.
                 </p>
@@ -188,19 +194,22 @@
                 type="checkbox"
                 bind:checked={config.colorblind_mode}
                 aria-describedby="colorblind_mode_description"
-                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
+                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
             />
-            <label for="colorblind_mode" class="ml-2 block text-sm text-gray-700">
+            <label
+                for="colorblind_mode"
+                class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+            >
                 Colorblind mode — use blue instead of green
             </label>
         </div>
-        <p id="colorblind_mode_description" class="text-xs text-gray-500 mt-1">
+        <p id="colorblind_mode_description" class="text-xs text-gray-500 dark:text-gray-400 mt-1">
             Changes the built-in recording color from green to blue, which most forms of color
             blindness can tell apart from the warning colors. Warning colors are unchanged, and
             severity is also shown by line pattern (dotted, dashed, solid) regardless of color.
         </p>
         {#if colorblind_overridden}
-            <p class="text-xs text-amber-600 mt-1">
+            <p class="text-xs text-amber-600 dark:text-amber-400 mt-1">
                 This is currently having no effect: you have set your own Recording color below, and
                 an explicit choice takes precedence. Reset Recording to use blue.
             </p>
@@ -219,16 +228,19 @@
                         value={effective_color(row.key)}
                         oninput={(e) => (config.display_colors[row.key] = e.currentTarget.value)}
                         aria-describedby="display_color_{row.key}_description"
-                        class="h-8 w-12 shrink-0 cursor-pointer rounded-sm border border-gray-300 bg-white p-0.5"
+                        class="h-8 w-12 shrink-0 cursor-pointer rounded-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 p-0.5"
                     />
                     <div class="min-w-0 flex-1">
                         <label
                             for="display_color_{row.key}"
-                            class="block text-sm font-medium text-gray-700"
+                            class="block text-sm font-medium text-gray-700 dark:text-gray-200"
                         >
                             {row.label}
                         </label>
-                        <p id="display_color_{row.key}_description" class="text-xs text-gray-500">
+                        <p
+                            id="display_color_{row.key}_description"
+                            class="text-xs text-gray-500 dark:text-gray-400"
+                        >
                             {row.description}{customized ? '' : ' — using built-in color'}
                         </p>
                     </div>
@@ -236,7 +248,7 @@
                     <!-- Scale model of the device screen: the bar covers the
                          same fraction of it that it will on the device. -->
                     <div
-                        class="hidden shrink-0 overflow-hidden rounded-sm border border-gray-300 bg-black sm:block"
+                        class="hidden shrink-0 overflow-hidden rounded-sm border border-gray-300 dark:border-gray-600 bg-black sm:block"
                         style:width="{PREVIEW_PX}px"
                         style:height="{PREVIEW_PX}px"
                         aria-hidden="true"
@@ -251,13 +263,13 @@
                         type="button"
                         onclick={() => reset_color(row.key)}
                         disabled={!customized}
-                        class="shrink-0 text-xs text-rayhunter-blue underline disabled:cursor-default disabled:text-gray-300 disabled:no-underline"
+                        class="shrink-0 text-xs text-rayhunter-blue underline disabled:cursor-default disabled:text-gray-300 dark:disabled:text-gray-600 disabled:no-underline"
                     >
                         Reset
                     </button>
                 </div>
                 {#if dim}
-                    <p class="text-xs text-amber-600 mt-1">
+                    <p class="text-xs text-amber-600 dark:text-amber-400 mt-1">
                         This color is very dark. The device screen is black, so it may be almost
                         invisible.
                     </p>
@@ -267,7 +279,7 @@
     </div>
 
     {#if clashing.length > 0}
-        <p class="text-xs text-amber-600">
+        <p class="text-xs text-amber-600 dark:text-amber-400">
             {#each clashing as [a, b], i (a + b)}{i > 0 ? ' ' : ''}<strong>{a}</strong> and
                 <strong>{b}</strong> are close enough in color to be hard to tell apart.{/each}
             You may not be able to judge how serious a warning is at a glance. Line patterns still differ,
@@ -276,7 +288,7 @@
     {/if}
 
     {#if dim_states.length > 0}
-        <p class="text-xs text-gray-500">
+        <p class="text-xs text-gray-500 dark:text-gray-400">
             Nothing is blocked — these are only warnings, and you can save anyway.
         </p>
     {/if}
@@ -285,7 +297,7 @@
         type="button"
         onclick={reset_all}
         disabled={!any_customized}
-        class="text-xs text-rayhunter-blue underline disabled:cursor-default disabled:text-gray-300 disabled:no-underline"
+        class="text-xs text-rayhunter-blue underline disabled:cursor-default disabled:text-gray-300 dark:disabled:text-gray-600 disabled:no-underline"
     >
         Reset all colors to defaults
     </button>

@@ -87,9 +87,12 @@
     <img src="/rayhunter_text.png" alt="" class="h-10 xl:h-12" />
     <div class="flex flex-row gap-4">
         <button onclick={() => (logview_shown = true)} class="flex flex-row gap-1 group">
-            <span class="hidden text-white group-hover:text-gray-400 lg:flex">Logs</span>
+            <span
+                class="hidden text-white group-hover:text-gray-400 dark:group-hover:text-gray-500 lg:flex"
+                >Logs</span
+            >
             <svg
-                class="w-6 h-6 text-white group-hover:text-gray-400"
+                class="w-6 h-6 text-white group-hover:text-gray-400 dark:group-hover:text-gray-500"
                 aria-hidden="true"
                 xmlns="http://www.w3.org/2000/svg"
                 width="24"
@@ -131,9 +134,12 @@
             </svg>
         </button>
         <button onclick={() => (config_shown = true)} class="flex flex-row gap-1 group">
-            <span class="hidden text-white group-hover:text-gray-400 lg:flex">Config</span>
+            <span
+                class="hidden text-white group-hover:text-gray-400 dark:group-hover:text-gray-500 lg:flex"
+                >Config</span
+            >
             <svg
-                class="w-6 h-6 text-white group-hover:text-gray-400"
+                class="w-6 h-6 text-white group-hover:text-gray-400 dark:group-hover:text-gray-500"
                 aria-hidden="true"
                 xmlns="http://www.w3.org/2000/svg"
                 width="24"
@@ -157,15 +163,18 @@
                 />
             </svg>
         </button>
-        <div class="w-px bg-white/30 self-stretch"></div>
+        <div class="w-px bg-white dark:bg-gray-900/30 self-stretch"></div>
         <a
             class="flex flex-row gap-1 group"
             href="https://github.com/EFForg/rayhunter/issues"
             target="_blank"
         >
-            <span class="hidden text-white group-hover:text-gray-400 lg:flex">Report Issue</span>
+            <span
+                class="hidden text-white group-hover:text-gray-400 dark:group-hover:text-gray-500 lg:flex"
+                >Report Issue</span
+            >
             <svg
-                class="w-6 h-6 text-white group-hover:text-gray-400"
+                class="w-6 h-6 text-white group-hover:text-gray-400 dark:group-hover:text-gray-500"
                 aria-hidden="true"
                 xmlns="http://www.w3.org/2000/svg"
                 width="24"
@@ -185,9 +194,12 @@
             href="https://efforg.github.io/rayhunter/"
             target="_blank"
         >
-            <span class="hidden text-white group-hover:text-gray-400 lg:flex">Docs</span>
+            <span
+                class="hidden text-white group-hover:text-gray-400 dark:group-hover:text-gray-500 lg:flex"
+                >Docs</span
+            >
             <svg
-                class="w-6 h-6 text-white group-hover:text-gray-400"
+                class="w-6 h-6 text-white group-hover:text-gray-400 dark:group-hover:text-gray-500"
                 aria-hidden="true"
                 xmlns="http://www.w3.org/2000/svg"
                 width="24"
@@ -209,9 +221,12 @@
             href="https://eff.org/donate-rayhunter"
             target="_blank"
         >
-            <span class="hidden text-white group-hover:text-gray-400 lg:flex">Donate</span>
+            <span
+                class="hidden text-white group-hover:text-gray-400 dark:group-hover:text-gray-500 lg:flex"
+                >Donate</span
+            >
             <svg
-                class="w-6 h-6 text-white group-hover:text-gray-400"
+                class="w-6 h-6 text-white group-hover:text-gray-400 dark:group-hover:text-gray-500"
                 aria-hidden="true"
                 xmlns="http://www.w3.org/2000/svg"
                 width="24"
@@ -229,11 +244,13 @@
 <div class="m-4 xl:mx-8 flex flex-col gap-4">
     {#if update_error !== undefined}
         <div
-            class="bg-red-100 border-red-100 drop-shadow-sm p-4 flex flex-col gap-2 border rounded-md flex-1 justify-between"
+            class="bg-red-100 dark:bg-red-950 border-red-100 dark:border-red-900 drop-shadow-sm p-4 flex flex-col gap-2 border rounded-md flex-1 justify-between"
         >
-            <span class="text-2xl font-bold mb-2 flex flex-row items-center gap-2 text-red-600">
+            <span
+                class="text-2xl font-bold mb-2 flex flex-row items-center gap-2 text-red-600 dark:text-red-400"
+            >
                 <svg
-                    class="w-8 h-8 text-red-600"
+                    class="w-8 h-8 text-red-600 dark:text-red-400"
                     aria-hidden="true"
                     xmlns="http://www.w3.org/2000/svg"
                     width="24"
@@ -275,13 +292,13 @@
                 />
             {:else}
                 <div
-                    class="bg-red-100 border-red-100 drop-shadow-sm p-4 flex flex-col gap-2 border rounded-md flex-1 justify-between"
+                    class="bg-red-100 dark:bg-red-950 border-red-100 dark:border-red-900 drop-shadow-sm p-4 flex flex-col gap-2 border rounded-md flex-1 justify-between"
                 >
                     <span
-                        class="text-2xl font-bold mb-2 flex flex-row items-center gap-2 text-red-600"
+                        class="text-2xl font-bold mb-2 flex flex-row items-center gap-2 text-red-600 dark:text-red-400"
                     >
                         <svg
-                            class="w-8 h-8 text-red-600"
+                            class="w-8 h-8 text-red-600 dark:text-red-400"
                             aria-hidden="true"
                             xmlns="http://www.w3.org/2000/svg"
                             width="24"
@@ -313,7 +330,7 @@
                 <div class="flex flex-row items-center gap-2 px-3">
                     <label
                         for="filter_threshold"
-                        class="block text-md font-medium text-gray-700 mb-1"
+                        class="block text-md font-medium text-gray-700 dark:text-gray-200 mb-1"
                     >
                         Filter for Warnings
                     </label>
@@ -321,7 +338,7 @@
                         type="checkbox"
                         id="filter_threshold"
                         bind:checked={filter_threshold}
-                        class="px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                        class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
                     />
                 </div>
             </div>

@@ -34,7 +34,7 @@
 
 {#if shown}
     <div
-        class="fixed left-5 right-5 top-5 bottom-5 z-50 bg-white border border-white rounded-md
+        class="fixed left-5 right-5 top-5 bottom-5 z-50 bg-white dark:bg-gray-900 border border-white rounded-md
 		flex flex-col p-2 drop-shadow-sm"
     >
         <div class="flex justify-between items-center p-1">

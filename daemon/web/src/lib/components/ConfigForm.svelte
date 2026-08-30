@@ -17,6 +17,7 @@
     import DeviceGifSettings from './DeviceGifSettings.svelte';
     import Explainer from './Explainer.svelte';
     import { HEURISTICS } from '../heuristics';
+    import { theme, type ThemePreference } from '../theme.svelte';
 
     let { shown = $bindable() }: { shown: boolean } = $props();
     let config = $state<Config | null>(null);
@@ -184,13 +185,40 @@
                 }}
             >
                 <div>
-                    <label for="ui_level" class="block text-sm font-medium text-gray-700 mb-1">
+                    <label
+                        for="theme_preference"
+                        class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                    >
+                        Appearance of this page
+                    </label>
+                    <select
+                        id="theme_preference"
+                        value={theme.preference}
+                        onchange={(e) => theme.set(e.currentTarget.value as ThemePreference)}
+                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                    >
+                        <option value="system">Match my device</option>
+                        <option value="light">Light</option>
+                        <option value="dark">Dark</option>
+                    </select>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        Changes this web page only, not the device screen. Applies straight away and
+                        is remembered in this browser, so it does not restart Rayhunter or interrupt
+                        a recording.
+                    </p>
+                </div>
+
+                <div>
+                    <label
+                        for="ui_level"
+                        class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                    >
                         Device UI Level
                     </label>
                     <select
                         id="ui_level"
                         bind:value={config.ui_level}
-                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
                     >
                         <option value={0}>Invisible mode</option>
                         <option value={1}>Subtle mode (colored line)</option>
@@ -199,7 +227,7 @@
                         <option value={2}>Demo mode (orca gif)</option>
                         <option value={3}>EFF logo</option>
                     </select>
-                    <p class="text-xs text-gray-500 mt-1">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                         Note: Rayhunter draws over the device's native UI, so some flickering is
                         expected
                     </p>
@@ -218,35 +246,40 @@
                 <div>
                     <label
                         for="key_input_mode"
-                        class="block text-sm font-medium text-gray-700 mb-1"
+                        class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
                     >
                         Device Input Mode
                     </label>
                     <select
                         id="key_input_mode"
                         bind:value={config.key_input_mode}
-                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
                     >
                         <option value={0}>Disable button control</option>
                         <option value={1}>Double-tap power button to start new recording</option>
                     </select>
                 </div>
 
-                <div class="border-t border-gray-200 pt-4 mt-6 space-y-3">
-                    <h3 class="text-lg font-semibold text-gray-800 mb-4">Notification Settings</h3>
+                <div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3">
+                    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
+                        Notification Settings
+                    </h3>
 
                     <div class="flex items-center">
                         <input
                             id="auto_check_updates"
                             type="checkbox"
                             bind:checked={config.auto_check_updates}
-                            class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
+                            class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
                         />
-                        <label for="auto_check_updates" class="ml-2 block text-sm text-gray-700">
+                        <label
+                            for="auto_check_updates"
+                            class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                        >
                             Automatically check for software updates
                         </label>
                     </div>
-                    <p class="text-xs text-gray-500">
+                    <p class="text-xs text-gray-500 dark:text-gray-400">
                         When enabled, Rayhunter periodically checks GitHub for new releases and
                         shows an update notice in the web UI.
                     </p>
@@ -292,8 +325,8 @@
                             {#if testMessage}
                                 <div
                                     class="mt-2 p-2 rounded-sm text-sm {testMessageType === 'error'
-                                        ? 'bg-red-100 text-red-700'
-                                        : 'bg-green-100 text-green-700'}"
+                                        ? 'bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300'
+                                        : 'bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-300'}"
                                 >
                                     {testMessage}
                                 </div>
@@ -301,7 +334,9 @@
                         </div>
 
                         <div class="space-y-2">
-                            <div class="block text-sm font-medium text-gray-700 mb-1">
+                            <div
+                                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                            >
                                 Enabled Notification Types
                             </div>
                             <div class="flex items-center">
@@ -313,7 +348,7 @@
                                 />
                                 <label
                                     for="enable_warning_notifications"
-                                    class="ml-2 block text-sm text-gray-700"
+                                    class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
                                 >
                                     Warnings
                                 </label>
@@ -327,7 +362,7 @@
                                 />
                                 <label
                                     for="enable_lowbattery_notifications"
-                                    class="ml-2 block text-sm text-gray-700"
+                                    class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
                                 >
                                     Low Battery
                                 </label>
@@ -341,7 +376,7 @@
                                 />
                                 <label
                                     for="enable_update_notifications"
-                                    class="ml-2 block text-sm text-gray-700"
+                                    class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
                                 >
                                     Software Updates
                                 </label>
@@ -350,13 +385,15 @@
                     </ExpandableInput>
                 </div>
 
-                <div class="border-t border-gray-200 pt-4 mt-6 space-y-3">
-                    <h3 class="text-lg font-semibold text-gray-800 mb-4">Storage Management</h3>
+                <div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3">
+                    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
+                        Storage Management
+                    </h3>
 
                     <div>
                         <label
                             for="min_space_to_start_recording_mb"
-                            class="block text-sm font-medium text-gray-700 mb-1"
+                            class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
                         >
                             Minimum Space to Start Recording (MB)
                         </label>
@@ -365,9 +402,9 @@
                             type="number"
                             min="1"
                             bind:value={config.min_space_to_start_recording_mb}
-                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
                         />
-                        <p class="text-xs text-gray-500 mt-1">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                             Recording will not start if less than this amount of disk space is free
                         </p>
                     </div>
@@ -375,7 +412,7 @@
                     <div>
                         <label
                             for="min_space_to_continue_recording_mb"
-                            class="block text-sm font-medium text-gray-700 mb-1"
+                            class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
                         >
                             Minimum Space to Continue Recording (MB)
                         </label>
@@ -384,17 +421,19 @@
                             type="number"
                             min="1"
                             bind:value={config.min_space_to_continue_recording_mb}
-                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
                         />
-                        <p class="text-xs text-gray-500 mt-1">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                             Recording will stop automatically if disk space drops below this level
                         </p>
                     </div>
                 </div>
 
-                <div class="border-t border-gray-200 pt-4 mt-6 space-y-3">
-                    <h3 class="text-lg font-semibold text-gray-800 mb-4">WebDAV Upload</h3>
-                    <p class="text-xs text-gray-500">
+                <div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3">
+                    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
+                        WebDAV Upload
+                    </h3>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">
                         Once a recording has been closed for at least the configured age, both the
                         .qmdl and .ndjson files are uploaded in the background to the WebDAV server.
                     </p>
@@ -411,7 +450,7 @@
                         <div>
                             <label
                                 for="webdav_username"
-                                class="block text-sm font-medium text-gray-700 mb-1"
+                                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
                             >
                                 Username
                             </label>
@@ -419,9 +458,9 @@
                                 id="webdav_username"
                                 type="text"
                                 bind:value={config.webdav.username}
-                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
                             />
-                            <p class="text-xs text-gray-500 mt-1">
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                 Optional. Leave blank for unauthenticated uploads.
                             </p>
                         </div>
@@ -429,7 +468,7 @@
                         <div>
                             <label
                                 for="webdav_password"
-                                class="block text-sm font-medium text-gray-700 mb-1"
+                                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
                             >
                                 Password
                             </label>
@@ -437,9 +476,9 @@
                                 id="webdav_password"
                                 type="password"
                                 bind:value={config.webdav.password}
-                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
                             />
-                            <p class="text-xs text-gray-500 mt-1">
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                 A password without a username will be rejected and the request will
                                 be sent unauthenticated.
                             </p>
@@ -448,7 +487,7 @@
                         <div>
                             <label
                                 for="webdav_upload_timeout_secs"
-                                class="block text-sm font-medium text-gray-700 mb-1"
+                                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
                             >
                                 Upload Timeout (seconds)
                             </label>
@@ -457,14 +496,14 @@
                                 type="number"
                                 min="1"
                                 bind:value={config.webdav.upload_timeout_secs}
-                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
                             />
                         </div>
 
                         <div>
                             <label
                                 for="webdav_poll_interval_secs"
-                                class="block text-sm font-medium text-gray-700 mb-1"
+                                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
                             >
                                 Poll Interval (seconds)
                             </label>
@@ -473,9 +512,9 @@
                                 type="number"
                                 min="1"
                                 bind:value={config.webdav.poll_interval_secs}
-                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
                             />
-                            <p class="text-xs text-gray-500 mt-1">
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                 How often the worker checks for new entries to upload.
                             </p>
                         </div>
@@ -483,7 +522,7 @@
                         <div>
                             <label
                                 for="webdav_min_age_secs"
-                                class="block text-sm font-medium text-gray-700 mb-1"
+                                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
                             >
                                 Minimum Age Before Upload (seconds)
                             </label>
@@ -492,9 +531,9 @@
                                 type="number"
                                 min="0"
                                 bind:value={config.webdav.min_age_secs}
-                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
                             />
-                            <p class="text-xs text-gray-500 mt-1">
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                 How long a recording must be closed before it becomes eligible for
                                 upload.
                             </p>
@@ -505,16 +544,16 @@
                                 id="webdav_delete_on_upload"
                                 type="checkbox"
                                 bind:checked={config.webdav.delete_on_upload}
-                                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
+                                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
                             />
                             <label
                                 for="webdav_delete_on_upload"
-                                class="ml-2 block text-sm text-gray-700"
+                                class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
                             >
                                 Delete on successful upload
                             </label>
                         </div>
-                        <p class="text-xs text-gray-500">
+                        <p class="text-xs text-gray-500 dark:text-gray-400">
                             When enabled, the local files are removed after a successful upload.
                             Otherwise the manifest is just marked as uploaded.
                         </p>
@@ -522,9 +561,11 @@
                 </div>
 
                 {#if config.device === 'orbic' || config.device === 'moxee' || config.device === 'tmobile' || config.device === 'wingtech'}
-                    <div class="border-t border-gray-200 pt-4 mt-6 space-y-3">
-                        <h3 class="text-lg font-semibold text-gray-800 mb-4">WiFi Client Mode</h3>
-                        <p class="text-xs text-gray-500">
+                    <div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3">
+                        <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
+                            WiFi Client Mode
+                        </h3>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">
                             Connect the device to an existing WiFi network for internet access (e.g.
                             notifications, remote access). The hotspot AP stays running alongside
                             WiFi client mode.
@@ -535,13 +576,16 @@
                                 id="wifi_enabled"
                                 type="checkbox"
                                 bind:checked={config.wifi_enabled}
-                                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
+                                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
                             />
-                            <label for="wifi_enabled" class="ml-2 block text-sm text-gray-700">
+                            <label
+                                for="wifi_enabled"
+                                class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                            >
                                 Enable WiFi
                             </label>
                         </div>
-                        <p class="text-xs text-gray-500">
+                        <p class="text-xs text-gray-500 dark:text-gray-400">
                             Unchecking stops WiFi without clearing saved credentials.
                         </p>
 
@@ -551,15 +595,19 @@
                                     Connected to "{wifiStatus.ssid}" ({wifiStatus.ip})
                                 </p>
                             {:else if wifiStatus.state === 'connecting'}
-                                <p class="text-xs text-amber-600">Connecting...</p>
+                                <p class="text-xs text-amber-600 dark:text-amber-400">
+                                    Connecting...
+                                </p>
                             {:else if wifiStatus.state === 'recovering'}
-                                <p class="text-xs text-amber-600">Recovering connection...</p>
+                                <p class="text-xs text-amber-600 dark:text-amber-400">
+                                    Recovering connection...
+                                </p>
                             {:else if wifiStatus.state === 'dataPathDead'}
-                                <p class="text-xs text-amber-600">
+                                <p class="text-xs text-amber-600 dark:text-amber-400">
                                     Data path stalled, attempting recovery...
                                 </p>
                             {:else if wifiStatus.state === 'failed'}
-                                <p class="text-xs text-red-600">
+                                <p class="text-xs text-red-600 dark:text-red-400">
                                     Failed: {wifiStatus.error}
                                 </p>
                             {/if}
@@ -568,7 +616,7 @@
                         <div>
                             <label
                                 for="wifi_ssid"
-                                class="block text-sm font-medium text-gray-700 mb-1"
+                                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
                             >
                                 WiFi Network Name (SSID)
                             </label>
@@ -578,13 +626,13 @@
                                     type="text"
                                     bind:value={config.wifi_ssid}
                                     placeholder="MyWiFiNetwork"
-                                    class="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                    class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
                                 />
                                 <button
                                     type="button"
                                     onclick={do_scan}
                                     disabled={scanning}
-                                    class="px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 disabled:opacity-50 border border-gray-300 rounded-md"
+                                    class="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 border border-gray-300 dark:border-gray-600 rounded-md"
                                 >
                                     {scanning ? 'Scanning...' : 'Scan'}
                                 </button>
@@ -592,21 +640,21 @@
                         </div>
 
                         {#if scanError}
-                            <p class="text-xs text-red-600">{scanError}</p>
+                            <p class="text-xs text-red-600 dark:text-red-400">{scanError}</p>
                         {/if}
 
                         {#if scanResults.length > 0}
                             <div
-                                class="border border-gray-200 rounded-md max-h-40 overflow-y-auto divide-y divide-gray-200"
+                                class="border border-gray-200 dark:border-gray-700 rounded-md max-h-40 overflow-y-auto divide-y divide-gray-200 dark:divide-gray-700"
                             >
                                 {#each scanResults as network}
                                     <button
                                         type="button"
-                                        class="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex justify-between"
+                                        class="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 flex justify-between"
                                         onclick={() => select_network(network)}
                                     >
                                         <span>{network.ssid}</span>
-                                        <span class="text-gray-400"
+                                        <span class="text-gray-400 dark:text-gray-500"
                                             >{network.signal_dbm} dBm &middot; {network.security}</span
                                         >
                                     </button>
@@ -618,14 +666,14 @@
                             <div>
                                 <label
                                     for="wifi_security"
-                                    class="block text-sm font-medium text-gray-700 mb-1"
+                                    class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
                                 >
                                     Security Type
                                 </label>
                                 <select
                                     id="wifi_security"
                                     bind:value={config.wifi_security}
-                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
                                 >
                                     <option value="wpa_psk">WPA2 (WPA-PSK)</option>
                                     <option value="sae">WPA3 (SAE)</option>
@@ -636,7 +684,7 @@
                         <div>
                             <label
                                 for="wifi_password"
-                                class="block text-sm font-medium text-gray-700 mb-1"
+                                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
                             >
                                 WiFi Password
                             </label>
@@ -645,9 +693,9 @@
                                 type="password"
                                 bind:value={config.wifi_password}
                                 placeholder="Enter password"
-                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
                             />
-                            <p class="text-xs text-gray-500 mt-1">
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                 Changing the network requires re-entering the password.
                             </p>
                         </div>
@@ -656,7 +704,7 @@
                             <div>
                                 <label
                                     for="dns_servers"
-                                    class="block text-sm font-medium text-gray-700 mb-1"
+                                    class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
                                 >
                                     DNS Servers
                                 </label>
@@ -665,9 +713,9 @@
                                     type="text"
                                     bind:value={dnsServersInput}
                                     placeholder="9.9.9.9, 149.112.112.112"
-                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
                                 />
-                                <p class="text-xs text-gray-500 mt-1">
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                     Comma-separated. Used when WiFi is active. Defaults to 9.9.9.9,
                                     149.112.112.112 (Quad9).
                                 </p>
@@ -676,11 +724,11 @@
                     </div>
                 {/if}
 
-                <div class="border-t border-gray-200 pt-4 mt-6">
-                    <h3 class="text-lg font-semibold text-gray-800 mb-2">
+                <div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6">
+                    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-2">
                         Analyzer Heuristic Settings
                     </h3>
-                    <p class="text-xs text-gray-500 mb-4">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
                         Each of these watches for a different sign that a tower is not behaving the
                         way a real one should. Leaving them on costs you nothing except the
                         occasional false alarm. Open any entry to read what it looks for and why it
@@ -694,22 +742,22 @@
                                         id={h.key}
                                         type="checkbox"
                                         bind:checked={config.analyzers[h.key]}
-                                        class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
+                                        class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
                                     />
                                     <label
                                         for={h.key}
-                                        class="ml-2 block text-sm font-medium text-gray-700"
+                                        class="ml-2 block text-sm font-medium text-gray-700 dark:text-gray-200"
                                     >
                                         {h.title}
                                     </label>
                                     {#if h.tag === 'noisy'}
                                         <span
-                                            class="ml-2 rounded-sm bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
+                                            class="ml-2 rounded-sm bg-amber-100 dark:bg-amber-950 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:text-amber-300"
                                             >very noisy</span
                                         >
                                     {:else if h.tag === 'informational'}
                                         <span
-                                            class="ml-2 rounded-sm bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600"
+                                            class="ml-2 rounded-sm bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300"
                                             >notes only</span
                                         >
                                     {/if}
@@ -728,22 +776,26 @@
                     </div>
                 </div>
 
-                <div class="border-t border-gray-200 pt-4 mt-6 space-y-3">
-                    <h3 class="text-lg font-semibold text-gray-800 mb-4">GPS Settings</h3>
+                <div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3">
+                    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
+                        GPS Settings
+                    </h3>
                     <div>
-                        <label for="gps_mode" class="block text-sm font-medium text-gray-700 mb-1"
+                        <label
+                            for="gps_mode"
+                            class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
                             >GPS Mode</label
                         >
                         <select
                             id="gps_mode"
                             bind:value={config.gps_mode}
-                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-rayhunter-blue"
+                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-rayhunter-blue"
                         >
                             <option value={GpsMode.Disabled}>Disabled</option>
                             <option value={GpsMode.Fixed}>Fixed coordinates</option>
                             <option value={GpsMode.Api}>API endpoint</option>
                         </select>
-                        <p class="text-xs text-gray-500 mt-1">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                             {#if config.gps_mode === GpsMode.Api}
                                 POST latitude and longitude to <code>/api/gps</code> from any device on
                                 the network. Timestamp is derived from packet capture timing.
@@ -758,7 +810,7 @@
                         <div>
                             <label
                                 for="gps_fixed_latitude"
-                                class="block text-sm font-medium text-gray-700 mb-1"
+                                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
                                 >Fixed Latitude</label
                             >
                             <input
@@ -770,14 +822,16 @@
                                 required
                                 bind:value={config.gps_fixed_latitude}
                                 placeholder="e.g. 37.7749"
-                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-rayhunter-blue"
+                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-rayhunter-blue"
                             />
-                            <p class="text-xs text-gray-500 mt-1">Decimal degrees, -90 to 90</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                Decimal degrees, -90 to 90
+                            </p>
                         </div>
                         <div>
                             <label
                                 for="gps_fixed_longitude"
-                                class="block text-sm font-medium text-gray-700 mb-1"
+                                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
                                 >Fixed Longitude</label
                             >
                             <input
@@ -789,9 +843,11 @@
                                 required
                                 bind:value={config.gps_fixed_longitude}
                                 placeholder="e.g. -122.4194"
-                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-rayhunter-blue"
+                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-rayhunter-blue"
                             />
-                            <p class="text-xs text-gray-500 mt-1">Decimal degrees, -180 to 180</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                Decimal degrees, -180 to 180
+                            </p>
                         </div>
                     {/if}
                 </div>
@@ -829,14 +885,14 @@
             {#if message}
                 <div
                     class="mt-4 p-3 rounded-sm {messageType === 'error'
-                        ? 'bg-red-100 text-red-700'
-                        : 'bg-green-100 text-green-700'}"
+                        ? 'bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300'
+                        : 'bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-300'}"
                 >
                     {message}
                 </div>
             {/if}
         {:else}
-            <div class="text-center py-4 text-red-600">
+            <div class="text-center py-4 text-red-600 dark:text-red-400">
                 Failed to load configuration. Please try reloading the page.
             </div>
         {/if}

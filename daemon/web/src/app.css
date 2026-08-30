@@ -1,5 +1,9 @@
 @import 'tailwindcss';
 
+/* Dark mode is driven by a class on <html> rather than the media query alone,
+ * so the appearance can be overridden per browser. See lib/theme.svelte.ts. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
     --color-rayhunter-blue: #4e4eb1;
     --color-rayhunter-dark-blue: #3f3da0;
@@ -9,6 +13,11 @@
 /* v4 dropped the v3 preflight rule that set `cursor: pointer` on buttons.
  * Restore it so enabled buttons get the pointer cursor. */
 @layer base {
+    /* The page itself, so the area around the content follows the theme too. */
+    body {
+        @apply bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100;
+    }
+
     button:not(:disabled),
     [role='button']:not(:disabled) {
         cursor: pointer;

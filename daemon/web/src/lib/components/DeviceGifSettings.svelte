@@ -142,17 +142,17 @@
     }
 </script>
 
-<div class="border-t border-gray-200 pt-4 mt-6 space-y-3">
-    <h3 class="text-lg font-semibold text-gray-800 mb-4">Device Display GIFs</h3>
+<div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3">
+    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Device Display GIFs</h3>
 
-    <p class="text-xs text-gray-500">
+    <p class="text-xs text-gray-500 dark:text-gray-400">
         Play your own animation on the device for each state. The screen is {DEVICE_SCREEN_PX}×{DEVICE_SCREEN_PX}
         pixels, so square GIFs of that size look best — anything larger is scaled down on the device.
         Any state without a GIF falls back to showing its colored status line instead, so the device is
         never blank. Uploaded GIFs are stored right away, but only take effect once you save this form.
     </p>
 
-    <p class="text-xs text-gray-500">
+    <p class="text-xs text-gray-500 dark:text-gray-400">
         Warnings interrupt a playing animation immediately, so a long GIF will never delay an alert.
     </p>
 
@@ -171,22 +171,24 @@
                             onerror={() => (unfetchable[row.key] = true)}
                         />
                     {:else if uploaded}
-                        <span class="text-[10px] text-gray-400">stored</span>
+                        <span class="text-[10px] text-gray-400 dark:text-gray-500">stored</span>
                     {:else}
-                        <span class="text-[10px] text-gray-600">none</span>
+                        <span class="text-[10px] text-gray-600 dark:text-gray-300">none</span>
                     {/if}
                 </div>
 
                 <div class="min-w-0 flex-1">
-                    <div class="block text-sm font-medium text-gray-700">{row.label}</div>
-                    <p class="text-xs text-gray-500">{row.description}</p>
+                    <div class="block text-sm font-medium text-gray-700 dark:text-gray-200">
+                        {row.label}
+                    </div>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{row.description}</p>
 
                     <div class="mt-1 flex flex-wrap items-center gap-3">
                         <label
                             class="cursor-pointer text-xs text-rayhunter-blue underline {busy[
                                 row.key
                             ]
-                                ? 'pointer-events-none text-gray-300'
+                                ? 'pointer-events-none text-gray-300 dark:text-gray-600'
                                 : ''}"
                         >
                             {busy[row.key] ? 'Uploading…' : uploaded ? 'Replace GIF' : 'Choose GIF'}
@@ -203,7 +205,7 @@
                                 type="button"
                                 onclick={() => remove(row.key)}
                                 disabled={busy[row.key]}
-                                class="text-xs text-rayhunter-blue underline disabled:text-gray-300 disabled:no-underline"
+                                class="text-xs text-rayhunter-blue underline disabled:text-gray-300 dark:disabled:text-gray-600 disabled:no-underline"
                             >
                                 Remove
                             </button>
@@ -211,10 +213,12 @@
                     </div>
 
                     {#if errors[row.key]}
-                        <p class="mt-1 text-xs text-red-600">{errors[row.key]}</p>
+                        <p class="mt-1 text-xs text-red-600 dark:text-red-400">{errors[row.key]}</p>
                     {/if}
                     {#if notices[row.key]}
-                        <p class="mt-1 text-xs text-amber-600">{notices[row.key]}</p>
+                        <p class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                            {notices[row.key]}
+                        </p>
                     {/if}
                 </div>
             </div>
