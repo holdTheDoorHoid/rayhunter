@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     load_per_core,
-    load_state,
+    cpu_state,
     format_uptime,
     hours_until_full,
     format_duration_hours,
@@ -14,27 +14,38 @@ const health = (load: number, cores = 1): HealthStats => ({
     cpu_count: cores,
 });
 
-describe('load', () => {
-    /**
-     * The core count is what makes the number mean anything. A load of 1.4
-     * sounds mild and is saturation on the single core these devices have.
-     */
-    it('is judged against the number of cores', () => {
+describe('load average', () => {
+    it('is still reported per core, since raw load means little alone', () => {
         expect(load_per_core(health(1.4, 1))).toBeCloseTo(1.4);
         expect(load_per_core(health(1.4, 4))).toBeCloseTo(0.35);
-        expect(load_state(health(1.4, 1))).toBe('saturated');
-        expect(load_state(health(1.4, 4))).toBe('idle');
-    });
-
-    it('names each band', () => {
-        expect(load_state(health(0.2))).toBe('idle');
-        expect(load_state(health(0.8))).toBe('busy');
-        expect(load_state(health(1.5))).toBe('saturated');
-        expect(load_state(health(3.0))).toBe('overloaded');
     });
 
     it('never divides by zero if a platform reports no cores', () => {
         expect(load_per_core({ ...health(2), cpu_count: 0 })).toBe(2);
+    });
+});
+
+describe('cpu_state', () => {
+    /**
+     * The distinction that matters. Measured on the test device: load average
+     * 1.59 on a single core, which reads as saturated, while the processor was
+     * 81% idle. Judging on load would report a problem that is not there.
+     */
+    it('judges on measured usage, not on load average', () => {
+        const misleading = { ...health(1.59, 1), cpu_busy_percent: 19 };
+        expect(load_per_core(misleading)).toBeCloseTo(1.59);
+        expect(cpu_state(misleading)).toBe('comfortable');
+    });
+
+    it('names each band', () => {
+        expect(cpu_state({ ...health(0), cpu_busy_percent: 10 })).toBe('comfortable');
+        expect(cpu_state({ ...health(0), cpu_busy_percent: 60 })).toBe('busy');
+        expect(cpu_state({ ...health(0), cpu_busy_percent: 80 })).toBe('stretched');
+        expect(cpu_state({ ...health(0), cpu_busy_percent: 95 })).toBe('overloaded');
+    });
+
+    it('says nothing when usage has not been measured yet', () => {
+        expect(cpu_state(health(1.5))).toBeNull();
     });
 });
 

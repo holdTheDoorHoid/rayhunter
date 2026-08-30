@@ -42,6 +42,10 @@ export interface HealthStats {
     cpu_count: number;
     cpu_temp_c?: number;
     radio_temp_c?: number;
+    /** Share of the processor in use, measured between requests. */
+    cpu_busy_percent?: number;
+    /** Share of the processor Rayhunter itself accounts for. */
+    rayhunter_cpu_percent?: number;
 }
 
 /**
@@ -55,13 +59,23 @@ export function load_per_core(health: HealthStats): number {
     return health.load_avg[0] / Math.max(1, health.cpu_count);
 }
 
-export type LoadState = 'idle' | 'busy' | 'saturated' | 'overloaded';
+export type LoadState = 'comfortable' | 'busy' | 'stretched' | 'overloaded';
 
-export function load_state(health: HealthStats): LoadState {
-    const per = load_per_core(health);
-    if (per < 0.7) return 'idle';
-    if (per < 1.0) return 'busy';
-    if (per < 2.0) return 'saturated';
+/**
+ * How hard the device is working, judged on actual processor usage.
+ *
+ * Deliberately not based on load average. Load counts tasks waiting on
+ * anything, not just the processor, so on this hardware it sits near 1 while
+ * the device is 80% idle. Reporting that as saturation would send someone
+ * optimising a problem that does not exist, which is exactly what happened
+ * before this was measured properly.
+ */
+export function cpu_state(health: HealthStats): LoadState | null {
+    const busy = health.cpu_busy_percent;
+    if (busy === undefined) return null;
+    if (busy < 50) return 'comfortable';
+    if (busy < 75) return 'busy';
+    if (busy < 90) return 'stretched';
     return 'overloaded';
 }
 

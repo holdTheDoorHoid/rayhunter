@@ -2,7 +2,7 @@
     import {
         type SystemStats,
         load_per_core,
-        load_state,
+        cpu_state,
         format_uptime,
         hours_until_full,
         format_duration_hours,
@@ -52,11 +52,11 @@
             ? hours_until_full(bytesPerSecond, stats.disk_stats.available_bytes)
             : null
     );
-    let loadLabel = $derived(stats.health ? load_state(stats.health) : null);
-    let loadClass = $derived(
-        loadLabel === 'overloaded'
+    let cpuLabel = $derived(stats.health ? cpu_state(stats.health) : null);
+    let cpuClass = $derived(
+        cpuLabel === 'overloaded'
             ? 'text-red-600 dark:text-red-400'
-            : loadLabel === 'saturated'
+            : cpuLabel === 'stretched'
               ? 'text-amber-600 dark:text-amber-400'
               : ''
     );
@@ -119,12 +119,18 @@
             {/if}
             {#if stats.health}
                 <tr class="border-b border-gray-200 dark:border-gray-700">
-                    <td class="py-1 pr-4 text-gray-500 dark:text-gray-400 font-medium">Load</td>
-                    <td class="py-1 {loadClass}">
-                        {loadLabel}
-                        <span class="text-gray-500 dark:text-gray-400">
-                            ({load_per_core(stats.health).toFixed(2)} per core)
-                        </span>
+                    <td class="py-1 pr-4 text-gray-500 dark:text-gray-400 font-medium">Processor</td
+                    >
+                    <td class="py-1 {cpuClass}">
+                        {#if stats.health.cpu_busy_percent !== undefined}
+                            {cpuLabel}
+                            <span class="text-gray-500 dark:text-gray-400">
+                                ({stats.health.cpu_busy_percent.toFixed(0)}% in use{#if stats.health.rayhunter_cpu_percent !== undefined},
+                                    {stats.health.rayhunter_cpu_percent.toFixed(0)}% Rayhunter{/if})
+                            </span>
+                        {:else}
+                            measuring
+                        {/if}
                     </td>
                 </tr>
                 <tr class="border-b border-gray-200 dark:border-gray-700">

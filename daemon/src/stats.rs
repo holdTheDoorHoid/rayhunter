@@ -72,6 +72,88 @@ pub struct HealthStats {
     /// transmitting rather than how busy the processor is.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub radio_temp_c: Option<f32>,
+    /// Share of the processor actually in use, 0 to 100, measured between
+    /// requests.
+    ///
+    /// This is the figure that answers "is the device keeping up". Load
+    /// average does not: it counts tasks waiting on anything at all, so it can
+    /// sit near 1 on a device that is 80% idle. Measured here rather than
+    /// derived from load, because they are different quantities.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_busy_percent: Option<f32>,
+    /// Share of the processor this daemon is responsible for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rayhunter_cpu_percent: Option<f32>,
+}
+
+/// Previous processor counters, so usage can be measured across requests
+/// rather than reported as a meaningless instantaneous value.
+static LAST_CPU_SAMPLE: std::sync::Mutex<Option<CpuSample>> = std::sync::Mutex::new(None);
+
+#[derive(Clone, Copy)]
+struct CpuSample {
+    total: u64,
+    idle: u64,
+    process: u64,
+}
+
+fn read_cpu_sample() -> Option<CpuSample> {
+    let stat = std::fs::read_to_string("/proc/stat").ok()?;
+    let line = stat.lines().find(|l| l.starts_with("cpu "))?;
+    let fields: Vec<u64> = line
+        .split_whitespace()
+        .skip(1)
+        .filter_map(|f| f.parse().ok())
+        .collect();
+    if fields.len() < 5 {
+        return None;
+    }
+    let total: u64 = fields.iter().sum();
+    let idle = fields[3];
+
+    // utime + stime for this process, in the same clock ticks.
+    let process = std::fs::read_to_string("/proc/self/stat")
+        .ok()
+        .and_then(|s| {
+            // The command name can contain spaces inside parentheses, so
+            // fields are counted from after the closing one.
+            let rest = s.rsplit_once(") ")?.1;
+            let f: Vec<&str> = rest.split_whitespace().collect();
+            Some(f.get(11)?.parse::<u64>().ok()? + f.get(12)?.parse::<u64>().ok()?)
+        })
+        .unwrap_or(0);
+
+    Some(CpuSample {
+        total,
+        idle,
+        process,
+    })
+}
+
+/// Processor usage since the previous call, as (whole system, this daemon).
+fn measure_cpu() -> (Option<f32>, Option<f32>) {
+    let Some(now) = read_cpu_sample() else {
+        return (None, None);
+    };
+    let mut last = match LAST_CPU_SAMPLE.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let previous = last.replace(now);
+
+    let Some(previous) = previous else {
+        // First call has nothing to compare against; a figure now would be
+        // usage since boot, which is not what anyone reading this wants.
+        return (None, None);
+    };
+    let elapsed = now.total.saturating_sub(previous.total);
+    if elapsed == 0 {
+        return (None, None);
+    }
+    let idle = now.idle.saturating_sub(previous.idle);
+    let busy = elapsed.saturating_sub(idle) as f32 / elapsed as f32 * 100.0;
+    let mine = now.process.saturating_sub(previous.process) as f32 / elapsed as f32 * 100.0;
+    (Some(busy.clamp(0.0, 100.0)), Some(mine.clamp(0.0, 100.0)))
 }
 
 impl HealthStats {
@@ -97,6 +179,7 @@ impl HealthStats {
             .max(1);
 
         let (cpu_temp_c, radio_temp_c) = read_temperatures();
+        let (cpu_busy_percent, rayhunter_cpu_percent) = measure_cpu();
 
         Some(Self {
             uptime_secs,
@@ -104,6 +187,8 @@ impl HealthStats {
             cpu_count,
             cpu_temp_c,
             radio_temp_c,
+            cpu_busy_percent,
+            rayhunter_cpu_percent,
         })
     }
 }
