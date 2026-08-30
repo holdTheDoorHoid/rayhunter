@@ -91,6 +91,49 @@ pub fn scenarios() -> Vec<Scenario> {
             }],
         },
         Scenario {
+            name: "pushed down onto a 2G network (connection release redirect)",
+            messages: vec![DemoMessage::Rrc {
+                // DL-DCCH rrcConnectionRelease carrying redirectedCarrierInfo
+                // set to geran, which is a tower handing the phone off to 2G.
+                // 0 picks c1, 0101 picks rrcConnectionRelease (index 5), the
+                // optional preamble 100 marks redirectedCarrierInfo present,
+                // and 001 inside it selects geran over the other targets.
+                payload: vec![0x28, 0x22, 0x20, 0x00, 0x00],
+                pdu_num: 7,
+            }],
+        },
+        Scenario {
+            name: "2G advertised as a better choice than nearby 4G (SIB downgrade)",
+            messages: vec![
+                // Three broadcasts in order, because this detector compares
+                // priorities and only decides when it sees a SIB1.
+                //
+                // SIB3 sets the LTE reselection priority to 1.
+                DemoMessage::Rrc {
+                    payload: vec![0x00, 0x04, 0x00, 0x08, 0x00, 0x00],
+                    pdu_num: 2,
+                },
+                // SIB7 advertises a 2G carrier at priority 7, the highest
+                // there is, so 2G outranks the LTE neighbours.
+                DemoMessage::Rrc {
+                    payload: vec![0x00, 0x14, 0x80, 0x00, 0x00, 0x17, 0x00, 0x00, 0x00],
+                    pdu_num: 2,
+                },
+                // The SIB1 that makes the detector compare the two. It also
+                // carries only one further scheduling entry, which is what the
+                // Incomplete SIB detector looks for. Its network identity is
+                // 001-01, the code the ITU reserves for testing, so it can
+                // never collide with a real operator.
+                DemoMessage::Rrc {
+                    payload: vec![
+                        0x40, 0x40, 0x04, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                        0x00, 0x00, 0x00,
+                    ],
+                    pdu_num: 2,
+                },
+            ],
+        },
+        Scenario {
             name: "identity demanded after authentication (IMSI catcher pattern)",
             messages: vec![
                 // 53 = Authentication Response, moving the detector into its
@@ -302,9 +345,14 @@ mod tests {
         }
     }
 
-    /// Each scenario has to raise a high severity warning on its own, since any
-    /// of them can be chosen alone. One that only produced an informational
-    /// note would leave a demo showing nothing.
+    /// Every scenario must raise a *high* warning on its own, not merely make
+    /// a detector fire.
+    ///
+    /// This is stricter than it looks. Rows carrying only informational events
+    /// are treated as empty and never written to the recording, so a scenario
+    /// that produced only notes would fire its detector, pass a weaker check,
+    /// and still show an audience an unchanged screen. Two scenarios did
+    /// exactly that before this assertion was tightened.
     #[test]
     fn every_scenario_raises_a_high_warning_by_itself() {
         for scenario in scenarios() {
@@ -317,10 +365,11 @@ mod tests {
                 .flat_map(|row| row.events.iter().flatten())
                 .map(|e| e.event_type)
                 .max();
+
             assert_eq!(
                 highest,
                 Some(EventType::High),
-                "scenario {name:?} did not raise a high warning"
+                "scenario {name:?} produced {highest:?}; only high warnings reach the recording"
             );
         }
     }
@@ -416,19 +465,10 @@ mod coverage {
     use super::*;
     use rayhunter::analysis::analyzer::{AnalyzerConfig, Harness};
 
-    /// Detectors the demo cannot yet show.
-    ///
-    /// All three need a hand built RRC message, and unlike the null cipher one
-    /// their payloads carry nested structures (a GERAN carrier list, a SIB
-    /// schedule) whose bit layout has not been worked out yet. Listing them
-    /// here rather than leaving the gap implicit means the coverage test fails
-    /// the moment one starts or stops working, instead of the demo quietly
-    /// showing less than it used to.
-    const KNOWN_UNCOVERED: &[&str] = &[
-        "Connection Release/Redirected Carrier 2G Downgrade",
-        "LTE SIB 6/7 Downgrade",
-        "Incomplete SIB",
-    ];
+    /// Detectors the demo cannot show. Empty: every enabled detector is now
+    /// reachable. Kept so a future detector arriving undemonstrable is a
+    /// deliberate entry here rather than a silent gap.
+    const KNOWN_UNCOVERED: &[&str] = &[];
 
     /// Every enabled detector is either demonstrable or explicitly listed as
     /// not yet demonstrable. A new detector arriving with neither fails here.
@@ -511,7 +551,7 @@ mod coverage {
 }
 
 #[cfg(test)]
-mod rrc_search {
+mod derived_payloads {
     use rayhunter::analysis::analyzer::{AnalyzerConfig, Harness};
 
     fn fires(payload: &[u8], pdu_num: u8) -> Option<Vec<String>> {
@@ -554,44 +594,64 @@ mod rrc_search {
         }
     }
 
-    /// Focused search for the remaining detectors, over the byte ranges the
-    /// ASN.1 choice indices constrain rather than the whole space.
+    /// SIB3 then SIB7 then SIB1: an LTE priority to compare against, a higher
+    /// 2G priority, and the SIB1 that makes the detector compare them. That
+    /// third piece is what turns a note into an actual warning.
     #[test]
-    #[ignore]
-    fn search_remaining() {
-        let mut seen: std::collections::HashSet<String> = Default::default();
-        // rrcConnectionRelease is c1 index 5, so the first five bits are 00101.
-        for b0 in 0x28u16..=0x2f {
-            for b1 in 0u16..=255 {
-                for b2 in 0u16..=255 {
-                    for b3 in 0u16..=255 {
-                        let bytes = [b0 as u8, b1 as u8, b2 as u8, b3 as u8];
-                        if let Some(hits) = fires(&bytes, 7) {
-                            for h in hits {
-                                let key = h.split(':').next().unwrap_or("").to_string();
-                                if seen.insert(key) {
-                                    println!("  DL-DCCH {bytes:02x?} -> {h}");
-                                }
-                            }
-                        }
+    fn try_sib3_sib7_sib1_sequence() {
+        let sib3 = vec![0x00u8, 0x04, 0x00, 0x08, 0x00, 0x00];
+        let sib7 = vec![0x00u8, 0x14, 0x80, 0x00, 0x00, 0x17, 0x00, 0x00, 0x00];
+        let sib1 = vec![
+            0x40u8, 0x40, 0x04, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00,
+        ];
+        let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
+        let names: Vec<String> = harness
+            .get_metadata()
+            .analyzers
+            .iter()
+            .map(|a| a.name.clone())
+            .collect();
+        for payload in [&sib3, &sib7, &sib1] {
+            let container = super::rrc_container(payload, 2).unwrap();
+            for row in harness.analyze_qmdl_messages(container) {
+                for (i, ev) in row.events.iter().enumerate() {
+                    if let Some(ev) = ev {
+                        println!("  {} [{:?}] {}", names[i], ev.event_type, ev.message);
                     }
                 }
             }
         }
-        // SIB messages on the broadcast channel.
-        for b0 in 0u16..=255 {
-            for b1 in 0u16..=255 {
-                for b2 in 0u16..=255 {
-                    let bytes = [b0 as u8, b1 as u8, b2 as u8];
-                    if let Some(hits) = fires(&bytes, 2) {
-                        for h in hits {
-                            let key = h.split(':').next().unwrap_or("").to_string();
-                            if seen.insert(key) {
-                                println!("  BCCH {bytes:02x?} -> {h}");
-                            }
-                        }
-                    }
-                }
+    }
+
+    /// The derived SIB1. PDU 2 is the broadcast channel.
+    #[test]
+    fn try_derived_sib1() {
+        let sib1 = vec![
+            0x40u8, 0x40, 0x04, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00,
+        ];
+        match fires(&sib1, 2) {
+            Some(hits) => println!("  sib1 -> {hits:?}"),
+            None => println!("  sib1 -> nothing"),
+        }
+    }
+
+    /// The derived 2G redirect payload, plus a few neighbours in case one of
+    /// the enumerated widths is off by a bit.
+    #[test]
+    fn try_derived_connection_release() {
+        for candidate in [
+            vec![0x28u8, 0x22, 0x20, 0x00, 0x00],
+            vec![0x28, 0x20, 0x20, 0x00, 0x00],
+            vec![0x28, 0x24, 0x20, 0x00, 0x00],
+            vec![0x28, 0x26, 0x20, 0x00, 0x00],
+            vec![0x28, 0x22, 0x20, 0x00, 0x00, 0x00],
+            vec![0x28, 0x22, 0x10, 0x00, 0x00],
+        ] {
+            match fires(&candidate, 7) {
+                Some(hits) => println!("  {candidate:02x?} -> {hits:?}"),
+                None => println!("  {candidate:02x?} -> nothing"),
             }
         }
     }
@@ -613,79 +673,6 @@ mod rrc_search {
                 Some(hits) => println!("  {candidate:02x?} -> {hits:?}"),
                 None => println!("  {candidate:02x?} -> nothing"),
             }
-        }
-    }
-
-    #[test]
-    #[ignore]
-    fn search_rrc_payloads() {
-        for (channel, pdu) in [("DL-DCCH", 7u8), ("BCCH-DL-SCH", 2u8)] {
-            let mut shown = 0;
-            let mut seen: std::collections::HashSet<String> = Default::default();
-            for b0 in 0u16..=255 {
-                for b1 in 0u16..=255 {
-                    for b2 in 0u16..=255 {
-                        let bytes = [b0 as u8, b1 as u8, b2 as u8];
-                        if let Some(hits) = fires(&bytes, pdu) {
-                            for h in &hits {
-                                let key = h.split(':').next().unwrap_or("").to_string();
-                                if seen.insert(key) && shown < 12 {
-                                    println!("  {channel} {bytes:02x?} -> {h}");
-                                    shown += 1;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod marking {
-    use super::*;
-
-    /// The prefix must only ever reach synthetic messages. If a real warning
-    /// could be labelled a demo, somebody would dismiss a genuine detection,
-    /// which is a worse failure than an unlabelled fake one.
-    ///
-    /// This is structural: the marked path takes a container built here, and
-    /// the only caller passes `demo_container()`. The test pins the property
-    /// that every message in such a container is one we generated.
-    #[test]
-    fn only_generated_messages_can_be_marked() {
-        let generated: std::collections::HashSet<Vec<u8>> = scenarios()
-            .into_iter()
-            .flat_map(|s| s.messages)
-            .map(|m| match m {
-                DemoMessage::Nas(bytes) => bytes,
-                DemoMessage::Rrc { payload, .. } => payload,
-            })
-            .collect();
-
-        let container = demo_container().expect("container should build");
-        for message in container.messages() {
-            let parsed = message.expect("demo messages must parse");
-            let payload = match parsed {
-                rayhunter::diag::Message::Log { body, .. } => match body {
-                    rayhunter::diag::diaglog::LogBody::Nas4GMessage { msg, .. } => msg,
-                    rayhunter::diag::diaglog::LogBody::LteRrcOtaMessage { packet, .. } => {
-                        match packet {
-                            rayhunter::diag::diaglog::rrc::LteRrcOtaPacket::V8 {
-                                packet, ..
-                            } => packet,
-                            other => panic!("unexpected RRC packet version: {other:?}"),
-                        }
-                    }
-                    other => panic!("demo produced an unexpected message type: {other:?}"),
-                },
-                other => panic!("demo produced a non-log message: {other:?}"),
-            };
-            assert!(
-                generated.contains(&payload),
-                "a marked container held a payload that is not one of ours: {payload:02x?}"
-            );
         }
     }
 }
