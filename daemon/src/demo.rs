@@ -27,6 +27,9 @@ use rayhunter::hdlc::hdlc_encapsulate;
 /// neighbouring ESM code, 0xb0e2, carries a different protocol entirely.
 const LOG_TYPE_EMM_NAS_DOWNLINK: u16 = 0xb0ec;
 
+/// Diag log type for an LTE RRC message received over the air.
+const LOG_TYPE_LTE_RRC_OTA: u16 = 0xb0c0;
+
 /// Prefix on every message a demo generates. Deliberately shouty: this text
 /// travels with the event into the recording, the history and any notification.
 pub const DEMO_PREFIX: &str = "[DEMO, NOT REAL] ";
@@ -39,8 +42,18 @@ pub const DEMO_PREFIX: &str = "[DEMO, NOT REAL] ";
 pub struct Scenario {
     /// What this shows an audience, used in the log when it is chosen.
     pub name: &'static str,
-    /// NAS payloads, injected in order.
-    pub messages: Vec<Vec<u8>>,
+    /// The messages, injected in order.
+    pub messages: Vec<DemoMessage>,
+}
+
+/// A single synthetic message, and which protocol layer it belongs to.
+#[derive(Clone)]
+pub enum DemoMessage {
+    /// A NAS message, carried in an EMM log record.
+    Nas(Vec<u8>),
+    /// An RRC message on a logical channel. `pdu_num` 2 is the broadcast
+    /// channel and 7 is the dedicated downlink one.
+    Rrc { payload: Vec<u8>, pdu_num: u8 },
 }
 
 /// Every scenario the demo can draw from.
@@ -49,48 +62,66 @@ pub struct Scenario {
 /// header type of 0 (plain, no integrity protection) in the high nibble and
 /// protocol discriminator 7 (EPS Mobility Management) in the low nibble.
 pub fn scenarios() -> Vec<Scenario> {
+    // NAS bytes follow 3GPP TS 24.301. Each begins `07`: security header type
+    // 0 (plain) in the high nibble, protocol discriminator 7 (EPS Mobility
+    // Management) in the low nibble.
+    //
+    // RRC payloads are UPER encoded, derived from the ASN.1 choice indices in
+    // telcom-parser rather than captured, so they contain no real network's
+    // identifiers.
     vec![
         Scenario {
             name: "tower switched encryption off (NAS null cipher)",
-            messages: vec![
+            messages: vec![DemoMessage::Nas(vec![
                 // 5d = Security Mode Command. 00 selects EEA0, the null
-                // cipher, meaning no encryption at all. 00 is the key set
-                // identifier, then the replayed UE security capabilities.
-                vec![0x07, 0x5d, 0x00, 0x00, 0x02, 0x80, 0x00, 0x00],
-            ],
+                // cipher, meaning no encryption at all.
+                0x07, 0x5d, 0x00, 0x00, 0x02, 0x80, 0x00, 0x00,
+            ])],
+        },
+        Scenario {
+            name: "tower switched encryption off (RRC null cipher)",
+            messages: vec![DemoMessage::Rrc {
+                // DL-DCCH securityModeCommand selecting EEA0. Bit by bit:
+                // 0 picks the c1 branch, 0110 picks securityModeCommand
+                // (index 6), then the transaction id, the r8 critical
+                // extension, and finally the ciphering algorithm as 000,
+                // which is EEA0, no encryption.
+                payload: vec![0x30, 0x00, 0x10],
+                pdu_num: 7,
+            }],
         },
         Scenario {
             name: "identity demanded after authentication (IMSI catcher pattern)",
             messages: vec![
-                // 53 = Authentication Response, which moves the detector into
-                // its authenticated state. 08 is the length of the response.
-                vec![
+                // 53 = Authentication Response, moving the detector into its
+                // authenticated state. 08 is the length of the response.
+                DemoMessage::Nas(vec![
                     0x07, 0x53, 0x08, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
-                ],
-                // 55 = Identity Request, 01 = asking for the IMSI. Demanding
-                // the permanent identity *after* authentication has no
-                // legitimate reason and is the signature this detector wants.
-                vec![0x07, 0x55, 0x01],
+                ]),
+                // 55 = Identity Request, 01 = the IMSI. Demanding the
+                // permanent identity after authentication has no legitimate
+                // reason and is the signature this detector wants.
+                DemoMessage::Nas(vec![0x07, 0x55, 0x01]),
             ],
         },
         Scenario {
             name: "identity demanded with no attach request",
             messages: vec![
                 // 45 = Detach Request, putting the detector in its
-                // disconnected state, then an identity demand out of nowhere.
-                vec![0x07, 0x45, 0x01, 0x07],
-                vec![0x07, 0x55, 0x01],
+                // disconnected state, then a demand out of nowhere.
+                DemoMessage::Nas(vec![0x07, 0x45, 0x01, 0x07]),
+                DemoMessage::Nas(vec![0x07, 0x55, 0x01]),
             ],
         },
         Scenario {
             name: "permanent equipment identity demanded (IMEI)",
             messages: vec![
-                vec![
+                DemoMessage::Nas(vec![
                     0x07, 0x53, 0x08, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
-                ],
+                ]),
                 // 02 = IMEI rather than IMSI: identifying the handset itself
                 // rather than the subscription.
-                vec![0x07, 0x55, 0x02],
+                DemoMessage::Nas(vec![0x07, 0x55, 0x02]),
             ],
         },
     ]
@@ -122,6 +153,52 @@ fn encapsulate_nas(msg: Vec<u8>) -> Option<HdlcEncapsulatedMessage> {
     frame.push(0); // rrc_version_minor
     frame.push(14); // rrc_version_major
     frame.extend_from_slice(&msg);
+
+    let data = hdlc_encapsulate(&frame, &CRC_CCITT);
+    Some(HdlcEncapsulatedMessage {
+        len: data.len() as u32,
+        data,
+    })
+}
+
+/// Wrap a raw RRC payload the same way, for the messages that arrive over the
+/// air interface rather than as NAS. `pdu_num` selects the logical channel:
+/// 2 is BCCH-DL-SCH (the broadcasts) and 6 is DL-DCCH (dedicated downlink).
+#[cfg(test)]
+pub fn rrc_container(payload: &[u8], pdu_num: u8) -> Option<MessagesContainer> {
+    let msg = encapsulate_rrc(payload, pdu_num)?;
+    Some(MessagesContainer {
+        data_type: DataType::UserSpace,
+        num_messages: 1,
+        messages: vec![msg],
+    })
+}
+
+fn encapsulate_rrc(payload: &[u8], pdu_num: u8) -> Option<HdlcEncapsulatedMessage> {
+    // LteRrcOtaPacket::V8, selected by ext_header_version 20. Field widths
+    // matter: earfcn and sib_mask are both 32 bit, and getting either wrong
+    // shifts everything after it so the payload is never seen.
+    let len = u16::try_from(payload.len()).ok()?;
+    let inner_length = u16::try_from(31 + payload.len()).ok()?;
+
+    let mut frame = Vec::with_capacity(payload.len() + 32);
+    frame.push(16); // Message::Log
+    frame.push(0); // pending_msgs
+    frame.extend_from_slice(&inner_length.to_le_bytes());
+    frame.extend_from_slice(&inner_length.to_le_bytes());
+    frame.extend_from_slice(&LOG_TYPE_LTE_RRC_OTA.to_le_bytes());
+    frame.extend_from_slice(&current_diag_timestamp().to_le_bytes());
+    frame.push(20); // ext_header_version, selecting the V8 layout
+    frame.push(14); // rrc_rel_maj
+    frame.push(48); // rrc_rel_min
+    frame.push(0); // bearer_id
+    frame.extend_from_slice(&160u16.to_le_bytes()); // phy_cell_id
+    frame.extend_from_slice(&2050u32.to_le_bytes()); // earfcn
+    frame.extend_from_slice(&4057u16.to_le_bytes()); // sfn_subfn
+    frame.push(pdu_num);
+    frame.extend_from_slice(&0u32.to_le_bytes()); // sib_mask
+    frame.extend_from_slice(&len.to_le_bytes());
+    frame.extend_from_slice(payload);
 
     let data = hdlc_encapsulate(&frame, &CRC_CCITT);
     Some(HdlcEncapsulatedMessage {
@@ -187,7 +264,10 @@ pub fn demo_container_from(chosen: Vec<Scenario>) -> Option<MessagesContainer> {
     let messages: Vec<_> = chosen
         .into_iter()
         .flat_map(|s| s.messages)
-        .filter_map(encapsulate_nas)
+        .filter_map(|m| match m {
+            DemoMessage::Nas(bytes) => encapsulate_nas(bytes),
+            DemoMessage::Rrc { payload, pdu_num } => encapsulate_rrc(&payload, pdu_num),
+        })
         .collect();
 
     if messages.is_empty() {
@@ -328,5 +408,284 @@ mod tests {
     fn the_demo_prefix_is_unmistakable() {
         assert!(DEMO_PREFIX.contains("DEMO"));
         assert!(DEMO_PREFIX.contains("NOT REAL"));
+    }
+}
+
+#[cfg(test)]
+mod coverage {
+    use super::*;
+    use rayhunter::analysis::analyzer::{AnalyzerConfig, Harness};
+
+    /// Detectors the demo cannot yet show.
+    ///
+    /// All three need a hand built RRC message, and unlike the null cipher one
+    /// their payloads carry nested structures (a GERAN carrier list, a SIB
+    /// schedule) whose bit layout has not been worked out yet. Listing them
+    /// here rather than leaving the gap implicit means the coverage test fails
+    /// the moment one starts or stops working, instead of the demo quietly
+    /// showing less than it used to.
+    const KNOWN_UNCOVERED: &[&str] = &[
+        "Connection Release/Redirected Carrier 2G Downgrade",
+        "LTE SIB 6/7 Downgrade",
+        "Incomplete SIB",
+    ];
+
+    /// Every enabled detector is either demonstrable or explicitly listed as
+    /// not yet demonstrable. A new detector arriving with neither fails here.
+    #[test]
+    fn demo_coverage_is_accounted_for() {
+        let names: Vec<String> = Harness::new_with_config(&AnalyzerConfig::default())
+            .get_metadata()
+            .analyzers
+            .iter()
+            .map(|a| a.name.clone())
+            .collect();
+
+        let mut fired: std::collections::HashSet<String> = Default::default();
+        for scenario in scenarios() {
+            let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
+            let container = demo_container_from(vec![scenario]).unwrap();
+            for row in harness.analyze_qmdl_messages(container) {
+                for (i, ev) in row.events.iter().enumerate() {
+                    if ev.is_some() {
+                        fired.insert(names[i].clone());
+                    }
+                }
+            }
+        }
+
+        let unaccounted: Vec<&String> = names
+            .iter()
+            .filter(|n| !fired.contains(*n) && !KNOWN_UNCOVERED.contains(&n.as_str()))
+            .collect();
+        assert!(
+            unaccounted.is_empty(),
+            "these detectors have no demo scenario and are not listed as known gaps: {unaccounted:?}"
+        );
+
+        let now_working: Vec<&&str> = KNOWN_UNCOVERED
+            .iter()
+            .filter(|n| fired.contains(**n))
+            .collect();
+        assert!(
+            now_working.is_empty(),
+            "these are listed as uncovered but now fire; remove them from KNOWN_UNCOVERED: {now_working:?}"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn report_which_analyzers_the_demo_can_trigger() {
+        let names: Vec<String> = Harness::new_with_config(&AnalyzerConfig::default())
+            .get_metadata()
+            .analyzers
+            .iter()
+            .map(|a| a.name.clone())
+            .collect();
+
+        let mut fired: std::collections::HashSet<String> = Default::default();
+        for scenario in scenarios() {
+            let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
+            let container = demo_container_from(vec![scenario]).unwrap();
+            for row in harness.analyze_qmdl_messages(container) {
+                for (i, ev) in row.events.iter().enumerate() {
+                    if ev.is_some() {
+                        fired.insert(names[i].clone());
+                    }
+                }
+            }
+        }
+        println!("COVERED:");
+        for n in &names {
+            if fired.contains(n) {
+                println!("   yes  {n}");
+            }
+        }
+        println!("NOT COVERED:");
+        for n in &names {
+            if !fired.contains(n) {
+                println!("   no   {n}");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod rrc_search {
+    use rayhunter::analysis::analyzer::{AnalyzerConfig, Harness};
+
+    fn fires(payload: &[u8], pdu_num: u8) -> Option<Vec<String>> {
+        let container = super::rrc_container(payload, pdu_num)?;
+        let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
+        let names: Vec<String> = harness
+            .get_metadata()
+            .analyzers
+            .iter()
+            .map(|a| a.name.clone())
+            .collect();
+        let mut hits = Vec::new();
+        for row in harness.analyze_qmdl_messages(container) {
+            for (i, e) in row.events.iter().enumerate() {
+                if let Some(e) = e {
+                    hits.push(format!("{}: {}", names[i], e.message));
+                }
+            }
+        }
+        if hits.is_empty() { None } else { Some(hits) }
+    }
+
+    /// Sanity: does the RRC framing parse at all? Uses the known good captured
+    /// payload from the diag library's own tests.
+    #[test]
+    fn framing_sanity() {
+        let payload = [0x40u8, 0x1, 0xee, 0xad, 0xd5, 0x4d, 0xd0];
+        for pdu in [2u8, 5, 6] {
+            let c = super::rrc_container(&payload, pdu).unwrap();
+            let parsed = c.messages();
+            let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
+            let rows = harness.analyze_qmdl_messages(super::rrc_container(&payload, pdu).unwrap());
+            println!(
+                "pdu {pdu}: parsed_ok={} skipped={:?}",
+                parsed.iter().all(|m| m.is_ok()),
+                rows.iter()
+                    .filter_map(|r| r.skipped_message_reason.clone())
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    /// Focused search for the remaining detectors, over the byte ranges the
+    /// ASN.1 choice indices constrain rather than the whole space.
+    #[test]
+    #[ignore]
+    fn search_remaining() {
+        let mut seen: std::collections::HashSet<String> = Default::default();
+        // rrcConnectionRelease is c1 index 5, so the first five bits are 00101.
+        for b0 in 0x28u16..=0x2f {
+            for b1 in 0u16..=255 {
+                for b2 in 0u16..=255 {
+                    for b3 in 0u16..=255 {
+                        let bytes = [b0 as u8, b1 as u8, b2 as u8, b3 as u8];
+                        if let Some(hits) = fires(&bytes, 7) {
+                            for h in hits {
+                                let key = h.split(':').next().unwrap_or("").to_string();
+                                if seen.insert(key) {
+                                    println!("  DL-DCCH {bytes:02x?} -> {h}");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // SIB messages on the broadcast channel.
+        for b0 in 0u16..=255 {
+            for b1 in 0u16..=255 {
+                for b2 in 0u16..=255 {
+                    let bytes = [b0 as u8, b1 as u8, b2 as u8];
+                    if let Some(hits) = fires(&bytes, 2) {
+                        for h in hits {
+                            let key = h.split(':').next().unwrap_or("").to_string();
+                            if seen.insert(key) {
+                                println!("  BCCH {bytes:02x?} -> {h}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Targeted check of bit layouts derived from the ASN.1 rather than
+    /// searched for. PDU 7 is the dedicated downlink channel; 6 is the common
+    /// one, which was the earlier mistake.
+    #[test]
+    fn try_derived_security_mode_command() {
+        for candidate in [
+            vec![0x30u8, 0x00, 0x10],
+            vec![0x30, 0x00, 0x08],
+            vec![0x30, 0x00, 0x00],
+            vec![0x30, 0x00, 0x20],
+            vec![0x30, 0x08, 0x00],
+            vec![0x38, 0x00, 0x00],
+        ] {
+            match fires(&candidate, 7) {
+                Some(hits) => println!("  {candidate:02x?} -> {hits:?}"),
+                None => println!("  {candidate:02x?} -> nothing"),
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn search_rrc_payloads() {
+        for (channel, pdu) in [("DL-DCCH", 7u8), ("BCCH-DL-SCH", 2u8)] {
+            let mut shown = 0;
+            let mut seen: std::collections::HashSet<String> = Default::default();
+            for b0 in 0u16..=255 {
+                for b1 in 0u16..=255 {
+                    for b2 in 0u16..=255 {
+                        let bytes = [b0 as u8, b1 as u8, b2 as u8];
+                        if let Some(hits) = fires(&bytes, pdu) {
+                            for h in &hits {
+                                let key = h.split(':').next().unwrap_or("").to_string();
+                                if seen.insert(key) && shown < 12 {
+                                    println!("  {channel} {bytes:02x?} -> {h}");
+                                    shown += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod marking {
+    use super::*;
+
+    /// The prefix must only ever reach synthetic messages. If a real warning
+    /// could be labelled a demo, somebody would dismiss a genuine detection,
+    /// which is a worse failure than an unlabelled fake one.
+    ///
+    /// This is structural: the marked path takes a container built here, and
+    /// the only caller passes `demo_container()`. The test pins the property
+    /// that every message in such a container is one we generated.
+    #[test]
+    fn only_generated_messages_can_be_marked() {
+        let generated: std::collections::HashSet<Vec<u8>> = scenarios()
+            .into_iter()
+            .flat_map(|s| s.messages)
+            .map(|m| match m {
+                DemoMessage::Nas(bytes) => bytes,
+                DemoMessage::Rrc { payload, .. } => payload,
+            })
+            .collect();
+
+        let container = demo_container().expect("container should build");
+        for message in container.messages() {
+            let parsed = message.expect("demo messages must parse");
+            let payload = match parsed {
+                rayhunter::diag::Message::Log { body, .. } => match body {
+                    rayhunter::diag::diaglog::LogBody::Nas4GMessage { msg, .. } => msg,
+                    rayhunter::diag::diaglog::LogBody::LteRrcOtaMessage { packet, .. } => {
+                        match packet {
+                            rayhunter::diag::diaglog::rrc::LteRrcOtaPacket::V8 {
+                                packet, ..
+                            } => packet,
+                            other => panic!("unexpected RRC packet version: {other:?}"),
+                        }
+                    }
+                    other => panic!("demo produced an unexpected message type: {other:?}"),
+                },
+                other => panic!("demo produced a non-log message: {other:?}"),
+            };
+            assert!(
+                generated.contains(&payload),
+                "a marked container held a payload that is not one of ours: {payload:02x?}"
+            );
+        }
     }
 }
