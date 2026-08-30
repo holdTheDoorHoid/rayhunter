@@ -79,6 +79,52 @@ adb -s <serial> shell 'md5sum /data/rayhunter/rayhunter-daemon'
 md5sum target/armv7-unknown-linux-musleabihf/firmware-devel/rayhunter-daemon
 ```
 
+## Deploying: push via /tmp, not straight to /data
+
+`adb push` to `/data/rayhunter/` **reports success while writing nothing**.
+The directory is `root:root` mode 755 and the adb user is uid 2000, so it cannot
+create files there. Push to `/tmp` and move it into place as root:
+
+```
+adb -s <serial> push <binary> /tmp/rayhunter-daemon.new
+adb -s <serial> shell '/bin/rootshell -c "cat /tmp/rayhunter-daemon.new > /data/rayhunter/rayhunter-daemon && chmod 0777 /data/rayhunter/rayhunter-daemon && rm -f /tmp/rayhunter-daemon.new"'
+```
+
+Always compare md5 before rebooting. The checksum guard is what catches this.
+
+## Radio measurements are intermittent, not continuous
+
+ML1 serving cell and neighbour measurement reports (`0xb17f`, `0xb180`) only
+arrive while the modem is doing something: attaching, reselecting, recovering.
+An idle hotspot that is attached and stable **stops sending them entirely**, so
+`/api/cell-info` legitimately freezes at the last reading for long stretches.
+
+That is not a bug, and it wasted real time being mistaken for one. Before
+suspecting the code, pull the capture and count what is actually in it:
+
+```
+adb -s <serial> pull /data/rayhunter/qmdl/<id>.qmdl.gz . && gunzip <id>.qmdl.gz
+```
+
+then parse with `Message::from_hdlc` over `split_inclusive(|&b| b == 0x7e)` and
+count `LogBody` variants. Zero ML1 messages means the modem is quiet, not that
+the daemon is broken. A **full power cycle** brings them back; a reboot may not.
+
+## Building synthetic RRC messages
+
+Deriving UPER bit layouts from the ASN.1 in `telcom-parser` works and is quick;
+brute force searching the byte space does not and wasted hours. Read the
+`#[asn(...)]` attributes for each type: CHOICE index widths come from the
+alternative count, SEQUENCE preambles from `optional_fields`, extensible types
+add a leading bit, and INTEGER widths from `lb`/`ub`. See `daemon/src/demo.rs`.
+
+Two traps: PDU number **7** is DL-DCCH (6 is DL-CCCH, 2 is BCCH-DL-SCH), and the
+V8 RRC packet has `earfcn` and `sib_mask` as **32 bit** fields.
+
+**Analysis rows containing only informational events are never written** (see
+`AnalysisRow::is_empty`), so a detector that only emits informational events can
+never appear in the UI.
+
 ## Talking to the right device
 
 Several Orbics may be connected at once, and they all serve on `192.168.1.1:8080` —
