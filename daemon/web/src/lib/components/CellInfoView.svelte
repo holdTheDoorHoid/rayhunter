@@ -7,6 +7,15 @@
         split_cell_id,
         type CellInfo,
     } from '../cellInfo';
+    import {
+        band_for_earfcn,
+        downlink_mhz,
+        uplink_earfcn,
+        uplink_mhz,
+        signal_bars,
+        asu_from_rsrp,
+        timing_advance_metres,
+    } from '../lteBands';
 
     let { info, recording }: { info: CellInfo | null; recording: boolean } = $props();
 
@@ -35,6 +44,57 @@
     let carrier = $derived(operator_name(identity?.mcc ?? null, identity?.mnc ?? null));
     let plmn = $derived(format_plmn(identity?.mcc ?? null, identity?.mnc ?? null));
     let quality = $derived(serving ? rsrp_quality(serving.signal.rsrp_dbm) : null);
+    let bandInfo = $derived(serving ? band_for_earfcn(serving.earfcn) : null);
+    let dl = $derived(serving ? downlink_mhz(serving.earfcn) : null);
+    let ul = $derived(serving ? uplink_mhz(serving.earfcn) : null);
+    let ulEarfcn = $derived(serving ? uplink_earfcn(serving.earfcn) : null);
+    let bars = $derived(serving ? signal_bars(serving.signal.rsrp_dbm) : 0);
+    let asu = $derived(serving ? asu_from_rsrp(serving.signal.rsrp_dbm) : null);
+
+    /** Rows for the advanced table. Anything unknown is shown as such rather than hidden. */
+    let advanced = $derived.by(() => {
+        if (!serving) return [] as { label: string; value: string; hint?: string }[];
+        const rows: { label: string; value: string; hint?: string }[] = [];
+        const unknown = 'not captured';
+        rows.push({ label: 'Cell identity', value: identity?.cell_id?.toString() ?? unknown });
+        if (split) {
+            rows.push({ label: 'Base station (eNodeB)', value: split.enodeb_id.toString() });
+            rows.push({ label: 'Sector', value: split.sector_id.toString() });
+        }
+        rows.push({ label: 'Tracking area code', value: identity?.tac?.toString() ?? unknown });
+        rows.push({ label: 'Network (PLMN)', value: plmn ?? unknown });
+        rows.push({ label: 'Physical cell id (PCI)', value: serving.pci.toString() });
+        rows.push({
+            label: 'Band',
+            value: bandInfo ? `${bandInfo.band} (${bandInfo.name})` : unknown,
+        });
+        rows.push({ label: 'Downlink EARFCN', value: serving.earfcn.toString() });
+        rows.push({ label: 'Downlink frequency', value: dl !== null ? `${dl} MHz` : unknown });
+        rows.push({ label: 'Uplink EARFCN', value: ulEarfcn?.toString() ?? unknown });
+        rows.push({ label: 'Uplink frequency', value: ul !== null ? `${ul} MHz` : unknown });
+        rows.push({
+            label: 'Duplex',
+            value: bandInfo
+                ? bandInfo.tdd
+                    ? 'TDD, one frequency shared'
+                    : 'FDD, separate frequencies'
+                : unknown,
+        });
+        rows.push({ label: 'RSRP', value: `${serving.signal.rsrp_dbm.toFixed(1)} dBm` });
+        rows.push({ label: 'RSRQ', value: `${serving.signal.rsrq_db.toFixed(1)} dB` });
+        rows.push({ label: 'RSSI', value: `${serving.signal.rssi_dbm.toFixed(1)} dBm` });
+        rows.push({ label: 'Signal bars', value: `${bars} of 4` });
+        rows.push({ label: 'ASU', value: asu?.toString() ?? unknown });
+        rows.push({
+            label: 'Timing advance',
+            value:
+                serving.timing_advance !== null && serving.timing_advance !== undefined
+                    ? `${serving.timing_advance} (about ${timing_advance_metres(serving.timing_advance)} m away)`
+                    : 'not seen yet',
+        });
+        rows.push({ label: 'Last measurement', value: clock(serving.last_seen) });
+        return rows;
+    });
 </script>
 
 <div class="border border-gray-300 dark:border-gray-700 rounded-md p-4">
@@ -74,9 +134,15 @@
             </div>
             <div>
                 <div class="text-xs text-gray-500 dark:text-gray-400">Band</div>
-                <div class="text-lg">{serving.band ?? 'unknown'}</div>
+                <div class="text-lg">
+                    {bandInfo ? `${bandInfo.band}` : (serving.band ?? 'unknown')}
+                    {#if bandInfo}<span class="text-sm text-gray-500 dark:text-gray-400"
+                            >{bandInfo.name}</span
+                        >{/if}
+                </div>
                 <div class="text-xs text-gray-500 dark:text-gray-400">
-                    EARFCN {serving.earfcn}
+                    {#if dl !== null}{dl} MHz ·
+                    {/if}EARFCN {serving.earfcn}
                 </div>
             </div>
             <div>
@@ -107,51 +173,66 @@
             </p>
         </Explainer>
 
-        {#if identity}
-            <div class="mt-3 border-t border-gray-200 dark:border-gray-700 pt-3">
-                <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
-                    <div>
-                        <div class="text-xs text-gray-500 dark:text-gray-400">Cell identity</div>
-                        <div class="font-mono">{identity.cell_id}</div>
-                    </div>
-                    {#if split}
-                        <div>
-                            <div class="text-xs text-gray-500 dark:text-gray-400">Base station</div>
-                            <div class="font-mono">{split.enodeb_id}</div>
-                        </div>
-                        <div>
-                            <div class="text-xs text-gray-500 dark:text-gray-400">Sector</div>
-                            <div class="font-mono">{split.sector_id}</div>
-                        </div>
-                    {/if}
-                    <div>
-                        <div class="text-xs text-gray-500 dark:text-gray-400">Tracking area</div>
-                        <div class="font-mono">{identity.tac}</div>
-                    </div>
-                </div>
-
-                <Explainer summary="How this tower identifies itself in its broadcast.">
-                    <p>
-                        The <strong>cell identity</strong> is unique to this cell across the whole
-                        operator network. It splits into two halves that are more useful separately:
-                        the <strong>base station</strong> is the physical site, and the
-                        <strong>sector</strong> is which face of it you are on. A large site usually has
-                        three sectors pointing in different directions. If the sector changes but the
-                        base station does not, you moved around one tower rather than to a new one.
-                    </p>
-                    <p>
-                        The <strong>tracking area</strong> is the group of towers the network uses to
-                        find your phone when someone calls. Crossing between areas makes your phone announce
-                        itself, which is one of the moments a surveillance device can be waiting for.
-                    </p>
-                </Explainer>
-            </div>
-        {:else}
+        {#if !identity}
             <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
                 This tower's identifying broadcast has not been captured yet, so its operator and
                 cell identity are still unknown. It usually arrives within a few seconds.
             </p>
         {/if}
+
+        <details class="group mt-3 border-t border-gray-200 dark:border-gray-700 pt-3">
+            <summary
+                class="cursor-pointer list-none text-sm text-rayhunter-blue underline marker:hidden"
+            >
+                Advanced radio details
+            </summary>
+            <div class="mt-2 overflow-x-auto">
+                <table class="w-full text-sm">
+                    <tbody>
+                        {#each advanced as row (row.label)}
+                            <tr class="border-t border-gray-100 dark:border-gray-800">
+                                <td class="py-1 pr-4 text-gray-500 dark:text-gray-400"
+                                    >{row.label}</td
+                                >
+                                <td class="py-1 text-right font-mono">{row.value}</td>
+                            </tr>
+                        {/each}
+                    </tbody>
+                </table>
+            </div>
+
+            <Explainer summary="What the less obvious numbers here mean.">
+                <p>
+                    The <strong>cell identity</strong> is unique to this cell across the operator's
+                    whole network, and splits into a <strong>base station</strong> and a
+                    <strong>sector</strong>. A large site usually has three sectors pointing in
+                    different directions, so a sector change without a base station change means you
+                    moved around one tower rather than to a new one.
+                </p>
+                <p>
+                    The <strong>tracking area code</strong> groups towers for the purpose of finding your
+                    phone when someone calls it. Crossing between areas makes your phone announce itself,
+                    which is one of the moments a surveillance device can wait for.
+                </p>
+                <p>
+                    <strong>EARFCN</strong> is the channel number and the frequency is derived from it.
+                    Uplink and downlink are separate frequencies on most bands, and a single shared one
+                    on time division bands. A tower on a band your operator does not use in your area
+                    is worth a second look.
+                </p>
+                <p>
+                    <strong>Timing advance</strong> is how far ahead the tower tells your phone to transmit
+                    so its signal arrives on time, which is a direct read on distance. Each step is roughly
+                    78 metres of signal path. It measures the path the signal actually takes, so it reads
+                    high where the signal bounces off buildings, and it only updates when your phone performs
+                    random access rather than continuously.
+                </p>
+                <p>
+                    <strong>ASU</strong> and <strong>bars</strong> are the same measurement as RSRP presented
+                    the way phones show it. The dBm figure is the real reading.
+                </p>
+            </Explainer>
+        </details>
 
         <!-- Neighbours: signals we can measure but not identify. -->
         <div class="mt-4 border-t border-gray-200 dark:border-gray-700 pt-3">

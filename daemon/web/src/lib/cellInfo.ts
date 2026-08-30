@@ -32,6 +32,8 @@ export interface ServingCell {
     band: number | null;
     signal: SignalMeasurements;
     identity: CellIdentity | null;
+    /** Raw timing advance from the last random access, if one has happened. */
+    timing_advance: number | null;
     last_seen: string;
 }
 

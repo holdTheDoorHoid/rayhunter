@@ -505,6 +505,7 @@ async fn update_cell_info(cell_tracker: &Arc<RwLock<CellTracker>>, container: &M
 
     let mut serving: Option<(u16, u32, SignalMeasurements)> = None;
     let mut neighbors: Option<Vec<NeighborCell>> = None;
+    let mut timing_advance: Option<u16> = None;
     let mut rrc_messages: Vec<Message> = Vec::new();
 
     for message in container.messages() {
@@ -548,6 +549,18 @@ async fn update_cell_info(cell_tracker: &Arc<RwLock<CellTracker>>, container: &M
                         .collect(),
                 );
             }
+            LogBody::LteMacRachResponse { packet } => {
+                // The random access response carries the timing advance, which
+                // is the device's only read on how far away the tower is.
+                for subpacket in &packet.subpackets {
+                    if let rayhunter::diag::diaglog::mac::SubpacketBody::RachAttempt(attempt) =
+                        &subpacket.body
+                        && let Some(msg2) = attempt.get_msg2()
+                    {
+                        timing_advance = Some(msg2.ta);
+                    }
+                }
+            }
             LogBody::LteRrcOtaMessage { .. } => {
                 // Kept aside rather than parsed here: decoding RRC is the
                 // expensive part, and it is only needed until this cell's
@@ -565,7 +578,11 @@ async fn update_cell_info(cell_tracker: &Arc<RwLock<CellTracker>>, container: &M
         }
     }
 
-    if serving.is_none() && neighbors.is_none() && rrc_messages.is_empty() {
+    if serving.is_none()
+        && neighbors.is_none()
+        && timing_advance.is_none()
+        && rrc_messages.is_empty()
+    {
         return;
     }
 
@@ -575,6 +592,9 @@ async fn update_cell_info(cell_tracker: &Arc<RwLock<CellTracker>>, container: &M
     }
     if let Some(neighbors) = neighbors {
         tracker.update_neighbors(neighbors);
+    }
+    if let Some(ta) = timing_advance {
+        tracker.update_timing_advance(ta);
     }
 
     // Only decode RRC while this cell's identity is still unknown. Once it is

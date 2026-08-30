@@ -76,6 +76,13 @@ pub struct ServingCell {
     pub signal: SignalMeasurements,
     /// Present only once the cell's SIB1 broadcast has been seen.
     pub identity: Option<CellIdentity>,
+    /// Raw timing advance from the most recent random access response.
+    ///
+    /// Each step is about 0.52 microseconds of round trip, so roughly 78 metres
+    /// of separation. It only arrives when the device performs random access,
+    /// which is not continuous, so this is the last value seen rather than a
+    /// live one.
+    pub timing_advance: Option<u16>,
     pub last_seen: DateTime<Local>,
 }
 
@@ -206,15 +213,30 @@ impl CellTracker {
             _ => None,
         };
 
+        // Timing advance survives a measurement of the same cell, since random
+        // access happens far less often than measurement.
+        let timing_advance = match &self.serving {
+            Some(prev) if prev.pci == pci && prev.earfcn == earfcn => prev.timing_advance,
+            _ => None,
+        };
+
         self.serving = Some(ServingCell {
             pci,
             earfcn,
             band: band_for_earfcn(earfcn),
             signal,
             identity,
+            timing_advance,
             last_seen: now,
         });
         self.record_observation(pci, earfcn, signal.rsrp_dbm, now);
+    }
+
+    /// Record a timing advance from a random access response.
+    pub fn update_timing_advance(&mut self, ta: u16) {
+        if let Some(serving) = self.serving.as_mut() {
+            serving.timing_advance = Some(ta);
+        }
     }
 
     /// Attach a decoded identity to the current serving cell.
