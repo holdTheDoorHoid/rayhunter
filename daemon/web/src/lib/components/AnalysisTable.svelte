@@ -36,7 +36,7 @@
         <div class="overflow-x-auto">
             <table class="table-auto text-left">
                 <thead class="p-2">
-                    <tr class="bg-gray-300">
+                    <tr class="bg-gray-300 dark:bg-gray-700">
                         <th class="p-2">Timestamp</th>
                         <th class="p-2">Heuristic</th>
                         <th class="p-2">Warning</th>
@@ -52,11 +52,18 @@
                                     {@const analyzer = analyzers[analyzerIndex]}
                                     {@const event_type_class = {
                                         Informational: '',
-                                        Low: 'bg-yellow-200',
-                                        Medium: 'bg-orange-400',
-                                        High: 'bg-red-600',
+                                        // Each severity carries its own text
+                                        // colour rather than inheriting: these
+                                        // backgrounds are fixed in both themes,
+                                        // so inherited light text vanished on
+                                        // them in dark mode.
+                                        Low: 'bg-yellow-200 text-yellow-950',
+                                        Medium: 'bg-orange-400 text-orange-950',
+                                        High: 'bg-red-600 text-white',
                                     }[event.event_type]}
-                                    <tr class="even:bg-gray-200 odd:bg-white">
+                                    <tr
+                                        class="even:bg-gray-200 odd:bg-white dark:even:bg-gray-800 dark:odd:bg-gray-900"
+                                    >
                                         <td class="p-2">{date_formatter.format(parsed_date)}</td>
                                         <td class="p-2">{analyzer.name} v{analyzer.version}</td>
                                         <td class="p-2">{event.message}</td>
@@ -84,14 +91,16 @@
         <div class="overflow-x-auto">
             <table class="table-auto text-left">
                 <thead class="p-2">
-                    <tr class="bg-gray-300">
+                    <tr class="bg-gray-300 dark:bg-gray-700">
                         <th scope="col" class="p-2">Total Msgs Affected</th>
                         <th scope="col">Reason/Error</th>
                     </tr>
                 </thead>
                 <tbody>
                     {#each skipped_messages.entries() as [message, count]}
-                        <tr class="even:bg-gray-200 odd:bg-white">
+                        <tr
+                            class="even:bg-gray-200 odd:bg-white dark:even:bg-gray-800 dark:odd:bg-gray-900"
+                        >
                             <td class="text-center">{count}</td>
                             <td>{message}</td>
                         </tr>

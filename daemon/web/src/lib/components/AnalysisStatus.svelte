@@ -39,9 +39,9 @@
         if (!ready) {
             return 'text-gray-700 dark:text-gray-200';
         } else if ((entry.get_num_warnings() || 0) < 1) {
-            return 'text-green-700 dark:text-green-300 border-green-500 bg-green-200 text-blue-600 dark:text-blue-400 border rounded-full px-2';
+            return 'text-green-800 dark:text-green-200 border-green-500 dark:border-green-700 bg-green-200 dark:bg-green-900 border rounded-full px-2';
         } else {
-            return 'text-red-700 dark:text-red-300 border-red-500 bg-red-200 text-blue-600 dark:text-blue-400 border rounded-full px-2';
+            return 'text-red-800 dark:text-red-200 border-red-500 dark:border-red-700 bg-red-200 dark:bg-red-900 border rounded-full px-2';
         }
     });
 </script>

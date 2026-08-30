@@ -84,7 +84,9 @@
         >
     </div>
     {#if entry.stop_reason}
-        <div class="bg-yellow-50 border border-yellow-300 rounded-sm p-2 text-yellow-800 text-sm">
+        <div
+            class="bg-yellow-50 dark:bg-yellow-950 border border-yellow-300 dark:border-yellow-800 rounded-sm p-2 text-yellow-800 dark:text-yellow-200 text-sm"
+        >
             {entry.stop_reason}
         </div>
     {/if}

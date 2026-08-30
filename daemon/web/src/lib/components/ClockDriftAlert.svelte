@@ -55,11 +55,13 @@
 
 {#if show_alert}
     <div
-        class="bg-yellow-100 dark:bg-yellow-950 border-yellow-400 drop-shadow-sm p-4 flex flex-col gap-2 border rounded-md"
+        class="bg-yellow-100 dark:bg-yellow-950 border-yellow-400 dark:border-yellow-700 drop-shadow-sm p-4 flex flex-col gap-2 border rounded-md"
     >
-        <span class="text-xl font-bold flex flex-row items-center gap-2 text-yellow-700">
+        <span
+            class="text-xl font-bold flex flex-row items-center gap-2 text-yellow-700 dark:text-yellow-300"
+        >
             <svg
-                class="w-6 h-6 text-yellow-600"
+                class="w-6 h-6 text-yellow-600 dark:text-yellow-400"
                 aria-hidden="true"
                 xmlns="http://www.w3.org/2000/svg"
                 width="24"
@@ -102,7 +104,7 @@
         <p>Copy browser clock to device?</p>
         <div class="flex flex-row gap-2 justify-end">
             <button
-                class="font-medium py-2 px-4 rounded-md border border-gray-400 hover:bg-yellow-200"
+                class="font-medium py-2 px-4 rounded-md border border-gray-400 dark:border-gray-600 hover:bg-yellow-200 dark:hover:bg-yellow-900"
                 onclick={dismiss}
             >
                 Dismiss

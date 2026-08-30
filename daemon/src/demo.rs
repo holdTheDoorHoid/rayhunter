@@ -31,22 +31,69 @@ const LOG_TYPE_EMM_NAS_DOWNLINK: u16 = 0xb0ec;
 /// travels with the event into the recording, the history and any notification.
 pub const DEMO_PREFIX: &str = "[DEMO, NOT REAL] ";
 
-/// A NAS Security Mode Command selecting the null cipher, EEA0.
+/// One thing a demo can show, as the messages needed to provoke it.
 ///
-/// This is one of the clearest signs of a fake base station: it tells the phone
-/// to turn encryption off, which a real network essentially never does. It is
-/// also a single self contained message with no preceding state, which is what
-/// makes it usable as a demo.
+/// Each scenario is a self contained sequence: a state machine detector needs
+/// its messages in order, so a scenario carries all of them rather than being a
+/// single message.
+pub struct Scenario {
+    /// What this shows an audience, used in the log when it is chosen.
+    pub name: &'static str,
+    /// NAS payloads, injected in order.
+    pub messages: Vec<Vec<u8>>,
+}
+
+/// Every scenario the demo can draw from.
 ///
-/// Bytes, per 3GPP TS 24.301:
-/// - `07` protocol discriminator EMM, plain, no security header
-/// - `5d` message type, Security Mode Command
-/// - `00` selected algorithms: ciphering EEA0 (null), integrity EIA0
-/// - `00` NAS key set identifier, plus spare half octet
-/// - `02 80 00` replayed UE security capabilities, length 2
-/// - `00` selected NAS security algorithms follow on
-fn nas_null_cipher_bytes() -> Vec<u8> {
-    vec![0x07, 0x5d, 0x00, 0x00, 0x02, 0x80, 0x00, 0x00]
+/// The bytes follow 3GPP TS 24.301. Each message begins `07`, being a security
+/// header type of 0 (plain, no integrity protection) in the high nibble and
+/// protocol discriminator 7 (EPS Mobility Management) in the low nibble.
+pub fn scenarios() -> Vec<Scenario> {
+    vec![
+        Scenario {
+            name: "tower switched encryption off (NAS null cipher)",
+            messages: vec![
+                // 5d = Security Mode Command. 00 selects EEA0, the null
+                // cipher, meaning no encryption at all. 00 is the key set
+                // identifier, then the replayed UE security capabilities.
+                vec![0x07, 0x5d, 0x00, 0x00, 0x02, 0x80, 0x00, 0x00],
+            ],
+        },
+        Scenario {
+            name: "identity demanded after authentication (IMSI catcher pattern)",
+            messages: vec![
+                // 53 = Authentication Response, which moves the detector into
+                // its authenticated state. 08 is the length of the response.
+                vec![
+                    0x07, 0x53, 0x08, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+                ],
+                // 55 = Identity Request, 01 = asking for the IMSI. Demanding
+                // the permanent identity *after* authentication has no
+                // legitimate reason and is the signature this detector wants.
+                vec![0x07, 0x55, 0x01],
+            ],
+        },
+        Scenario {
+            name: "identity demanded with no attach request",
+            messages: vec![
+                // 45 = Detach Request, putting the detector in its
+                // disconnected state, then an identity demand out of nowhere.
+                vec![0x07, 0x45, 0x01, 0x07],
+                vec![0x07, 0x55, 0x01],
+            ],
+        },
+        Scenario {
+            name: "permanent equipment identity demanded (IMEI)",
+            messages: vec![
+                vec![
+                    0x07, 0x53, 0x08, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+                ],
+                // 02 = IMEI rather than IMSI: identifying the handset itself
+                // rather than the subscription.
+                vec![0x07, 0x55, 0x02],
+            ],
+        },
+    ]
 }
 
 /// Wrap raw NAS bytes in the diag log framing the daemon expects, then HDLC
@@ -96,9 +143,50 @@ fn current_diag_timestamp() -> u64 {
 ///
 /// Returns None if the messages cannot be built, which should not happen but is
 /// not worth crashing a running detector over.
+/// How many scenarios one press of the demo button uses.
+///
+/// More than one, so a demo shows that Rayhunter watches for several different
+/// signs rather than a single trick. Not all of them, so repeated presses look
+/// different and the audience sees the variety across a session.
+const SCENARIOS_PER_RUN: usize = 2;
+
+/// Choose the scenarios for one demo run.
+///
+/// Selection is shuffled so consecutive presses differ. The source of
+/// randomness is the clock rather than a crate dependency: nothing here is
+/// security sensitive, it only needs to not repeat itself.
+pub fn choose_scenarios(count: usize) -> Vec<Scenario> {
+    let mut pool = scenarios();
+    let mut seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as u64 ^ d.as_secs())
+        .unwrap_or(0x9e3779b9)
+        | 1;
+
+    // Fisher-Yates, with a small xorshift for the index at each step.
+    for i in (1..pool.len()).rev() {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        pool.swap(i, (seed % (i as u64 + 1)) as usize);
+    }
+    pool.truncate(count.min(pool.len()).max(1));
+    pool
+}
+
 pub fn demo_container() -> Option<MessagesContainer> {
-    let messages: Vec<_> = [nas_null_cipher_bytes()]
+    let chosen = choose_scenarios(SCENARIOS_PER_RUN);
+    for s in &chosen {
+        log::info!("demo scenario: {}", s.name);
+    }
+    demo_container_from(chosen)
+}
+
+/// Build a container from the given scenarios, in order.
+pub fn demo_container_from(chosen: Vec<Scenario>) -> Option<MessagesContainer> {
+    let messages: Vec<_> = chosen
         .into_iter()
+        .flat_map(|s| s.messages)
         .filter_map(encapsulate_nas)
         .collect();
 
@@ -118,25 +206,93 @@ mod tests {
     use super::*;
     use rayhunter::analysis::analyzer::{AnalyzerConfig, EventType, Harness};
 
-    /// The demo has to survive the same journey a real message takes: HDLC
+    /// Every message has to survive the same journey a real one takes: HDLC
     /// framing, diag parsing, gsmtap conversion, then the analysers. Testing
     /// the bytes in isolation would prove nothing about whether a demo works.
     #[test]
-    fn the_demo_message_round_trips_through_diag_parsing() {
-        let container = demo_container().expect("demo container should build");
-        let parsed = container.messages();
-        assert_eq!(parsed.len(), 1, "expected one demo message");
+    fn every_scenario_round_trips_through_diag_parsing() {
+        for scenario in scenarios() {
+            let expected = scenario.messages.len();
+            let container = demo_container_from(vec![scenario]).expect("container should build");
+            let parsed = container.messages();
+            assert_eq!(parsed.len(), expected);
+            for message in parsed {
+                assert!(message.is_ok(), "a demo message did not parse back");
+            }
+        }
+    }
+
+    /// Each scenario has to raise a high severity warning on its own, since any
+    /// of them can be chosen alone. One that only produced an informational
+    /// note would leave a demo showing nothing.
+    #[test]
+    fn every_scenario_raises_a_high_warning_by_itself() {
+        for scenario in scenarios() {
+            let name = scenario.name;
+            let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
+            let container = demo_container_from(vec![scenario]).expect("container should build");
+            let rows = harness.analyze_qmdl_messages(container);
+            let highest = rows
+                .iter()
+                .flat_map(|row| row.events.iter().flatten())
+                .map(|e| e.event_type)
+                .max();
+            assert_eq!(
+                highest,
+                Some(EventType::High),
+                "scenario {name:?} did not raise a high warning"
+            );
+        }
+    }
+
+    /// A run draws more than one scenario, so an audience sees that several
+    /// different signs are being watched for rather than a single trick.
+    #[test]
+    fn a_run_uses_several_scenarios() {
+        const { assert!(SCENARIOS_PER_RUN > 1) };
         assert!(
-            parsed[0].is_ok(),
-            "demo message failed to parse back: {:?}",
-            parsed[0]
+            scenarios().len() > SCENARIOS_PER_RUN,
+            "the pool must be larger than one run, or every run is identical"
+        );
+        assert_eq!(choose_scenarios(SCENARIOS_PER_RUN).len(), SCENARIOS_PER_RUN);
+    }
+
+    /// Selection must actually vary, or repeated presses look identical.
+    #[test]
+    fn selection_varies_between_runs() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..200 {
+            let names: Vec<_> = choose_scenarios(SCENARIOS_PER_RUN)
+                .iter()
+                .map(|s| s.name)
+                .collect();
+            seen.insert(names);
+            std::thread::sleep(std::time::Duration::from_nanos(1));
+        }
+        assert!(
+            seen.len() > 1,
+            "every run chose the same scenarios, so the demo never varies"
         );
     }
 
-    /// The point of the whole feature: it must actually trip a real detector.
-    /// If this fails, a demo would show an audience nothing.
+    /// Every scenario in the pool must be reachable, or it is dead weight that
+    /// nobody will notice has stopped working.
     #[test]
-    fn the_demo_message_triggers_a_real_heuristic() {
+    fn every_scenario_can_be_chosen() {
+        let all: std::collections::HashSet<_> = scenarios().iter().map(|s| s.name).collect();
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..500 {
+            for s in choose_scenarios(SCENARIOS_PER_RUN) {
+                seen.insert(s.name);
+            }
+            std::thread::sleep(std::time::Duration::from_nanos(1));
+        }
+        assert_eq!(seen, all, "some scenarios are never chosen");
+    }
+
+    /// The point of the whole feature: a run must actually trip real detectors.
+    #[test]
+    fn a_demo_run_triggers_real_heuristics() {
         let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
         let container = demo_container().expect("demo container should build");
 
