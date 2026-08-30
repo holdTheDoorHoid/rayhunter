@@ -27,6 +27,7 @@ use tokio_util::io::ReaderStream;
 use tokio_util::sync::CancellationToken;
 
 use crate::analysis::{AnalysisCtrlMessage, AnalysisStatus};
+use crate::cell_info::{CellInfo, CellTracker};
 use crate::config::{Config, GpsMode};
 use crate::diag::DiagDeviceCtrlMessage;
 use crate::display::DisplayState;
@@ -45,6 +46,7 @@ pub struct ServerState {
     pub analysis_sender: Sender<AnalysisCtrlMessage>,
     pub daemon_restart_token: CancellationToken,
     pub ui_update_sender: Option<Sender<DisplayState>>,
+    pub cell_tracker: Arc<RwLock<CellTracker>>,
     pub wifi_status: Arc<RwLock<wifi_station::WifiStatus>>,
     pub wifi_scan_lock: tokio::sync::Mutex<()>,
     pub gps_state: Arc<RwLock<Option<GpsData>>>,
@@ -133,6 +135,25 @@ pub async fn serve_static(
             StatusCode::NOT_FOUND.into_response()
         }
     }
+}
+
+/// What the radio currently sees on the air.
+///
+/// Only updates while a recording is running, since it comes from the modem
+/// diagnostic stream. `has_data` is false before anything has arrived, so the
+/// UI can say why it is empty rather than appearing broken.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    get,
+    path = "/api/cell-info",
+    tag = "Cell information",
+    responses(
+        (status = StatusCode::OK, description = "Success", body = CellInfo)
+    ),
+    summary = "Get cell information",
+    description = "The serving cell, the neighbours the modem can hear, and the cells seen during this run."
+))]
+pub async fn get_cell_info(State(state): State<Arc<ServerState>>) -> Json<CellInfo> {
+    Json(state.cell_tracker.read().await.snapshot())
 }
 
 #[cfg_attr(feature = "apidocs", utoipa::path(
@@ -788,6 +809,7 @@ mod tests {
             analysis_sender: analysis_tx,
             daemon_restart_token: CancellationToken::new(),
             ui_update_sender: None,
+            cell_tracker: Arc::new(RwLock::new(CellTracker::new())),
             wifi_status: Arc::new(RwLock::new(wifi_station::WifiStatus::default())),
             wifi_scan_lock: tokio::sync::Mutex::new(()),
             gps_state: Arc::new(RwLock::new(None)),

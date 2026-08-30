@@ -1,5 +1,6 @@
 mod analysis;
 mod battery;
+mod cell_info;
 mod config;
 mod crypto_provider;
 mod diag;
@@ -28,9 +29,9 @@ use crate::notifications::{NotificationService, run_notification_worker};
 use crate::pcap::get_pcap;
 use crate::qmdl_store::RecordingStore;
 use crate::server::{
-    MAX_GIF_BYTES, ServerState, debug_set_display_state, delete_display_gif, get_config,
-    get_display_gif, get_qmdl, get_time, get_wifi_status, get_zip, scan_wifi, serve_static,
-    set_config, set_display_gif, set_time_offset, test_notification,
+    MAX_GIF_BYTES, ServerState, debug_set_display_state, delete_display_gif, get_cell_info,
+    get_config, get_display_gif, get_qmdl, get_time, get_wifi_status, get_zip, scan_wifi,
+    serve_static, set_config, set_display_gif, set_time_offset, test_notification,
 };
 use crate::stats::{get_qmdl_manifest, get_system_stats, get_update_status};
 use crate::update::{UpdateStatus, run_update_check_worker};
@@ -78,6 +79,7 @@ fn get_router() -> AppRouter {
         .route("/api/analysis-report/{name}", get(get_analysis_report))
         .route("/api/analysis", get(get_analysis_status))
         .route("/api/analysis/{name}", post(start_analysis))
+        .route("/api/cell-info", get(get_cell_info))
         .route("/api/config", get(get_config))
         .route("/api/config", post(set_config))
         .route(
@@ -229,6 +231,11 @@ async fn run_with_config(
     // signaled to stop.
     let _shutdown_guard = shutdown_token.clone().drop_guard();
 
+    // Shared between the diag thread, which fills it, and the server, which
+    // serves it to the web UI. Declared out here so the server still has one in
+    // debug mode, where no diag thread runs and it simply stays empty.
+    let cell_tracker = Arc::new(RwLock::new(cell_info::CellTracker::new()));
+
     let notification_service = NotificationService::new(config.ntfy_url.clone());
     let update_status_lock = Arc::new(RwLock::new(UpdateStatus::default()));
 
@@ -252,6 +259,7 @@ async fn run_with_config(
             config.min_space_to_continue_recording_mb,
             config.gps_mode,
             gps_fixed_coords,
+            cell_tracker.clone(),
         );
         info!("Starting UI");
 
@@ -360,6 +368,7 @@ async fn run_with_config(
         analysis_sender: analysis_tx,
         daemon_restart_token: restart_token.clone(),
         ui_update_sender: Some(ui_update_tx),
+        cell_tracker: cell_tracker.clone(),
         wifi_status,
         wifi_scan_lock: tokio::sync::Mutex::new(()),
         gps_state: Arc::new(tokio::sync::RwLock::new(initial_gps)),

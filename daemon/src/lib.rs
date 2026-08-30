@@ -1,5 +1,6 @@
 pub mod analysis;
 pub mod battery;
+pub mod cell_info;
 pub mod config;
 pub mod crypto_provider;
 pub mod diag;

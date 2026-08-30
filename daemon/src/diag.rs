@@ -14,7 +14,11 @@ use rayhunter::Device;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
+use crate::cell_info::{
+    CellTracker, NeighborCell, SignalMeasurements, identity_from_information_element,
+};
 use crate::gps::GpsRecord;
+use rayhunter::analysis::information_element::InformationElement;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{RwLock, oneshot};
 use tokio_stream::wrappers::LinesStream;
@@ -70,6 +74,8 @@ pub struct DiagTask {
     bytes_since_space_check: usize,
     low_space_warned: bool,
     latest_packet_timestamp: Option<i64>,
+    /// Shared with the server so the web UI can read what the radio sees.
+    cell_tracker: Arc<RwLock<CellTracker>>,
 }
 
 enum DiagState {
@@ -117,6 +123,7 @@ impl DiagTask {
         min_space_to_continue_mb: u64,
         gps_mode: GpsMode,
         gps_fixed_coords: Option<(f64, f64)>,
+        cell_tracker: Arc<RwLock<CellTracker>>,
     ) -> Self {
         Self {
             ui_update_sender,
@@ -127,6 +134,7 @@ impl DiagTask {
             min_space_to_continue_mb,
             gps_mode,
             gps_fixed_coords,
+            cell_tracker,
             state: DiagState::Stopped,
             max_type_seen: EventType::Informational,
             bytes_since_space_check: 0,
@@ -413,6 +421,8 @@ impl DiagTask {
                 self.latest_packet_timestamp = Some(ts);
             }
 
+            update_cell_info(&self.cell_tracker, &container).await;
+
             let container_bytes: usize = container.messages.iter().map(|m| m.data.len()).sum();
             self.bytes_since_space_check += container_bytes;
             let max_type = match analysis_writer.analyze_container(container).await {
@@ -453,6 +463,112 @@ impl DiagTask {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Pull the radio measurements out of a container and fold them into the
+/// shared cell tracker.
+///
+/// These messages are decoded by the library already but nothing consumed
+/// them, so they were being parsed and dropped. Reading them here keeps
+/// this out of the analysis path, which stays focused on detection.
+async fn update_cell_info(cell_tracker: &Arc<RwLock<CellTracker>>, container: &MessagesContainer) {
+    use rayhunter::diag::diaglog::LogBody;
+
+    let mut serving: Option<(u16, u32, SignalMeasurements)> = None;
+    let mut neighbors: Option<Vec<NeighborCell>> = None;
+    let mut rrc_messages: Vec<Message> = Vec::new();
+
+    for message in container.messages() {
+        let Ok(Message::Log {
+            body,
+            pending_msgs,
+            outer_length,
+            inner_length,
+            log_type,
+            timestamp,
+        }) = message
+        else {
+            continue;
+        };
+        match body {
+            LogBody::LteMl1ServingCellMeasurementAndEvaluation { data } => {
+                serving = Some((
+                    data.get_pci(),
+                    data.get_earfcn(),
+                    SignalMeasurements {
+                        rsrp_dbm: data.get_meas_rsrp(),
+                        rsrq_db: data.get_meas_rsrq(),
+                        rssi_dbm: data.get_meas_rssi(),
+                    },
+                ));
+            }
+            LogBody::LteMl1NeighborCellsMeasurements { data } => {
+                let earfcn = data.get_earfcn();
+                neighbors = Some(
+                    data.cells
+                        .iter()
+                        .map(|cell| NeighborCell {
+                            pci: cell.pci,
+                            earfcn,
+                            signal: SignalMeasurements {
+                                rsrp_dbm: cell.get_meas_rsrp(),
+                                rsrq_db: cell.get_meas_rsrq(),
+                                rssi_dbm: cell.get_meas_rssi(),
+                            },
+                        })
+                        .collect(),
+                );
+            }
+            LogBody::LteRrcOtaMessage { .. } => {
+                // Kept aside rather than parsed here: decoding RRC is the
+                // expensive part, and it is only needed until this cell's
+                // identity is known.
+                rrc_messages.push(Message::Log {
+                    pending_msgs,
+                    outer_length,
+                    inner_length,
+                    log_type,
+                    timestamp,
+                    body,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    if serving.is_none() && neighbors.is_none() && rrc_messages.is_empty() {
+        return;
+    }
+
+    let mut tracker = cell_tracker.write().await;
+    if let Some((pci, earfcn, signal)) = serving {
+        tracker.update_serving(pci, earfcn, signal);
+    }
+    if let Some(neighbors) = neighbors {
+        tracker.update_neighbors(neighbors);
+    }
+
+    // Only decode RRC while this cell's identity is still unknown. Once it is
+    // known it stays put until the cell changes, so this stops being work.
+    if tracker
+        .snapshot()
+        .serving
+        .is_some_and(|s| s.identity.is_none())
+    {
+        for message in rrc_messages {
+            let Ok(Some((_, gsmtap))) = rayhunter::gsmtap::parser::parse(message) else {
+                continue;
+            };
+            let Ok(element) = InformationElement::try_from(&gsmtap) else {
+                continue;
+            };
+            if let Some(identity) = identity_from_information_element(&element) {
+                tracker.update_identity(identity);
+                break;
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn run_diag_read_thread(
     task_tracker: &TaskTracker,
     device: Device,
@@ -467,6 +583,7 @@ pub fn run_diag_read_thread(
     min_space_to_continue_mb: u64,
     gps_mode: GpsMode,
     gps_fixed_coords: Option<(f64, f64)>,
+    cell_tracker: Arc<RwLock<CellTracker>>,
 ) {
     task_tracker.spawn(async move {
         info!("Using configuration for device: {0:?}", device);
@@ -485,6 +602,7 @@ pub fn run_diag_read_thread(
             min_space_to_continue_mb,
             gps_mode,
             gps_fixed_coords,
+            cell_tracker,
         );
         qmdl_file_tx
             .send(DiagDeviceCtrlMessage::StartRecording { response_tx: None })
