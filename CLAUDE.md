@@ -282,3 +282,21 @@ The extension is historical; the file may hold a PNG. What it is gets decided
 from its magic bytes at every use. Uploading a file only writes it to disk;
 **the config's `display_gifs` entry for that state must also be set**, or the
 display loop never loads it. That is why an upload can appear to do nothing.
+
+## `POST /api/config` replaces the whole config
+
+Fields left out of the body are reset to their **defaults**, not left alone.
+Posting `{"min_space_to_start_recording_mb": 188}` silently turned off
+`auto_delete_clean_recordings`, `ui_level` and everything else that had been
+set. This wasted time twice.
+
+To change one setting from the shell, read the config, edit it, post it back:
+
+```
+curl -s http://localhost:9090/api/config > cfg.json
+python3 -c "import json;c=json.load(open('cfg.json'));c['ui_level']=5;json.dump(c,open('cfg.json','w'))"
+curl -s -X POST http://localhost:9090/api/config -H 'Content-Type: application/json' --data-binary @cfg.json
+```
+
+Every config POST also **restarts the daemon**, which takes about 60 seconds
+before the web UI answers again.
