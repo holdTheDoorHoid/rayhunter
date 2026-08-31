@@ -160,3 +160,42 @@ describe('open_action', () => {
         expect(open_action({ packet: null, nonce: 2 }, 1, open)).toEqual({ kind: 'nothing' });
     });
 });
+
+describe('alert packets are exempt from filters', () => {
+    /**
+     * A filter hiding the packet that raised the warning means the list can
+     * look clean while the thing you came to find sits behind a checkbox.
+     * That is a bad way for a detector to behave, so warnings win over filters.
+     */
+    it('keeps a warning packet that every filter would otherwise drop', () => {
+        const packets = [
+            packet({
+                packet_num: 7,
+                parse_status: 'not a signalling message',
+                protocol: 'LTE NAS',
+            }),
+            packet({ packet_num: 8, parse_status: 'not a signalling message' }),
+        ];
+        const alerts = new Set([7]);
+        const strict = { ...DEFAULT_FILTERS, protocol: 'rrc' as const, search: 'nothing matches' };
+
+        expect(apply_filters(packets, strict, alerts).map((p) => p.packet_num)).toEqual([7]);
+    });
+
+    it('changes nothing when no packet raised a warning', () => {
+        const packets = [packet(), packet({ packet_num: 2 })];
+        expect(apply_filters(packets, DEFAULT_FILTERS, new Set())).toEqual(
+            apply_filters(packets, DEFAULT_FILTERS)
+        );
+    });
+
+    it('still hides ordinary packets alongside an exempt one', () => {
+        const packets = [
+            packet({ packet_num: 7, parse_status: 'not a signalling message' }),
+            packet({ packet_num: 8, parse_status: 'not a signalling message' }),
+        ];
+        expect(
+            apply_filters(packets, DEFAULT_FILTERS, new Set([7])).map((p) => p.packet_num)
+        ).toEqual([7]);
+    });
+});

@@ -2,6 +2,7 @@
     import {
         type SystemStats,
         cpu_state,
+        load_state_label,
         format_uptime,
         hours_until_full,
         format_duration_hours,
@@ -59,6 +60,20 @@
               ? 'text-amber-600 dark:text-amber-400'
               : ''
     );
+
+    // Built here rather than in the markup. Assembling it there meant the comma
+    // and the spaces around it fell out of how the `if` blocks happened to be
+    // indented, which is a fragile way to decide what a sentence looks like.
+    let tempParts = $derived.by(() => {
+        const health = stats.health;
+        if (!health) return [];
+        const parts: string[] = [];
+        if (health.cpu_temp_c !== undefined)
+            parts.push(`${health.cpu_temp_c.toFixed(0)}°C Processor`);
+        if (health.radio_temp_c !== undefined)
+            parts.push(`${health.radio_temp_c.toFixed(0)}°C Radio`);
+        return parts;
+    });
 
     let battery_level = $derived(stats.battery_status ? stats.battery_status.level : 0);
     let bar_color = $derived.by(() => {
@@ -121,8 +136,8 @@
                     <td class="py-1 pr-4 text-gray-500 dark:text-gray-400 font-medium">Processor</td
                     >
                     <td class="py-1 {cpuClass}">
-                        {#if stats.health.cpu_busy_percent !== undefined}
-                            {cpuLabel}
+                        {#if stats.health.cpu_busy_percent !== undefined && cpuLabel}
+                            {load_state_label(cpuLabel)}
                             <span class="text-gray-500 dark:text-gray-400">
                                 ({stats.health.cpu_busy_percent.toFixed(0)}% in use{#if stats.health.rayhunter_cpu_percent !== undefined},
                                     {stats.health.rayhunter_cpu_percent.toFixed(0)}% Rayhunter{/if})
@@ -136,17 +151,12 @@
                     <td class="py-1 pr-4 text-gray-500 dark:text-gray-400 font-medium">Uptime</td>
                     <td class="py-1">{format_uptime(stats.health.uptime_secs)}</td>
                 </tr>
-                {#if stats.health.cpu_temp_c !== undefined || stats.health.radio_temp_c !== undefined}
+                {#if tempParts.length > 0}
                     <tr class="border-b border-gray-200 dark:border-gray-700">
                         <td class="py-1 pr-4 text-gray-500 dark:text-gray-400 font-medium"
                             >Temperature</td
                         >
-                        <td class="py-1">
-                            {#if stats.health.cpu_temp_c !== undefined}
-                                {stats.health.cpu_temp_c.toFixed(0)}&deg;C processor{/if}{#if stats.health.cpu_temp_c !== undefined && stats.health.radio_temp_c !== undefined},
-                            {/if}{#if stats.health.radio_temp_c !== undefined}
-                                {stats.health.radio_temp_c.toFixed(0)}&deg;C radio{/if}
-                        </td>
+                        <td class="py-1">{tempParts.join(', ')}</td>
                     </tr>
                 {/if}
             {/if}

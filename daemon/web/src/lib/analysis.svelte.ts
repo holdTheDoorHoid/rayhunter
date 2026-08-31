@@ -11,6 +11,17 @@ export type ReportStatistics = {
     num_warnings: number;
     num_informational_logs: number;
     num_skipped_packets: number;
+    /**
+     * How many events reached each severity.
+     *
+     * A single total answers "was anything found" but not "how bad", and those
+     * are different questions. Six low severity notes and one high severity
+     * detection both read as a number next to the word warnings, while meaning
+     * very different things to somebody deciding whether to act.
+     *
+     * Requested upstream as EFForg/rayhunter#363.
+     */
+    by_severity: Record<EventType, number>;
 };
 
 export class ReportMetadata {
@@ -108,12 +119,19 @@ function get_report_stats(rows: AnalysisRow[]): ReportStatistics {
     let num_warnings = 0;
     let num_informational_logs = 0;
     let num_skipped_packets = 0;
+    const by_severity: Record<EventType, number> = {
+        Informational: 0,
+        Low: 0,
+        Medium: 0,
+        High: 0,
+    };
     for (const row of rows) {
         if (row.type === AnalysisRowType.Skipped) {
             num_skipped_packets++;
         } else {
             for (const event of row.events) {
                 if (event !== null) {
+                    by_severity[event.event_type]++;
                     if (event.event_type === 'Informational') {
                         num_informational_logs++;
                     } else {
@@ -127,6 +145,7 @@ function get_report_stats(rows: AnalysisRow[]): ReportStatistics {
         num_warnings,
         num_informational_logs,
         num_skipped_packets,
+        by_severity,
     };
 }
 

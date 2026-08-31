@@ -79,6 +79,16 @@ export function cpu_state(health: HealthStats): LoadState | null {
     return 'overloaded';
 }
 
+/**
+ * The processor state as it is written on screen.
+ *
+ * Kept apart from the state itself so the value stays a plain lowercase tag
+ * for comparing against, while what the reader sees starts a sentence properly.
+ */
+export function load_state_label(state: LoadState): string {
+    return state.charAt(0).toUpperCase() + state.slice(1);
+}
+
 /** Uptime in words, e.g. "3 hours 12 minutes". */
 export function format_uptime(seconds: number): string {
     if (seconds < 60) return `${Math.floor(seconds)} seconds`;

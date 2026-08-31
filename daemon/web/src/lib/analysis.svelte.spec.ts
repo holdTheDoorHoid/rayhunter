@@ -64,3 +64,51 @@ describe('analysis report parsing', () => {
         }
     });
 });
+
+describe('severity breakdown', () => {
+    /**
+     * One total says whether anything was found, not how bad it was. Six low
+     * severity notes and one high severity detection are the same number next
+     * to the word warnings while meaning very different things. Requested
+     * upstream as EFForg/rayhunter#363.
+     */
+    it('counts events at each level separately', () => {
+        const report = parse_finished_report([
+            { analyzers: [], report_version: 2 },
+            {
+                packet_timestamp: '2024-08-19T03:33:54.318Z',
+                events: [
+                    { event_type: 'High', message: 'a' },
+                    { event_type: 'High', message: 'b' },
+                    { event_type: 'Informational', message: 'c' },
+                ],
+            },
+            {
+                packet_timestamp: '2024-08-19T03:33:55.318Z',
+                events: [null, { event_type: 'Low', message: 'd' }],
+            },
+        ] as NewlineDeliminatedJson);
+
+        expect(report.statistics.by_severity).toEqual({
+            High: 2,
+            Medium: 0,
+            Low: 1,
+            Informational: 1,
+        });
+        // The existing totals must not drift: informational is not a warning.
+        expect(report.statistics.num_warnings).toBe(3);
+        expect(report.statistics.num_informational_logs).toBe(1);
+    });
+
+    it('reports every level as zero when a recording is clean', () => {
+        const report = parse_finished_report([
+            { analyzers: [], report_version: 2 },
+        ] as NewlineDeliminatedJson);
+        expect(report.statistics.by_severity).toEqual({
+            High: 0,
+            Medium: 0,
+            Low: 0,
+            Informational: 0,
+        });
+    });
+});

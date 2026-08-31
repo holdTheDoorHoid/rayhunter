@@ -46,7 +46,8 @@
     /** True while showing a window centred on a warning rather than a page. */
     let contextMode = $state(false);
 
-    let visible = $derived(list ? apply_filters(list.packets, filters) : []);
+    let alertNums = $derived(new Set(alertPackets.keys()));
+    let visible = $derived(list ? apply_filters(list.packets, filters, alertNums) : []);
     let cells = $derived(list ? cells_present(list.packets) : []);
     let jumpTo = $state('');
 
@@ -119,9 +120,10 @@
         if (action.kind === 'focus') {
             contextMode = true;
             selected = action.packet;
-            // Unfiltered, so the packet asked for is never filtered out from
-            // under the person who clicked through to it.
-            filters = { ...DEFAULT_FILTERS, decodedOnly: false };
+            // Filters are left as they were. Warning packets are exempt from
+            // them now, so the one clicked through to is on screen either way,
+            // and silently unticking a box the person had set was its own kind
+            // of confusing.
             load({ around: action.packet });
         } else {
             // Arriving by the browse button. Leaving the previous focused
@@ -345,6 +347,10 @@
                     decoded, which is why the numbering matches what warnings quote. Most messages
                     carry no signalling at all; those are hidden unless you turn off
                     <strong>Signalling only</strong>.
+                </p>
+                <p>
+                    Packets that raised a warning are always shown, whatever the filters are set to,
+                    so a filter can never hide the thing you came here to look at.
                 </p>
                 <p>
                     Filters apply to the packets currently fetched rather than the whole recording,

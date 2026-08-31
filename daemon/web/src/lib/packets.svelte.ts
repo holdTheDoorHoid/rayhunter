@@ -86,10 +86,21 @@ export const DEFAULT_FILTERS: PacketFilters = {
  * on hardware with one slow core, so the window is fetched and narrowed here.
  * The consequence, which the UI states rather than hides, is that a filter
  * applies to the packets on screen and not to the entire recording.
+ *
+ * Packets in `alwaysKeep` are never filtered out. Those are the ones that
+ * raised a warning, and they are the whole reason for looking at a recording
+ * at all. Letting a filter hide one means the list can look clean while the
+ * thing you came to find is sitting behind a checkbox, which is a bad way for
+ * a detector to behave.
  */
-export function apply_filters(packets: PacketSummary[], filters: PacketFilters): PacketSummary[] {
+export function apply_filters(
+    packets: PacketSummary[],
+    filters: PacketFilters,
+    alwaysKeep: ReadonlySet<number> = new Set()
+): PacketSummary[] {
     const needle = filters.search.trim().toLowerCase();
     return packets.filter((p) => {
+        if (alwaysKeep.has(p.packet_num)) return true;
         if (filters.decodedOnly && p.parse_status !== 'decoded') return false;
         if (filters.protocol === 'rrc' && !p.protocol.includes('RRC')) return false;
         if (filters.protocol === 'nas' && !p.protocol.includes('NAS')) return false;

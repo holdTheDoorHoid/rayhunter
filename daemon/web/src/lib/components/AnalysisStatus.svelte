@@ -1,5 +1,6 @@
 <script lang="ts">
     import { AnalysisStatus } from '$lib/analysisManager.svelte';
+    import type { EventType } from '$lib/analysis.svelte';
     import type { ManifestEntry } from '$lib/manifest.svelte';
     let {
         entry,
@@ -27,6 +28,50 @@
         } else {
             return 'Loading...';
         }
+    });
+
+    /**
+     * The counts to show, worst first, leaving out levels that scored nothing.
+     *
+     * One total says whether anything was found but not how bad it was, and
+     * those are separate questions. Six low severity notes and one high
+     * severity detection are the same number next to the word warnings while
+     * meaning quite different things. Requested upstream as
+     * EFForg/rayhunter#363, where a maintainer asked for exactly this: a count
+     * per level rather than one figure standing for all of them.
+     */
+    const LEVELS: { key: EventType; label: string; class: string }[] = [
+        {
+            key: 'High',
+            label: 'High',
+            class: 'text-red-800 dark:text-red-200 border-red-500 dark:border-red-700 bg-red-200 dark:bg-red-900',
+        },
+        {
+            key: 'Medium',
+            label: 'Medium',
+            class: 'text-orange-900 dark:text-orange-100 border-orange-500 dark:border-orange-700 bg-orange-200 dark:bg-orange-900',
+        },
+        {
+            key: 'Low',
+            label: 'Low',
+            class: 'text-yellow-900 dark:text-yellow-100 border-yellow-500 dark:border-yellow-700 bg-yellow-200 dark:bg-yellow-900',
+        },
+        {
+            key: 'Informational',
+            label: 'Info',
+            class: 'text-gray-700 dark:text-gray-200 border-gray-400 dark:border-gray-600 bg-gray-200 dark:bg-gray-700',
+        },
+    ];
+
+    let severity_counts = $derived.by(() => {
+        const report = entry.analysis_report;
+        if (!report || typeof report === 'string') return [];
+        // Older reports parsed before this existed have no breakdown.
+        const counts = report.statistics.by_severity;
+        if (!counts) return [];
+        return LEVELS.map((level) => ({ ...level, count: counts[level.key] ?? 0 })).filter(
+            (level) => level.count > 0
+        );
     });
 
     let ready = $derived.by(() => {
@@ -70,7 +115,22 @@
                 ></path>
             </svg>
         {/if}
-        <span class={button_class}>{summary}</span>
+        {#if severity_counts.length > 0}
+            <!-- Each pill names its level as well as colouring it. Severity
+                 read from colour alone is unreadable to anyone who cannot
+                 separate red from orange, and this is the one line on the page
+                 that says how bad things are. -->
+            <span class="flex flex-row flex-wrap items-center gap-1">
+                {#each severity_counts as level (level.key)}
+                    <span class="{level.class} border rounded-full px-2 whitespace-nowrap">
+                        {level.count}
+                        {level.label}
+                    </span>
+                {/each}
+            </span>
+        {:else}
+            <span class={button_class}>{summary}</span>
+        {/if}
     </span>
     <svg
         class="w-6 h-6 text-gray-800 dark:text-gray-100 transition-transform {analysis_visible

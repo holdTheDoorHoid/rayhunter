@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     load_per_core,
     cpu_state,
+    load_state_label,
     format_uptime,
     hours_until_full,
     format_duration_hours,
@@ -75,5 +76,14 @@ describe('storage estimate', () => {
         expect(format_duration_hours(0.5)).toBe('30 minutes');
         expect(format_duration_hours(6)).toBe('6 hours');
         expect(format_duration_hours(100)).toBe('4 days');
+    });
+});
+
+describe('load_state_label', () => {
+    it('starts the state with a capital, since it begins a line on screen', () => {
+        expect(load_state_label('comfortable')).toBe('Comfortable');
+        expect(load_state_label('busy')).toBe('Busy');
+        expect(load_state_label('stretched')).toBe('Stretched');
+        expect(load_state_label('overloaded')).toBe('Overloaded');
     });
 });

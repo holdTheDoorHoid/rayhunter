@@ -826,6 +826,7 @@
                         </label>
                     </div>
                     <Explainer
+                        keepSummary
                         summary="Adds a button to the main page that fakes a surveillance detection, for showing Rayhunter to an audience."
                     >
                         <p>

@@ -15,21 +15,34 @@
     let {
         summary,
         label = 'What this means',
+        keepSummary = false,
         children,
     }: {
-        /** One plain sentence, always visible. */
+        /** One plain sentence, introducing what opens below it. */
         summary: string;
         /** Text on the toggle. Keep it a promise of what opens. */
         label?: string;
+        /**
+         * Keep the summary on screen even with explanations turned off.
+         *
+         * For the configuration page, where the summary is a setting's own
+         * description rather than a signpost, and removing it would leave a
+         * bare checkbox with no statement of what it does.
+         */
+        keepSummary?: boolean;
         /** The fuller explanation. */
         children: Snippet;
     } = $props();
 </script>
 
-<!-- The one line summary stays whatever the preference is: it is the sentence
-     that makes a reading legible at all, rather than background explanation.
-     Only the expandable part is hidden. -->
-<p class="text-xs text-gray-500 dark:text-gray-400">{summary}</p>
+<!-- The summary goes with the explanation it introduces. These sentences read
+     as signposts to what opens below ("What this means", "Why this matters"),
+     so with nothing left to open they are a promise of an explanation that is
+     no longer there, which is worse than silence. Settings are the exception,
+     since there the summary is the description of the setting itself. -->
+{#if help.shown || keepSummary}
+    <p class="text-xs text-gray-500 dark:text-gray-400">{summary}</p>
+{/if}
 {#if help.shown}
     <details class="group mt-1">
         <summary
