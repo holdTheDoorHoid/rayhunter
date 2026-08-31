@@ -479,6 +479,8 @@ mod tests {
         assert!(!config.analyzers.null_cipher);
         // ...and ones it predates come up enabled, matching the defaults.
         assert!(config.analyzers.lpp_location_request);
+        assert!(config.analyzers.lpp_location_tracking);
+        assert!(config.analyzers.rrlp_location_request);
         assert!(config.analyzers.incomplete_sib);
         // The testing analyzer stays off by default even when unlisted.
         assert!(!config.analyzers.test_analyzer);

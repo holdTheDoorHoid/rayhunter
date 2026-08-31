@@ -306,7 +306,10 @@ fn describe(element: &InformationElement, out: &mut Classified) {
                 out.message_type = message_name(&text);
             }
         },
-        InformationElement::GSM => out.protocol = "GSM".to_string(),
+        InformationElement::GSM(gsm) => {
+            out.protocol = "GSM".to_string();
+            out.channel = Some(format!("{:?}", gsm.channel));
+        }
         InformationElement::UMTS => out.protocol = "UMTS".to_string(),
         InformationElement::FiveG => out.protocol = "5G".to_string(),
     }

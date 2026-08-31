@@ -119,8 +119,13 @@ pub struct LppSummary {
 /// wrong message kind, and a false "your location was requested" is worse
 /// than an honest "an LPP message we could not read".
 pub fn decode_lpp_prefix(bytes: &[u8]) -> Option<LppSummary> {
-    let mut reader = BitReader::new(bytes);
+    read_lpp_prefix(&mut BitReader::new(bytes))
+}
 
+/// Read the fixed prefix, leaving `reader` positioned at the start of the
+/// message body's content (right after the c1 message-type index). The detail
+/// decoders below continue from there.
+fn read_lpp_prefix(reader: &mut BitReader) -> Option<LppSummary> {
     let has_transaction_id = reader.bit()?;
     let has_sequence_number = reader.bit()?;
     let has_acknowledgement = reader.bit()?;
@@ -193,6 +198,212 @@ pub fn decode_lpp_prefix(bytes: &[u8]) -> Option<LppSummary> {
         transaction,
         end_transaction,
         body,
+    })
+}
+
+/// Which positioning methods an LPP message names. Each is a different level of
+/// precision and intrusiveness, so which one the network asked for matters as
+/// much as the fact that it asked.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Methods {
+    /// Assisted GNSS: satellite positioning. The most precise, a true fix.
+    pub gnss: bool,
+    /// Observed Time Difference of Arrival: the device times signals from
+    /// several towers. Precise, and it needs the device to actively measure.
+    pub otdoa: bool,
+    /// Enhanced Cell ID: which cell, plus timing to it. Coarser, but cheap and
+    /// silent.
+    pub ecid: bool,
+    /// An externally defined positioning protocol carried inside LPP.
+    pub epdu: bool,
+}
+
+impl Methods {
+    /// A human list of the methods named, most precise first. Empty when the
+    /// message named none explicitly (the method rides in the common fields).
+    pub fn describe(&self) -> String {
+        let mut parts = Vec::new();
+        if self.gnss {
+            parts.push("satellite (GNSS)");
+        }
+        if self.otdoa {
+            parts.push("tower timing (OTDOA)");
+        }
+        if self.ecid {
+            parts.push("cell ID (E-CID)");
+        }
+        if self.epdu {
+            parts.push("an external protocol");
+        }
+        if parts.is_empty() {
+            "an unspecified method".to_string()
+        } else {
+            parts.join(", ")
+        }
+    }
+
+    fn any(&self) -> bool {
+        self.gnss || self.otdoa || self.ecid || self.epdu
+    }
+}
+
+/// What kind of answer a location request wants back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocInfoType {
+    EstimateRequired,
+    MeasurementsRequired,
+    EstimatePreferred,
+    MeasurementsPreferred,
+    /// An extended value this decoder does not name.
+    Unknown,
+}
+
+/// The decoded detail of a location request or response, past the prefix.
+#[derive(Debug, PartialEq)]
+pub enum LppDetailKind {
+    Request {
+        methods: Methods,
+        /// The network asked for reports to repeat on a timer: continuous
+        /// tracking rather than a single fix. This is the signature that
+        /// separates surveillance from a one-off locate.
+        periodic: bool,
+        info_type: LocInfoType,
+    },
+    Response {
+        methods: Methods,
+        /// The device sent back an actual position estimate.
+        provided_estimate: bool,
+        /// The device answered with a failure cause instead of a position.
+        declined: bool,
+    },
+    /// A message this decoder does not read in detail (a future critical
+    /// extension, a spare alternative, or a non-location body).
+    Other,
+}
+
+/// A location message decoded past its prefix, into what it actually asks for
+/// or reports.
+#[derive(Debug, PartialEq)]
+pub struct LppDetail {
+    pub summary: LppSummary,
+    pub kind: LppDetailKind,
+}
+
+/// Decode a location request or response past the prefix, into the fields that
+/// say *what kind* of location was asked for and whether it repeats.
+///
+/// Every field read here sits at a fixed bit offset from the message body, with
+/// no variable-length content in front of it, which is what makes decoding it
+/// by hand safe. The moment a field would sit behind something whose length
+/// this code cannot compute, it stops. The offsets are verified in the tests
+/// against encodings from a reference 36.355 implementation.
+pub fn decode_lpp_detail(bytes: &[u8]) -> Option<LppDetail> {
+    let mut reader = BitReader::new(bytes);
+    let summary = read_lpp_prefix(&mut reader)?;
+    let kind = match summary.body {
+        LppBody::RequestLocationInformation => read_request_detail(&mut reader)?,
+        LppBody::ProvideLocationInformation => read_response_detail(&mut reader)?,
+        _ => LppDetailKind::Other,
+    };
+    Some(LppDetail { summary, kind })
+}
+
+/// Step through `criticalExtensions` to the r9 IEs SEQUENCE. Returns `false`
+/// when the message uses a future critical extension or a spare alternative,
+/// where the r9 layout does not apply.
+fn enter_r9(reader: &mut BitReader) -> Option<bool> {
+    // criticalExtensions ::= CHOICE { c1, criticalExtensionsFuture }: 1 bit.
+    if reader.bit()? {
+        return Some(false);
+    }
+    // c1 ::= CHOICE { ...-r9, spare3, spare2, spare1 }: 2 bits.
+    if reader.bits(2)? != 0 {
+        return Some(false);
+    }
+    Some(true)
+}
+
+fn read_request_detail(reader: &mut BitReader) -> Option<LppDetailKind> {
+    if !enter_r9(reader)? {
+        return Some(LppDetailKind::Other);
+    }
+    // RequestLocationInformation-r9-IEs ::= SEQUENCE (extensible) with five root
+    // optional fields. The extension bit and the five presence bits sit right
+    // at the front; the method a request names is exactly which of these is
+    // present.
+    let _ext = reader.bit()?;
+    let common = reader.bit()?;
+    let methods = Methods {
+        gnss: reader.bit()?,
+        otdoa: reader.bit()?,
+        ecid: reader.bit()?,
+        epdu: reader.bit()?,
+    };
+
+    let mut periodic = false;
+    let mut info_type = LocInfoType::Unknown;
+    if common {
+        // CommonIEsRequestLocationInformation ::= SEQUENCE (extensible) with a
+        // mandatory locationInformationType and seven root optional fields. The
+        // second optional is periodicalReporting.
+        let _cext = reader.bit()?;
+        let _triggered = reader.bit()?;
+        periodic = reader.bit()?;
+        let _additional_info = reader.bit()?;
+        let _qos = reader.bit()?;
+        let _environment = reader.bit()?;
+        let _coordinate_types = reader.bit()?;
+        let _velocity_types = reader.bit()?;
+        // locationInformationType ::= ENUMERATED (extensible), 4 root values.
+        let extended = reader.bit()?;
+        let index = reader.bits(2)?;
+        info_type = match (extended, index) {
+            (false, 0) => LocInfoType::EstimateRequired,
+            (false, 1) => LocInfoType::MeasurementsRequired,
+            (false, 2) => LocInfoType::EstimatePreferred,
+            (false, 3) => LocInfoType::MeasurementsPreferred,
+            _ => LocInfoType::Unknown,
+        };
+    }
+
+    Some(LppDetailKind::Request {
+        methods,
+        periodic,
+        info_type,
+    })
+}
+
+fn read_response_detail(reader: &mut BitReader) -> Option<LppDetailKind> {
+    if !enter_r9(reader)? {
+        return Some(LppDetailKind::Other);
+    }
+    // ProvideLocationInformation-r9-IEs ::= SEQUENCE (extensible), same five
+    // root optionals as the request: which result blocks are present says which
+    // method the device actually measured with.
+    let _ext = reader.bit()?;
+    let common = reader.bit()?;
+    let methods = Methods {
+        gnss: reader.bit()?,
+        otdoa: reader.bit()?,
+        ecid: reader.bit()?,
+        epdu: reader.bit()?,
+    };
+
+    let mut provided_estimate = false;
+    let mut declined = false;
+    if common {
+        // CommonIEsProvideLocationInformation ::= SEQUENCE (extensible) with
+        // three root optionals: locationEstimate, velocityEstimate, locationError.
+        let _cext = reader.bit()?;
+        provided_estimate = reader.bit()?;
+        let _velocity = reader.bit()?;
+        declined = reader.bit()?;
+    }
+
+    Some(LppDetailKind::Response {
+        methods,
+        provided_estimate,
+        declined,
     })
 }
 
@@ -394,6 +605,215 @@ impl Analyzer for LppLocationRequestAnalyzer {
     }
 }
 
+/// The LPP container bytes and travel direction, if this NAS message is a
+/// Generic NAS Transport carrying LPP. Shared by both LPP analyzers.
+fn lpp_container(ie: &InformationElement) -> Option<(&[u8], Direction)> {
+    let InformationElement::LTE(lte) = ie else {
+        return None;
+    };
+    let LteInformationElement::NAS(nas) = &**lte else {
+        return None;
+    };
+    match nas {
+        NASMessage::EMMMessage(EMMMessage::EMMDLGenericNASTransport(t))
+            if t.generic_cont_type.inner
+                == DlContainerType::LTEPositioningProtocolLPPMessageContainer =>
+        {
+            Some((&t.generic_container.inner.buf, Direction::Downlink))
+        }
+        NASMessage::EMMMessage(EMMMessage::EMMULGenericNASTransport(t))
+            if t.generic_cont_type.inner
+                == UlContainerType::LTEPositioningProtocolLPPMessageContainer =>
+        {
+            Some((&t.generic_container.inner.buf, Direction::Uplink))
+        }
+        _ => None,
+    }
+}
+
+/// Reads LPP messages in depth, to say *what kind* of location the network
+/// asked for and, above all, whether it asked for **continuous** tracking.
+///
+/// This is the heavier companion to [`LppLocationRequestAnalyzer`]: it decodes
+/// past the message type into the request and response bodies. Separated so a
+/// device short on memory can run the cheap request/response awareness without
+/// this. It stands on its own, warning even if the basic analyzer is off.
+pub struct LppLocationTrackingAnalyzer {
+    /// Transactions already warned about, so a periodic session that reports
+    /// for an hour raises one warning rather than thousands. Same bound and
+    /// lifetime as the basic analyzer's map.
+    warned_transactions: HashMap<(Initiator, u8), ()>,
+}
+
+impl Default for LppLocationTrackingAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LppLocationTrackingAnalyzer {
+    pub fn new() -> Self {
+        Self {
+            warned_transactions: HashMap::new(),
+        }
+    }
+
+    fn event_for(&mut self, detail: &LppDetail, direction: Direction) -> Option<Event> {
+        let note = match detail.summary.transaction {
+            Some((Initiator::LocationServer, n)) => format!(" (network transaction {n})"),
+            Some((Initiator::TargetDevice, n)) => format!(" (device transaction {n})"),
+            None => String::new(),
+        };
+
+        let event = match (&detail.kind, direction) {
+            (
+                LppDetailKind::Request {
+                    methods, periodic, ..
+                },
+                Direction::Downlink,
+            ) => {
+                let methods = methods.describe();
+                if *periodic {
+                    // Continuous tracking is the surveillance signature, and a
+                    // step above a one-off locate, so it warns at Medium.
+                    self.escalating_event(
+                        detail,
+                        EventType::Medium,
+                        format!(
+                            "Network requested CONTINUOUS location tracking via {methods}: reports \
+                             repeat until stopped{note}"
+                        ),
+                        format!("Network's continuous LPP tracking request repeated{note}"),
+                    )
+                } else {
+                    self.escalating_event(
+                        detail,
+                        EventType::Low,
+                        format!("Network requested a one-off location fix via {methods}{note}"),
+                        format!("Network repeated its one-off LPP location request{note}"),
+                    )
+                }
+            }
+            // A request the wrong way round is not a normal flow, but it is
+            // still the network machinery for locating a device.
+            (LppDetailKind::Request { methods, .. }, Direction::Uplink) => Event {
+                event_type: EventType::Low,
+                message: format!(
+                    "This device sent an LPP location request uplink ({}), which is unusual{note}",
+                    methods.describe()
+                ),
+            },
+            (
+                LppDetailKind::Response {
+                    methods,
+                    provided_estimate,
+                    declined,
+                },
+                Direction::Uplink,
+            ) => {
+                if *declined && !*provided_estimate && !methods.any() {
+                    // Declining is the device protecting itself; worth noting,
+                    // not worth alarming over.
+                    Event {
+                        event_type: EventType::Informational,
+                        message: format!(
+                            "This device declined the network's LPP location request{note}"
+                        ),
+                    }
+                } else {
+                    let how = if methods.any() {
+                        methods.describe()
+                    } else {
+                        "an estimate".to_string()
+                    };
+                    self.escalating_event(
+                        detail,
+                        EventType::Low,
+                        format!("This device reported its position to the network via {how}{note}"),
+                        format!("This device sent another LPP location report{note}"),
+                    )
+                }
+            }
+            (LppDetailKind::Response { .. }, Direction::Downlink) => Event {
+                event_type: EventType::Informational,
+                message: format!(
+                    "Network sent an LPP location report downlink, which is unusual{note}"
+                ),
+            },
+            // Capability, assistance, abort and the like: the basic analyzer
+            // covers those as informational. Nothing to add in depth.
+            (LppDetailKind::Other, _) => return None,
+        };
+
+        if (detail.summary.end_transaction || detail.summary.body == LppBody::Abort)
+            && let Some(transaction) = detail.summary.transaction
+        {
+            self.warned_transactions.remove(&transaction);
+        }
+
+        Some(event)
+    }
+
+    /// Warn at `severity` the first time a transaction moves location
+    /// information, informational for the repeats, so periodic reporting does
+    /// not flood the history.
+    fn escalating_event(
+        &mut self,
+        detail: &LppDetail,
+        severity: EventType,
+        first_message: String,
+        repeat_message: String,
+    ) -> Event {
+        let already_warned = match detail.summary.transaction {
+            Some(transaction) => self.warned_transactions.insert(transaction, ()).is_some(),
+            None => false,
+        };
+        if already_warned {
+            Event {
+                event_type: EventType::Informational,
+                message: repeat_message,
+            }
+        } else {
+            Event {
+                event_type: severity,
+                message: first_message,
+            }
+        }
+    }
+}
+
+impl Analyzer for LppLocationTrackingAnalyzer {
+    fn get_name(&self) -> Cow<'_, str> {
+        Cow::from("LPP Location Tracking")
+    }
+
+    fn get_description(&self) -> Cow<'_, str> {
+        Cow::from(
+            "Reads LPP location messages in depth: which positioning method the network asked for \
+             (satellite, tower timing or cell ID) and, most importantly, whether it asked for \
+             continuous tracking rather than a single fix. A continuous-tracking request warns at \
+             medium severity. This parses more of each message than the basic LPP check and can \
+             be turned off on devices very short on memory.",
+        )
+    }
+
+    fn get_version(&self) -> u32 {
+        1
+    }
+
+    fn analyze_information_element(
+        &mut self,
+        ie: &InformationElement,
+        _packet_num: usize,
+    ) -> Option<Event> {
+        let (container, direction) = lpp_container(ie)?;
+        // Undecodable LPP is left to the basic analyzer to note; adding depth
+        // to "could not read it" says nothing more.
+        let detail = decode_lpp_detail(container)?;
+        self.event_for(&detail, direction)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -481,6 +901,136 @@ mod tests {
             assert_eq!(summary.transaction, *transaction, "transaction in {hex}");
             assert_eq!(summary.end_transaction, *end, "endTransaction in {hex}");
             assert_eq!(summary.body, *body, "body in {hex}");
+        }
+    }
+
+    // Deep-detail reference vectors, same provenance as above: encoded by
+    // pycrate's 36.355 implementation and round-tripped before use. Each
+    // isolates one field so a wrong bit offset fails a specific assertion.
+    /// commonIEs present, locationInformationType = each of the four root
+    /// values. Only the type differs between these.
+    const REQ_TYPE_ESTIMATE_REQ: &str = "900b20400000";
+    const REQ_TYPE_MEAS_REQ: &str = "900b20400080";
+    const REQ_TYPE_ESTIMATE_PREF: &str = "900b20400100";
+    const REQ_TYPE_MEAS_PREF: &str = "900b20400180";
+    /// Only the ecid method requested, no commonIEs.
+    const REQ_METHOD_ECID: &str = "900b200870";
+    /// Single-shot vs periodic (continuous) reporting, otherwise identical.
+    const REQ_SINGLE_SHOT: &str = "900b20400000";
+    const REQ_PERIODIC: &str = "900b20408018";
+    /// The same periodic request, but not ending its transaction (endTransaction
+    /// = false), as an ongoing tracking session actually sends.
+    const REQ_PERIODIC_OPEN: &str = "900a20408018";
+    /// Periodic reporting AND the ecid method named together.
+    const REQ_PERIODIC_PLUS_ECID: &str = "900b2048801870";
+    /// Responses: an error (declined), a GNSS result, an E-CID result, empty.
+    const PROV_ERROR: &str = "900b284040";
+    const PROV_GNSS: &str = "900b282000";
+    const PROV_ECID: &str = "900b280800";
+    const PROV_EMPTY: &str = "900b2800";
+
+    fn request_detail(hex: &str) -> (Methods, bool, LocInfoType) {
+        match decode_lpp_detail(&from_hex(hex)).map(|d| d.kind) {
+            Some(LppDetailKind::Request {
+                methods,
+                periodic,
+                info_type,
+            }) => (methods, periodic, info_type),
+            other => panic!("{hex} decoded as {other:?}, expected a Request"),
+        }
+    }
+
+    #[test]
+    fn decodes_the_requested_location_information_type() {
+        assert_eq!(
+            request_detail(REQ_TYPE_ESTIMATE_REQ).2,
+            LocInfoType::EstimateRequired
+        );
+        assert_eq!(
+            request_detail(REQ_TYPE_MEAS_REQ).2,
+            LocInfoType::MeasurementsRequired
+        );
+        assert_eq!(
+            request_detail(REQ_TYPE_ESTIMATE_PREF).2,
+            LocInfoType::EstimatePreferred
+        );
+        assert_eq!(
+            request_detail(REQ_TYPE_MEAS_PREF).2,
+            LocInfoType::MeasurementsPreferred
+        );
+    }
+
+    #[test]
+    fn decodes_which_positioning_method_was_requested() {
+        let (methods, _, _) = request_detail(REQ_METHOD_ECID);
+        assert_eq!(
+            methods,
+            Methods {
+                ecid: true,
+                ..Default::default()
+            }
+        );
+        // The combined vector names ecid and, via commonIEs, asks periodically.
+        let (methods, periodic, _) = request_detail(REQ_PERIODIC_PLUS_ECID);
+        assert!(methods.ecid && periodic);
+    }
+
+    #[test]
+    fn tells_periodic_tracking_from_a_single_fix() {
+        assert!(
+            !request_detail(REQ_SINGLE_SHOT).1,
+            "single shot must not read as periodic"
+        );
+        assert!(
+            request_detail(REQ_PERIODIC).1,
+            "periodic reporting must be detected"
+        );
+    }
+
+    #[test]
+    fn reads_whether_the_device_provided_or_declined() {
+        let declined = match decode_lpp_detail(&from_hex(PROV_ERROR)).map(|d| d.kind) {
+            Some(LppDetailKind::Response {
+                declined,
+                provided_estimate,
+                ..
+            }) => {
+                assert!(!provided_estimate);
+                declined
+            }
+            other => panic!("expected Response, got {other:?}"),
+        };
+        assert!(declined, "a locationError response must read as declined");
+
+        // A GNSS result block present means the device measured and answered.
+        match decode_lpp_detail(&from_hex(PROV_GNSS)).map(|d| d.kind) {
+            Some(LppDetailKind::Response { methods, .. }) => assert!(methods.gnss),
+            other => panic!("expected Response, got {other:?}"),
+        }
+        match decode_lpp_detail(&from_hex(PROV_ECID)).map(|d| d.kind) {
+            Some(LppDetailKind::Response { methods, .. }) => assert!(methods.ecid),
+            other => panic!("expected Response, got {other:?}"),
+        }
+        match decode_lpp_detail(&from_hex(PROV_EMPTY)).map(|d| d.kind) {
+            Some(LppDetailKind::Response {
+                methods,
+                provided_estimate,
+                declined,
+            }) => {
+                assert!(!methods.any() && !provided_estimate && !declined);
+            }
+            other => panic!("expected Response, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deep_decode_of_truncated_input_never_panics() {
+        for hex in [REQ_PERIODIC_PLUS_ECID, PROV_ERROR, REQ_TYPE_MEAS_PREF] {
+            let bytes = from_hex(hex);
+            for n in 0..bytes.len() {
+                // Must return Some(Other/partial) or None, never panic.
+                let _ = decode_lpp_detail(&bytes[..n]);
+            }
         }
     }
 
@@ -616,5 +1166,123 @@ mod tests {
         let nas = NASMessage::parse(&[0x07, 0x55, 0x01]).unwrap();
         let ie = InformationElement::LTE(Box::new(LteInformationElement::NAS(nas)));
         assert_eq!(analyzer.analyze_information_element(&ie, 1), None);
+    }
+
+    // --- The deep tracking analyzer ---
+
+    #[test]
+    fn tracking_flags_continuous_requests_at_medium() {
+        let mut analyzer = LppLocationTrackingAnalyzer::new();
+        let event = analyzer
+            .analyze_information_element(&nas_transport(true, &from_hex(REQ_PERIODIC)), 1)
+            .expect("must produce an event");
+        assert_eq!(event.event_type, EventType::Medium);
+        assert!(
+            event.message.contains("CONTINUOUS"),
+            "unexpected message: {}",
+            event.message
+        );
+    }
+
+    #[test]
+    fn tracking_reports_a_one_off_request_at_low_with_its_method() {
+        let mut analyzer = LppLocationTrackingAnalyzer::new();
+        let event = analyzer
+            .analyze_information_element(&nas_transport(true, &from_hex(REQ_METHOD_ECID)), 1)
+            .expect("must produce an event");
+        assert_eq!(event.event_type, EventType::Low);
+        assert!(
+            event.message.contains("cell ID (E-CID)"),
+            "should name the method: {}",
+            event.message
+        );
+        assert!(event.message.contains("one-off"));
+    }
+
+    #[test]
+    fn tracking_warns_once_per_transaction() {
+        let mut analyzer = LppLocationTrackingAnalyzer::new();
+        // First continuous request warns Medium. Uses the open-transaction
+        // vector: an ongoing session does not end its transaction each message.
+        let first = analyzer
+            .analyze_information_element(&nas_transport(true, &from_hex(REQ_PERIODIC_OPEN)), 1)
+            .unwrap();
+        assert_eq!(first.event_type, EventType::Medium);
+        // Same transaction again: informational, not another Medium.
+        let repeat = analyzer
+            .analyze_information_element(&nas_transport(true, &from_hex(REQ_PERIODIC_OPEN)), 2)
+            .unwrap();
+        assert_eq!(repeat.event_type, EventType::Informational);
+    }
+
+    /// A periodic request that *does* end its transaction frees the number, so
+    /// a genuinely new session with the same number warns again rather than
+    /// being silently folded into the last one.
+    #[test]
+    fn tracking_rewarns_after_a_transaction_ends() {
+        let mut analyzer = LppLocationTrackingAnalyzer::new();
+        let first = analyzer
+            .analyze_information_element(&nas_transport(true, &from_hex(REQ_PERIODIC)), 1)
+            .unwrap();
+        assert_eq!(first.event_type, EventType::Medium);
+        // REQ_PERIODIC ends its transaction, so the same bytes again are a new
+        // session and warn afresh.
+        let again = analyzer
+            .analyze_information_element(&nas_transport(true, &from_hex(REQ_PERIODIC)), 2)
+            .unwrap();
+        assert_eq!(again.event_type, EventType::Medium);
+    }
+
+    #[test]
+    fn tracking_notes_a_declined_response_informationally() {
+        let mut analyzer = LppLocationTrackingAnalyzer::new();
+        let event = analyzer
+            .analyze_information_element(&nas_transport(false, &from_hex(PROV_ERROR)), 1)
+            .expect("must produce an event");
+        assert_eq!(event.event_type, EventType::Informational);
+        assert!(
+            event.message.contains("declined"),
+            "unexpected message: {}",
+            event.message
+        );
+    }
+
+    #[test]
+    fn tracking_flags_a_position_report_at_low() {
+        let mut analyzer = LppLocationTrackingAnalyzer::new();
+        let event = analyzer
+            .analyze_information_element(&nas_transport(false, &from_hex(PROV_GNSS)), 1)
+            .expect("must produce an event");
+        assert_eq!(event.event_type, EventType::Low);
+        assert!(
+            event.message.contains("reported its position"),
+            "unexpected message: {}",
+            event.message
+        );
+    }
+
+    /// Capability chatter carries no request/response detail, so the deep
+    /// analyzer stays silent and leaves it to the basic one.
+    #[test]
+    fn tracking_ignores_capability_messages() {
+        let mut analyzer = LppLocationTrackingAnalyzer::new();
+        assert_eq!(
+            analyzer.analyze_information_element(
+                &nas_transport(true, &from_hex(REQUEST_CAPABILITIES)),
+                1
+            ),
+            None
+        );
+    }
+
+    /// The deep analyzer is self-sufficient: a lone one-off request still warns
+    /// even with no basic analyzer running alongside it.
+    #[test]
+    fn tracking_is_self_sufficient() {
+        let mut analyzer = LppLocationTrackingAnalyzer::new();
+        let event = analyzer
+            .analyze_information_element(&nas_transport(true, &from_hex(REQ_TYPE_ESTIMATE_REQ)), 1)
+            .expect("a location request must always produce a visible event");
+        assert!(event.event_type >= EventType::Low);
     }
 }

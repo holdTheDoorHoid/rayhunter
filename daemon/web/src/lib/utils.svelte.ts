@@ -10,6 +10,8 @@ export interface AnalyzerConfig {
     nas_null_cipher: boolean;
     incomplete_sib: boolean;
     lpp_location_request: boolean;
+    lpp_location_tracking: boolean;
+    rrlp_location_request: boolean;
     test_analyzer: boolean;
     diagnostic_analyzer: boolean;
 }

@@ -83,6 +83,26 @@ A *request for location information* arriving from the network, and the device's
 
 False positives: an emergency call will legitimately trigger LPP, and some carriers use network-initiated location for lawful services (fraud checks, "find my device" offerings, regulatory obligations). A warning during a normal day with no emergency call, especially on a stationary hotspot, is worth reading alongside the other heuristics.
 
+### LPP Location Tracking
+
+This is the in-depth companion to **LPP Location Request**. Where that analyzer reports *that* a location message was exchanged, this one decodes the request and response bodies to report *what kind*: which positioning method the network asked for (A-GNSS satellite, OTDOA tower-timing, or E-CID cell-ID), and — the point of the analyzer — whether the request is for a single fix or for **periodic (continuous) reporting**.
+
+A `periodicalReporting` field in a `RequestLocationInformation` means the network asked the device to report its position repeatedly on a timer until told to stop. That is the signature of active tracking rather than a one-off locate, so it is raised to **medium** severity, versus **low** for a one-shot request or a position report. Capability and assistance messages carry no such detail and are left to the basic analyzer.
+
+It is kept as a separate, independently toggleable analyzer because it parses more of each LPP message than the basic check. A device very short on memory can disable `lpp_location_tracking` and keep `lpp_location_request`; enabling both is fine and gives the fullest picture. The extra bytes read all sit at fixed offsets in the message with no variable-length content in front of them, which is what makes decoding them by hand safe; the offsets are verified against a reference 36.355 encoder in the tests.
+
+Same false positives as **LPP Location Request**: emergencies and lawful location services. A *continuous* request with no emergency in progress is the one most worth attention.
+
+### RRLP Location Request
+
+The 2G counterpart to the LPP analyzers, addressing EFForg/rayhunter#534. RRLP (Radio Resource LCS Protocol, 3GPP TS 44.031) is how the older GSM network asks a handset to measure and report its position, from before LPP existed.
+
+On the air, an RRLP message travels inside a GSM RR **APPLICATION INFORMATION** message (3GPP TS 44.018 §9.1.53). This analyzer reads that transport header to find the RRLP APDU, then reads the front of the APDU to tell a location *request* (`msrPositionReq`) from the device's *response* (`msrPositionRsp`) or from routine assistance data. A request or a response warns at **low** severity; assistance data, acknowledgements and errors are informational.
+
+This matters because being forced down to 2G is itself a known surveillance step (see **Pushed down to a 2G network**), and RRLP is how a device is then located there. The transport framing is verified in the tests against `pycrate_mobile`'s 44.018 implementation, and the RRLP APDU against pycrate's 44.031 ASN.1. Detection requires both a valid APPLICATION INFORMATION header *and* a well-formed RRLP APDU behind it, so an unrelated 2G message cannot raise a false positive.
+
+False positives: legitimate on emergency calls placed over 2G. On a device that never uses 2G, it stays silent.
+
 ### Diagnostic Information 
 This analyzer displays some diagnostic information about when your device connects and disconnects from certain towers. It is helpful for analysis of suspicious PCAPs. The informational warnings in here can safely be ignored until there is a low, medium, or high severity warning. 
 

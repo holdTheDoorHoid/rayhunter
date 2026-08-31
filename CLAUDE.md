@@ -125,13 +125,25 @@ V8 RRC packet has `earfcn` and `sib_mask` as **32 bit** fields.
 `AnalysisRow::is_empty`), so a detector that only emits informational events can
 never appear in the UI.
 
-For a protocol whose ASN.1 is **not** in `telcom-parser` (LPP was one), derive
-the layout by hand but verify against an independent reference encoder before
-trusting it — hand-derivation from memory of the spec missed the extension bit
-on `LPP-TransactionID`, a one-bit error that shifted every field after it. The
-reference bytes live as hex constants in the Rust tests
-(`lib/src/analysis/lpp.rs`); the encoder that produced them (pycrate, offline,
-throwaway) is not a dependency of anything.
+For a protocol whose ASN.1 is **not** in `telcom-parser` (LPP and RRLP were
+two), derive the layout by hand but verify against an independent reference
+encoder before trusting it — hand-derivation from memory of the spec missed the
+extension bit on `LPP-TransactionID`, a one-bit error that shifted every field
+after it, and mis-sized the `CommonIEsRequestLocationInformation` optional
+bitmap (it is **7** root optionals, not 5). The reference bytes live as hex
+constants in the Rust tests (`lib/src/analysis/lpp.rs`, `rrlp.rs`); the encoders
+that produced them are offline and throwaway, not a dependency:
+`pip install pycrate`, then `pycrate_asn1dir.LPP` / `.RRLP` for the ASN.1
+payloads and `pycrate_mobile.TS44018_RR` for GSM RR framing (2G is TLV, not
+ASN.1, so `pycrate_asn1dir` does not cover the transport). Only decode fields at
+**fixed** offsets by hand — no variable-length content in front of them — and
+stop at the first extension bit you cannot size.
+
+**2G messages now reach analyzers.** `InformationElement::GSM` carries the raw
+Layer 3 bytes (it was an empty stub), populated from `GsmtapType::Um` in
+`information_element.rs`. The RRLP analyzer is the first consumer; any future 2G
+heuristic builds on this. A demo `DemoMessage::Gsm` injects one through the real
+diag→gsmtap→IE path, and the demo round-trip test is what proves the framing.
 
 ## Talking to the right device
 

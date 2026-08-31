@@ -112,6 +112,28 @@ export const HEURISTICS: HeuristicInfo[] = [
         noise: 'Fires legitimately during emergency calls, and on some carriers that use network location for lawful services. A hotspot sitting on a desk should see this rarely, so an unexplained warning is worth attention.',
     },
     {
+        key: 'lpp_location_tracking',
+        title: 'Continuous location tracking',
+        summary:
+            'Looks more closely at those location requests, and raises the alarm when the network asks to be told your position over and over.',
+        detects:
+            'This is the deeper look at the same location messages as the check above. It reads how the network asked: which method it wants your device to use, from a precise satellite fix down to a rough cell estimate, and, most importantly, whether it asked for your position once or asked for it to be reported continuously on a timer. A repeated, on-a-timer request is flagged more seriously than a single one.',
+        matters:
+            'The difference between being located once and being followed is the whole point. A single location request during an emergency call is ordinary; a standing request that reports where you are every few seconds, for as long as it lasts, is what continuous tracking actually looks like. Reading that distinction is what separates a routine locate from surveillance.',
+        noise: 'Same legitimate causes as the check above. This one reads more of each message, so it does a little more work; on a device very short on memory you can turn it off and keep the basic version. Leaving both on is fine.',
+    },
+    {
+        key: 'rrlp_location_request',
+        title: 'Location asked for on 2G (older networks)',
+        summary:
+            'The same idea as the location checks above, but for the older 2G network that phones fall back to.',
+        detects:
+            "2G networks have their own, older way of asking a phone for its position, from before the one modern networks use. This watches 2G signalling for that request and for your device's answer.",
+        matters:
+            'Being pushed onto 2G is itself a known surveillance move, because its protections are weak, and once there this older location request is how a device can be pinpointed. Watching for it means a switch to 2G followed by a location request does not go unnoticed. It is the 2G companion to the checks above, so the same concern applies wherever your phone still uses 2G.',
+        noise: 'Legitimate on emergency calls on 2G. On a device that never touches 2G this will simply stay quiet.',
+    },
+    {
         key: 'diagnostic_analyzer',
         title: 'Connection diary',
         summary:

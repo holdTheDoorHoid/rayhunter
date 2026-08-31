@@ -140,10 +140,18 @@ PCAP and parsing them for analyzers, are not done. Timing advance is the prize
 there: it gives distance to the tower.
 
 ### lpp-heuristic (#1072)
-An analyzer for LPP, the LTE Positioning Protocol: the network asking the
-device to measure and report its own position. A location request and the
-device's report each raise a low warning once per LPP transaction; capability
-exchanges and GPS assistance data are informational.
+Two analyzers for LPP, the LTE Positioning Protocol (the network asking the
+device to measure and report its own position), separately toggleable:
+
+- `lpp_location_request` (basic): a location request and the device's report
+  each raise a low warning once per LPP transaction; capability exchanges and
+  GPS assistance data are informational. Reads only the message prefix.
+- `lpp_location_tracking` (deep): decodes the request/response bodies to report
+  the positioning method (A-GNSS satellite, OTDOA timing, E-CID cell) and
+  whether the request is for **periodic** (continuous) reporting, which it
+  raises to **medium**. Split out as its own analyzer so a memory-constrained
+  device can disable it and keep the basic one — the user asked for exactly
+  this. Reads more of each message, all at fixed offsets.
 **Upstream:** [#1072](https://github.com/EFForg/rayhunter/issues/1072), opened
 by a maintainer, also touching
 [#534](https://github.com/EFForg/rayhunter/issues/534).
@@ -168,7 +176,38 @@ messages therefore warn at Low, once per transaction; everything else stays
 informational. Say so when proposing, since upstream may prefer to change the
 row-writing rule instead. The test vectors in `lpp.rs` were generated with
 pycrate's reference 36.355 encoder and caught a real one-bit layout mistake;
-keep them.
+keep them. The deep analyzer's method/periodic offsets are verified against the
+same encoder — do not "simplify" them without re-checking against vectors.
+
+### rrlp-heuristic (#534)
+An analyzer for RRLP (Radio Resource LCS Protocol, 3GPP TS 44.031), the 2G
+counterpart to LPP: the GSM network asking a handset to report its position. A
+location request (`msrPositionReq`) or the device's response (`msrPositionRsp`)
+warns at low; assistance data and errors are informational.
+**Upstream:** [#534](https://github.com/EFForg/rayhunter/issues/534), which asks
+for both RRLP and LPP location-usage detection and is **unclaimed**. Still,
+#534 is a large multi-part wishlist issue (silent SMS, empty paging, LAC
+changes, and more); propose this as "the RRLP location part of #534", not as
+closing it.
+**Files:** `lib/src/analysis/rrlp.rs`, `lib/src/analysis/mod.rs`,
+`lib/src/analysis/analyzer.rs` (config field and wiring),
+`lib/src/analysis/information_element.rs` (the `GSM` variant now carries the
+raw L3 bytes, and `TryFrom` populates it from `GsmtapType::Um`),
+`daemon/src/packet_explorer.rs` (the `GSM` match arm),
+`dist/config.toml.in`, `daemon/web/src/lib/utils.svelte.ts`,
+`daemon/web/src/lib/heuristics.ts`, `doc/heuristics.md`, `daemon/src/demo.rs`
+(the `Gsm` demo message kind, `encapsulate_gsm`, and the RRLP scenario).
+**Depends on:** the `InformationElement::GSM`-carries-bytes change is the
+reusable half — it is the first time 2G messages reach an analyzer at all, so
+any future 2G heuristic builds on it. Worth calling out separately upstream.
+**Note:** the transport framing (GSM RR APPLICATION INFORMATION, message type
+0x38) is verified against `pycrate_mobile`'s TS 44.018 encoder and the RRLP
+APDU against pycrate's 44.031, both in `rrlp.rs`'s tests, and the whole
+diag→gsmtap→analyzer path is exercised by the demo round-trip test. It has
+**not** been seen against a real 2G RRLP capture (the test devices are LTE), so
+say that when proposing. Detection requires both a valid APPLICATION
+INFORMATION header and a decodable RRLP APDU, so a wrong message-type guess
+cannot produce a false positive on its own.
 
 ### web-authentication
 Optional accounts for the web interface, off by default so an update cannot

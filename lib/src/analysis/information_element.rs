@@ -3,7 +3,7 @@
 //! the term to refer to a structured, fully parsed message in any telcom
 //! standard.
 
-use crate::gsmtap::{GsmtapMessage, GsmtapType, LteNasSubtype, LteRrcSubtype};
+use crate::gsmtap::{GsmtapMessage, GsmtapType, LteNasSubtype, LteRrcSubtype, UmSubtype};
 use pycrate_rs::nas::NASMessage;
 use telcom_parser::{decode, lte_rrc};
 use thiserror::Error;
@@ -20,12 +20,27 @@ pub enum InformationElementError {
 
 #[derive(Debug)]
 pub enum InformationElement {
-    GSM,
+    // Carries the raw Layer 3 signalling bytes (2G is TLV, not something we
+    // parse into a tree the way we do LTE). Boxed to keep the enum small, and
+    // because most 2G messages are never looked at past their type.
+    GSM(Box<GsmInformationElement>),
     UMTS,
     // This element of the enum is substantially larger than the others,
     // so we box it to prevent the size of the enum (any variant) from blowing up.
     LTE(Box<LteInformationElement>),
     FiveG,
+}
+
+/// A 2G (GSM) Layer 3 signalling message, kept as its raw bytes.
+///
+/// Unlike the LTE variants there is no parsed tree here: the analysers that
+/// care read the specific fields they need out of the bytes. The logical
+/// channel it arrived on is kept because it is useful context and costs
+/// nothing.
+#[derive(Debug)]
+pub struct GsmInformationElement {
+    pub channel: UmSubtype,
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Debug)]
@@ -96,6 +111,15 @@ impl TryFrom<&GsmtapMessage> for InformationElement {
                 Ok(InformationElement::LTE(Box::new(
                     LteInformationElement::NAS(msg),
                 )))
+            }
+            // 2G Layer 3 signalling, kept as raw bytes rather than parsed. It is
+            // carried so analysers such as the RRLP location detector can read
+            // it; the bytes are already written to the PCAP for Wireshark too.
+            GsmtapType::Um(channel) => {
+                Ok(InformationElement::GSM(Box::new(GsmInformationElement {
+                    channel,
+                    bytes: gsmtap_msg.payload.clone(),
+                })))
             }
             _ => Err(InformationElementError::UnsupportedGsmtapType(
                 gsmtap_msg.header.gsmtap_type,

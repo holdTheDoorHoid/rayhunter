@@ -91,5 +91,7 @@ null_cipher = true
 nas_null_cipher = true
 incomplete_sib = true
 lpp_location_request = true
+lpp_location_tracking = true
+rrlp_location_request = true
 test_analyzer = false
 diagnostic_analyzer = true

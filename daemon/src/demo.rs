@@ -54,6 +54,8 @@ pub enum DemoMessage {
     /// An RRC message on a logical channel. `pdu_num` 2 is the broadcast
     /// channel and 7 is the dedicated downlink one.
     Rrc { payload: Vec<u8>, pdu_num: u8 },
+    /// A 2G (GSM) Layer 3 signalling message, carried in a GSM RR log record.
+    Gsm(Vec<u8>),
 }
 
 /// Every scenario the demo can draw from.
@@ -157,21 +159,31 @@ pub fn scenarios() -> Vec<Scenario> {
             ],
         },
         Scenario {
-            name: "network asked the device for its location (LPP)",
+            name: "network set up continuous location tracking (LPP)",
             messages: vec![DemoMessage::Nas(vec![
                 // 68 = Downlink Generic NAS Transport, container type 01 (LPP),
                 // then a two byte length and the LPP message itself: a
-                // requestLocationInformation for transaction 5, asking for a
-                // location estimate. These are the bytes of the reference
-                // vector in lib/src/analysis/lpp.rs with one change: the
-                // endTransaction bit is set (0x0a -> 0x0b in the second LPP
-                // byte, same bit the provide-and-end vector carries). The
-                // detector warns once per transaction, and the analysis
-                // harness lives as long as the recording, so a request that
-                // left its transaction open would demo exactly once per
-                // recording and then appear broken on every later press.
-                // Ending the transaction makes each press self-contained.
-                0x07, 0x68, 0x01, 0x00, 0x06, 0x90, 0x0b, 0x20, 0x40, 0x00, 0x00,
+                // requestLocationInformation for transaction 5 that asks for
+                // PERIODIC reporting by cell ID (E-CID) — the continuous-
+                // tracking signature the depth analyzer raises to medium, and a
+                // named method so the demo shows the method breakdown too. The
+                // seven LPP bytes are the reference periodic+ecid vector from
+                // lib/src/analysis/lpp.rs. The endTransaction bit is set (0x0b),
+                // so each press is a fresh, self-contained transaction rather
+                // than folding into the last.
+                0x07, 0x68, 0x01, 0x00, 0x07, 0x90, 0x0b, 0x20, 0x48, 0x80, 0x18, 0x70,
+            ])],
+        },
+        Scenario {
+            name: "2G network asked the device for its location (RRLP)",
+            messages: vec![DemoMessage::Gsm(vec![
+                // A GSM RR APPLICATION INFORMATION message (message type 0x38,
+                // protocol discriminator 6) carrying an RRLP measure-position
+                // request. Bytes are the reference frame from
+                // lib/src/analysis/rrlp.rs, encoded by pycrate_mobile (44.018)
+                // around a pycrate RRLP APDU (44.031): APDU ID 0 (RRLP), a
+                // four byte APDU whose component is msrPositionReq.
+                0x06, 0x38, 0x00, 0x04, 0x60, 0x00, 0xbc, 0x68,
             ])],
         },
         Scenario {
@@ -268,6 +280,43 @@ fn encapsulate_rrc(payload: &[u8], pdu_num: u8) -> Option<HdlcEncapsulatedMessag
     })
 }
 
+/// Diag log type for a 2G GSM Radio Resource signalling message.
+const LOG_TYPE_GSM_RR_SIGNALLING: u16 = 0x512f;
+
+/// SDCCH channel type, as Qualcomm's diag numbers it (`log_codes::SDCCH`). The
+/// gsmtap layer maps it to the SDCCH logical channel.
+const GSM_CHANNEL_SDCCH: u8 = 0x05;
+
+/// Wrap raw GSM Layer 3 bytes in a GSM RR signalling log record, the way a 2G
+/// message arrives. The body is channel type, a diag message-type byte the
+/// parser ignores, a length, then the Layer 3 message itself.
+fn encapsulate_gsm(msg: &[u8]) -> Option<HdlcEncapsulatedMessage> {
+    let length = u8::try_from(msg.len()).ok()?;
+    // Body: channel_type + message_type + length + msg.
+    let body_len = 3 + msg.len();
+    // inner_length counts the body plus the log type and timestamp ahead of it,
+    // the same twelve-byte offset the NAS and RRC records use.
+    let inner_length = u16::try_from(body_len + 12).ok()?;
+
+    let mut frame = Vec::with_capacity(body_len + 16);
+    frame.push(16); // Message::Log discriminant
+    frame.push(0); // pending_msgs
+    frame.extend_from_slice(&inner_length.to_le_bytes()); // outer_length
+    frame.extend_from_slice(&inner_length.to_le_bytes());
+    frame.extend_from_slice(&LOG_TYPE_GSM_RR_SIGNALLING.to_le_bytes());
+    frame.extend_from_slice(&current_diag_timestamp().to_le_bytes());
+    frame.push(GSM_CHANNEL_SDCCH); // channel_type
+    frame.push(0); // message_type, unused by the parser for this record
+    frame.push(length);
+    frame.extend_from_slice(msg);
+
+    let data = hdlc_encapsulate(&frame, &CRC_CCITT);
+    Some(HdlcEncapsulatedMessage {
+        len: data.len() as u32,
+        data,
+    })
+}
+
 /// Diag timestamps count 1.25ms ticks from the GPS epoch, 6 January 1980.
 fn current_diag_timestamp() -> u64 {
     const GPS_EPOCH_OFFSET_SECS: i64 = 315_964_800;
@@ -328,6 +377,7 @@ pub fn demo_container_from(chosen: Vec<Scenario>) -> Option<MessagesContainer> {
         .filter_map(|m| match m {
             DemoMessage::Nas(bytes) => encapsulate_nas(bytes),
             DemoMessage::Rrc { payload, pdu_num } => encapsulate_rrc(&payload, pdu_num),
+            DemoMessage::Gsm(bytes) => encapsulate_gsm(&bytes),
         })
         .collect();
 
