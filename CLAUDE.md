@@ -182,3 +182,55 @@ the user first, every time.
 
 Per CONTRIBUTING.md: for anything beyond a small doc fix, check existing issues and talk
 to the maintainers *before* implementing, or the contribution risks being rejected.
+
+## Verifying web UI work: count requests, do not just look
+
+Two traps, both of which cost real time.
+
+**Svelte effects re-run for reasons unrelated to anyone clicking anything.**
+An effect that acts every time it runs, and that writes state on the way
+(assigning a fresh object counts), can feed itself and loop. This is invisible
+on screen: the page looks right while it asks the device for the same thing
+several times a second, which matters a lot on a single core that is also
+recording. It also silently undoes anything the person did, a second or so
+after they do it.
+
+Drive such an effect from a **nonce the caller bumps once per click**, not from
+the value being requested, and act only on a nonce not yet handled. See
+`open_action` in `daemon/web/src/lib/packets.svelte.ts`. Keep the decision a
+pure function: there is no component test setup here, and adding one means new
+dev dependencies.
+
+Check for this by counting, not by watching:
+
+```js
+const n = {}; const orig = window.fetch;
+window.fetch = (...a) => { const u = `${a[0]}`; n[u] = (n[u]||0)+1; return orig(...a); };
+// interact, wait, then read n
+```
+
+**The polling loop pauses when the tab is hidden** (`if (document.hidden) return;`
+in `+page.svelte`). A browser pane that is collapsed or backgrounded therefore
+sits at "Loading..." for ever with every endpoint healthy, which looks exactly
+like a hang and is not one. Confirm with `document.visibilityState` before
+debugging anything else. To test a hidden pane, override it:
+
+```js
+Object.defineProperty(Document.prototype, 'hidden', { configurable: true, get: () => false });
+document.dispatchEvent(new Event('visibilitychange'));
+```
+
+## Deploying over a running daemon
+
+`cat > /data/rayhunter/rayhunter-daemon` fails with **"Text file busy"** while the
+service is running, and the `&&` chain after it silently skips the `sync`. Stop
+the service first:
+
+```
+adb -s <serial> shell '/bin/rootshell -c "/etc/init.d/rayhunter_daemon stop"'
+```
+
+`chmod` on the pushed binary then fails with "Operation not permitted" because
+the file is owned by uid 2000. That is harmless: `cat >` truncates in place and
+keeps the existing 0777 mode. Check the mode and `sync` separately rather than
+chaining, then verify md5 before rebooting.
