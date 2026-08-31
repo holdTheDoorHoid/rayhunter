@@ -1059,6 +1059,26 @@ mod tests {
             Some(Ok(expected_message)),
         );
     }
+
+    /// The cap may fall inside a multi-byte character, where String::truncate
+    /// panics. The firmware profile turns any panic into a daemon abort, so
+    /// terminal output must never be cut mid-character.
+    #[test]
+    fn terminal_output_is_cut_on_a_character_boundary() {
+        let short = truncate_output("hello".to_string());
+        assert_eq!(short, "hello");
+
+        // Two-byte characters at even offsets, and again shifted onto odd
+        // offsets by a one-byte prefix. Whatever the cap's parity, one of the
+        // two puts a character astride it.
+        let aligned = "é".repeat(TERMINAL_MAX_OUTPUT);
+        let shifted = format!("a{}", "é".repeat(TERMINAL_MAX_OUTPUT));
+        for text in [aligned, shifted] {
+            let cut = truncate_output(text);
+            assert!(cut.len() <= TERMINAL_MAX_OUTPUT + "\n[output truncated]".len());
+            assert!(cut.ends_with("\n[output truncated]"));
+        }
+    }
 }
 
 /// A display name and notes for one recording, as sent by the web UI.
@@ -1412,7 +1432,14 @@ pub async fn run_terminal_command(
 /// Cap output, saying so rather than silently cutting it off.
 fn truncate_output(mut text: String) -> String {
     if text.len() > TERMINAL_MAX_OUTPUT {
-        text.truncate(TERMINAL_MAX_OUTPUT);
+        // The limit may land inside a multi-byte character, and String::truncate
+        // panics there. The firmware profile aborts on panic, so that would take
+        // the whole daemon down mid-recording.
+        let mut cut = TERMINAL_MAX_OUTPUT;
+        while cut > 0 && !text.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        text.truncate(cut);
         text.push_str("\n[output truncated]");
     }
     text
