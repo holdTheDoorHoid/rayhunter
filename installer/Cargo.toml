@@ -33,6 +33,11 @@ tokio-retry2 = "0.5.7"
 tokio-stream = "0.1.17"
 futures = "0.3"
 
+[dev-dependencies]
+# Only to assert in tests that the config we write parses as intended. The
+# installer itself edits the file as text, so this is not shipped.
+toml = "0.8.8"
+
 [target.'cfg(unix)'.dependencies]
 termios = "0.3"
 

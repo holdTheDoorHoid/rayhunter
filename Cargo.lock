@@ -2903,6 +2903,7 @@ dependencies = [
  "tokio",
  "tokio-retry2",
  "tokio-stream",
+ "toml 0.8.22",
 ]
 
 [[package]]

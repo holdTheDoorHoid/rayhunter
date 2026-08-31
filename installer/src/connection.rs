@@ -23,6 +23,43 @@ pub async fn file_exists<C: DeviceConnection>(conn: &mut C, path: &str) -> bool 
         .unwrap_or(false)
 }
 
+/// Set a top-level boolean key in a TOML document, preserving everything else.
+///
+/// Appending the key would be wrong. The config template ends inside the
+/// `[analyzers]` table, so a key added at the end of the file is parsed as
+/// `analyzers.<key>` rather than a top-level setting — and since that table
+/// ignores keys it does not know, it is dropped without any error at all. A
+/// top-level key has to go before the first table header.
+fn set_top_level_bool(config: &str, key: &str, value: bool) -> String {
+    let assignment = format!("{key} = {value}");
+    let mut lines: Vec<String> = config.lines().map(str::to_string).collect();
+
+    // Only look above the first table header: a matching name below one belongs
+    // to that table, not to the document.
+    let end = lines
+        .iter()
+        .position(|line| line.trim_start().starts_with('['))
+        .unwrap_or(lines.len());
+
+    let existing = lines[..end].iter().position(|line| {
+        let trimmed = line.trim_start();
+        // A commented-out example is not the setting.
+        !trimmed.starts_with('#')
+            && trimmed
+                .strip_prefix(key)
+                .is_some_and(|rest| rest.trim_start().starts_with('='))
+    });
+
+    match existing {
+        Some(at) => lines[at] = assignment,
+        None => lines.insert(end, assignment),
+    }
+
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
 /// Shared config installation logic. Installs to /data/rayhunter/config.toml which resolves
 /// through the symlink to the actual data directory.
 pub async fn install_config<C: DeviceConnection>(
@@ -33,7 +70,7 @@ pub async fn install_config<C: DeviceConnection>(
 ) -> Result<()> {
     let config_path = "/data/rayhunter/config.toml";
     if reset_config || !file_exists(conn, config_path).await {
-        let mut config = crate::CONFIG_TOML.replace(
+        let config = crate::CONFIG_TOML.replace(
             r#"#device = "orbic""#,
             &format!(r#"device = "{device_type}""#),
         );
@@ -41,20 +78,33 @@ pub async fn install_config<C: DeviceConnection>(
         // root, so the terminal is the difference between an interface that
         // reads data and one that can do anything at all; turning it on should
         // take physical access to the device.
-        if enable_terminal {
-            config.push_str("\nterminal_enabled = true\n");
-            println!(
-                "  the web terminal is ENABLED on this device. Anyone who can reach the web\n                   interface can run commands as root. Set up a password under Configuration."
-            );
-        }
+        let config = set_top_level_bool(&config, "terminal_enabled", enable_terminal);
         conn.write_file(config_path, config.as_bytes()).await?;
     } else {
         println!("Config file already exists, skipping (use --reset-config to overwrite)");
-        if enable_terminal {
+        // The terminal is the exception to keeping the existing config: flashing
+        // is the only place it can be turned on, so the flag given here has to
+        // take effect without also demanding the rest of somebody's settings be
+        // thrown away. Absent, it turns the terminal off — whether it is on
+        // should always be what was asked for at the last flash.
+        let existing = conn.run_command(&format!("cat '{config_path}'")).await?;
+        let updated = set_top_level_bool(&existing, "terminal_enabled", enable_terminal);
+        if updated != existing {
+            conn.write_file(config_path, updated.as_bytes()).await?;
             println!(
-                "  --enable-terminal had no effect: the existing config was kept.\n                   Use --reset-config as well to write a fresh one."
+                "  the web terminal is now {} on this device.",
+                if enable_terminal {
+                    "ENABLED"
+                } else {
+                    "disabled"
+                }
             );
         }
+    }
+    if enable_terminal {
+        println!(
+            "  the web terminal is ENABLED on this device. Anyone who can reach the web\n  interface can run commands as root. Set a password under Configuration."
+        );
     }
     Ok(())
 }
@@ -247,5 +297,71 @@ impl DeviceConnection for TelnetConnection {
 
     async fn write_file(&mut self, path: &str, content: &[u8]) -> Result<()> {
         crate::util::telnet_send_file(self.addr, path, content, self.wait_for_prompt).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::set_top_level_bool;
+
+    /// The bug this exists to prevent: the template ends inside `[analyzers]`,
+    /// so a key appended to the end is silently swallowed by that table and the
+    /// setting never takes effect.
+    #[test]
+    fn the_key_goes_above_the_first_table() {
+        let config = "port = 8080\n\n[analyzers]\nnull_cipher = true\n";
+        let out = set_top_level_bool(config, "terminal_enabled", true);
+        let parsed: toml::Value = toml::from_str(&out).expect("still valid TOML");
+        assert_eq!(parsed["terminal_enabled"].as_bool(), Some(true));
+        assert!(
+            parsed["analyzers"].get("terminal_enabled").is_none(),
+            "leaked into the analyzers table: {out}"
+        );
+    }
+
+    #[test]
+    fn an_existing_value_is_replaced_not_duplicated() {
+        let config = "port = 8080\nterminal_enabled = false\n\n[analyzers]\n";
+        let out = set_top_level_bool(config, "terminal_enabled", true);
+        assert_eq!(out.matches("terminal_enabled").count(), 1, "{out}");
+        let parsed: toml::Value = toml::from_str(&out).unwrap();
+        assert_eq!(parsed["terminal_enabled"].as_bool(), Some(true));
+    }
+
+    /// Flashing without the flag has to turn the terminal off again.
+    #[test]
+    fn it_can_turn_the_setting_off() {
+        let config = "terminal_enabled = true\n\n[analyzers]\n";
+        let out = set_top_level_bool(config, "terminal_enabled", false);
+        let parsed: toml::Value = toml::from_str(&out).unwrap();
+        assert_eq!(parsed["terminal_enabled"].as_bool(), Some(false));
+    }
+
+    /// A commented-out example must not be mistaken for the real setting, or it
+    /// would be rewritten into a live one in the wrong place.
+    #[test]
+    fn a_commented_example_is_not_the_setting() {
+        let config = "# terminal_enabled = true\nport = 8080\n\n[analyzers]\n";
+        let out = set_top_level_bool(config, "terminal_enabled", true);
+        assert!(out.contains("# terminal_enabled = true"), "{out}");
+        let parsed: toml::Value = toml::from_str(&out).unwrap();
+        assert_eq!(parsed["terminal_enabled"].as_bool(), Some(true));
+    }
+
+    /// Comments and ordering elsewhere are somebody's own config; leave them be.
+    #[test]
+    fn the_rest_of_the_file_is_untouched() {
+        let config = "# a note\nport = 8080\n\n[analyzers]\nnull_cipher = true\n";
+        let out = set_top_level_bool(config, "terminal_enabled", false);
+        assert!(out.contains("# a note"));
+        assert!(out.contains("null_cipher = true"));
+    }
+
+    /// The real template, which is what actually ships.
+    #[test]
+    fn the_shipped_template_gets_a_top_level_key() {
+        let out = set_top_level_bool(crate::CONFIG_TOML, "terminal_enabled", true);
+        let parsed: toml::Value = toml::from_str(&out).expect("template stays valid");
+        assert_eq!(parsed["terminal_enabled"].as_bool(), Some(true));
     }
 }
