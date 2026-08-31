@@ -246,6 +246,11 @@ pub async fn get_config(
 ) -> Result<Json<Config>, (StatusCode, String)> {
     let mut config = state.config.clone();
     config.wifi_password = None;
+    // The account names are useful to show; the hashes are not, and serving
+    // them would hand an attacker something to grind offline at their leisure.
+    for user in config.web_users.iter_mut() {
+        user.password_hash = String::new();
+    }
     Ok(Json(config))
 }
 
@@ -274,6 +279,10 @@ pub async fn set_config(
         config.gps_fixed_longitude = None;
     }
     let mut config_to_write = config.clone();
+    // Accounts are never taken from the request. The hashes are redacted on
+    // the way out, so a client saving the settings page would otherwise post
+    // blanks back and lock everybody out of the device.
+    config_to_write.web_users = state.config.web_users.clone();
     config_to_write.wifi_ssid = None;
     config_to_write.wifi_password = None;
     config_to_write.wifi_security = None;
@@ -1162,4 +1171,113 @@ pub async fn debug_keypress(
             crate::display::KEYPRESS_QUIET_PERIOD.as_secs()
         ),
     ))
+}
+/// One account to add or replace.
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct WebUserRequest {
+    pub username: String,
+    pub password: String,
+}
+
+/// Add a web interface account, or change an existing one's password.
+///
+/// The password is hashed here and the plaintext is never written anywhere.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/web-users",
+    tag = "Configuration",
+    responses(
+        (status = StatusCode::ACCEPTED, description = "Account saved; restart to apply"),
+        (status = StatusCode::BAD_REQUEST, description = "Empty username or password"),
+    ),
+    summary = "Add or update a web interface account",
+))]
+pub async fn set_web_user(
+    State(state): State<Arc<ServerState>>,
+    Json(body): Json<WebUserRequest>,
+) -> Result<(StatusCode, String), (StatusCode, String)> {
+    let username = body.username.trim().to_string();
+    if username.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "username is empty".to_string()));
+    }
+    // Short enough to guess is the same as no password at all, and somebody
+    // setting one here believes they are protecting something.
+    if body.password.chars().count() < 8 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "password must be at least 8 characters".to_string(),
+        ));
+    }
+
+    let mut users = state.config.web_users.clone();
+    let hash = crate::web_auth::hash_password(&body.password);
+    match users.iter_mut().find(|u| u.username == username) {
+        Some(existing) => existing.password_hash = hash,
+        None => users.push(crate::web_auth::WebUser {
+            username: username.clone(),
+            password_hash: hash,
+        }),
+    }
+
+    write_web_users(&state, users).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        format!("saved {username}; restart Rayhunter to apply"),
+    ))
+}
+
+/// Remove a web interface account.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/web-users/{username}/delete",
+    tag = "Configuration",
+    responses(
+        (status = StatusCode::ACCEPTED, description = "Account removed"),
+        (status = StatusCode::NOT_FOUND, description = "No such account"),
+    ),
+    summary = "Remove a web interface account",
+))]
+pub async fn delete_web_user(
+    State(state): State<Arc<ServerState>>,
+    Path(username): Path<String>,
+) -> Result<(StatusCode, String), (StatusCode, String)> {
+    let mut users = state.config.web_users.clone();
+    let before = users.len();
+    users.retain(|u| u.username != username);
+    if users.len() == before {
+        return Err((StatusCode::NOT_FOUND, format!("no account {username}")));
+    }
+    write_web_users(&state, users).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        format!("removed {username}; restart Rayhunter to apply"),
+    ))
+}
+
+/// Write the account list back to the config file, leaving everything else as
+/// the running daemon has it.
+async fn write_web_users(
+    state: &Arc<ServerState>,
+    users: Vec<crate::web_auth::WebUser>,
+) -> Result<(), (StatusCode, String)> {
+    let mut config = state.config.clone();
+    config.web_users = users;
+    config.wifi_ssid = None;
+    config.wifi_password = None;
+    config.wifi_security = None;
+
+    let config_str = toml::to_string_pretty(&config).map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to serialize config: {err}"),
+        )
+    })?;
+    write(&state.config_path, config_str).await.map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to write config: {err}"),
+        )
+    })?;
+    Ok(())
 }

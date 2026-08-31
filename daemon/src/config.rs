@@ -175,6 +175,16 @@ pub struct Config {
     pub demo_mode: bool,
     /// Key input mode
     pub key_input_mode: KeyInputMode,
+    /// Accounts permitted to use the web interface.
+    ///
+    /// Empty means no authentication, which is how Rayhunter has always
+    /// behaved and stays the default so an update never locks anyone out of
+    /// their own device. Adding an account turns authentication on.
+    ///
+    /// There is no TLS on these devices, so this is a second factor beyond
+    /// knowing the WiFi password rather than protection against someone able
+    /// to capture the traffic itself.
+    pub web_users: Vec<crate::web_auth::WebUser>,
     /// Whether to disclose this device's own IMSI, IMEI and temporary identity
     /// over the web API.
     ///
@@ -300,6 +310,7 @@ impl Default for Config {
             gif_store_path: "/data/rayhunter/gifs".to_string(),
             key_input_mode: KeyInputMode::Disabled,
             show_subscriber_identity: false,
+            web_users: Vec::new(),
             // Off by default. It holds a backlight on, which is a real cost
             // to a device that may be running on battery.
             keep_screen_on: KeepScreenOn::Never,

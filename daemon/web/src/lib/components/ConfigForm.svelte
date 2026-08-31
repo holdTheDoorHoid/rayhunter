@@ -7,6 +7,8 @@
         scan_wifi_networks,
         GpsMode,
         enabled_notifications,
+        set_web_user,
+        delete_web_user,
         type Config,
         type WifiStatus,
         type WifiNetwork,
@@ -49,6 +51,50 @@
     // that matches a preset does not snap the control back under the cursor.
     let customRotationTime = $state(false);
     let customRotationSize = $state(false);
+
+    // Accounts are managed by their own endpoints rather than the settings
+    // save, because the hashes are redacted on the way out and posting the
+    // whole config back would otherwise blank them and lock everyone out.
+    let newUsername = $state('');
+    let newPassword = $state('');
+    let userMessage = $state('');
+    let userError = $state('');
+    let savingUser = $state(false);
+
+    async function save_user() {
+        if (!config) return;
+        savingUser = true;
+        userMessage = '';
+        userError = '';
+        try {
+            userMessage = await set_web_user(newUsername, newPassword);
+            config.web_users = [
+                ...config.web_users.filter((u) => u.username !== newUsername.trim()),
+                { username: newUsername.trim(), password_hash: '' },
+            ];
+            newUsername = '';
+            newPassword = '';
+        } catch (e) {
+            userError = `${e}`;
+        } finally {
+            savingUser = false;
+        }
+    }
+
+    async function remove_user(username: string) {
+        if (!config) return;
+        savingUser = true;
+        userMessage = '';
+        userError = '';
+        try {
+            userMessage = await delete_web_user(username);
+            config.web_users = config.web_users.filter((u) => u.username !== username);
+        } catch (e) {
+            userError = `${e}`;
+        } finally {
+            savingUser = false;
+        }
+    }
 
     /**
      * The sections of the configuration page.
@@ -439,6 +485,118 @@
                                  a thin line was never hiding anything, so there would
                                  be nothing to step aside from and this would be a
                                  control that visibly does nothing. -->
+                            <div class="border-t border-gray-200 dark:border-gray-700 pt-3 mt-4">
+                                <h4 class="text-sm font-medium text-gray-700 dark:text-gray-200">
+                                    Who can use this interface
+                                </h4>
+                                {#if config.web_users.length === 0}
+                                    <p class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                                        Anyone who can reach this page can use it, which on a
+                                        hotspot means anyone on its WiFi. Add an account to require
+                                        a password.
+                                    </p>
+                                {:else}
+                                    <ul class="mt-2 space-y-1">
+                                        {#each config.web_users as user (user.username)}
+                                            <li class="flex items-center gap-2 text-sm">
+                                                <span class="font-mono">{user.username}</span>
+                                                <button
+                                                    type="button"
+                                                    onclick={() => remove_user(user.username)}
+                                                    disabled={savingUser}
+                                                    class="text-xs text-red-600 underline disabled:opacity-40 dark:text-red-400"
+                                                >
+                                                    remove
+                                                </button>
+                                            </li>
+                                        {/each}
+                                    </ul>
+                                {/if}
+
+                                <div class="mt-2 flex flex-wrap items-end gap-2">
+                                    <div>
+                                        <label
+                                            for="new_web_username"
+                                            class="block text-xs text-gray-600 dark:text-gray-300"
+                                            >Username</label
+                                        >
+                                        <input
+                                            id="new_web_username"
+                                            type="text"
+                                            bind:value={newUsername}
+                                            autocomplete="off"
+                                            class="w-36 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label
+                                            for="new_web_password"
+                                            class="block text-xs text-gray-600 dark:text-gray-300"
+                                            >Password</label
+                                        >
+                                        <input
+                                            id="new_web_password"
+                                            type="password"
+                                            bind:value={newPassword}
+                                            autocomplete="new-password"
+                                            class="w-44 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
+                                        />
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onclick={save_user}
+                                        disabled={savingUser ||
+                                            !newUsername.trim() ||
+                                            newPassword.length < 8}
+                                        class="rounded-md border border-gray-300 px-2 py-1 text-sm disabled:opacity-40 dark:border-gray-600"
+                                    >
+                                        {savingUser ? 'Saving…' : 'Add or update'}
+                                    </button>
+                                </div>
+                                {#if newPassword.length > 0 && newPassword.length < 8}
+                                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                        At least 8 characters.
+                                    </p>
+                                {/if}
+                                {#if userMessage}
+                                    <p class="mt-1 text-xs text-green-700 dark:text-green-300">
+                                        {userMessage}
+                                    </p>
+                                {/if}
+                                {#if userError}
+                                    <p class="mt-1 text-xs text-red-600 dark:text-red-400">
+                                        {userError}
+                                    </p>
+                                {/if}
+
+                                <Explainer
+                                    summary="What a password here protects against, and what it does not."
+                                >
+                                    <p>
+                                        Accounts are saved as soon as you add them, separately from
+                                        the rest of this page, and take effect when Rayhunter next
+                                        restarts. Passwords are stored hashed, so a copy of the
+                                        configuration file does not hand them over.
+                                    </p>
+                                    <p>
+                                        What this protects against is someone who has the WiFi
+                                        password but should not have your recordings: a guest, or
+                                        anyone who was given the network for another reason.
+                                    </p>
+                                    <p>
+                                        What it does not protect against is someone able to capture
+                                        the WiFi traffic itself. There is no encryption between this
+                                        browser and the device, so the password crosses the air
+                                        readable to anyone already in that position. Treat it as a
+                                        second lock on the same door, not as a secure channel.
+                                    </p>
+                                    <p>
+                                        Removing every account returns the interface to being open
+                                        to anyone who can reach it.
+                                    </p>
+                                </Explainer>
+                            </div>
+
                             <div class="mt-3 flex items-center">
                                 <input
                                     id="show_subscriber_identity"

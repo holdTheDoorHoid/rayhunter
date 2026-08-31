@@ -19,6 +19,7 @@ pub mod server;
 pub mod stats;
 pub mod subscriber_id;
 pub mod update;
+pub mod web_auth;
 pub mod webdav;
 
 #[cfg(feature = "apidocs")]

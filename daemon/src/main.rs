@@ -19,6 +19,7 @@ mod server;
 mod stats;
 mod subscriber_id;
 mod update;
+mod web_auth;
 mod webdav;
 
 use std::net::SocketAddr;
@@ -35,9 +36,9 @@ use crate::pcap::get_pcap;
 use crate::qmdl_store::RecordingStore;
 use crate::server::{
     MAX_GIF_BYTES, ServerState, annotate_recording, debug_keypress, debug_set_display_state,
-    delete_display_gif, get_cell_info, get_config, get_display_gif, get_qmdl, get_time,
-    get_wifi_status, get_zip, scan_wifi, serve_static, set_config, set_display_gif,
-    set_time_offset, test_notification, trigger_demo_warning,
+    delete_display_gif, delete_web_user, get_cell_info, get_config, get_display_gif, get_qmdl,
+    get_time, get_wifi_status, get_zip, scan_wifi, serve_static, set_config, set_display_gif,
+    set_time_offset, set_web_user, test_notification, trigger_demo_warning,
 };
 use crate::stats::{get_qmdl_manifest, get_system_stats, get_update_status};
 use crate::update::{UpdateStatus, run_update_check_worker};
@@ -92,6 +93,8 @@ fn get_router() -> AppRouter {
         .route("/api/demo-warning", post(trigger_demo_warning))
         .route("/api/config", get(get_config))
         .route("/api/config", post(set_config))
+        .route("/api/web-users", post(set_web_user))
+        .route("/api/web-users/{username}/delete", post(delete_web_user))
         .route(
             "/api/display-gif/{state}",
             get(get_display_gif)
@@ -123,7 +126,15 @@ async fn run_server(
     info!("spinning up server");
     let addr = SocketAddr::from(([0, 0, 0, 0], state.config.port));
     let listener = TcpListener::bind(&addr).await.unwrap();
-    let app = get_router().with_state(state);
+    // Wrapped around every route. When no accounts are configured the layer
+    // passes everything through, so this changes nothing until somebody adds
+    // one.
+    let app = get_router()
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            web_auth::require_auth,
+        ))
+        .with_state(state);
 
     task_tracker.spawn(async move {
         info!("The orca is hunting for stingrays...");

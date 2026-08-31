@@ -20,6 +20,10 @@ pq-tls = ["reqwest/rustls-tls-webpki-roots-no-provider", "dep:rustls-post-quantu
 apidocs = ["dep:utoipa", "wifi-station/utoipa"]
 
 [dependencies]
+sha2 = "0.10"
+hmac = "0.12"
+fastrand = "2"
+base64 = "0.22"
 rayhunter = { path = "../lib" }
 wifi-station = "0.10.1"
 toml = "0.8.8"

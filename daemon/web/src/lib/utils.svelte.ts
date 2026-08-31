@@ -128,6 +128,8 @@ export interface Config {
     keep_screen_on: number;
     /** Disclose this device IMSI, IMEI and temporary identity over the API. */
     show_subscriber_identity: boolean;
+    /** Accounts allowed to use the web interface. Empty means no password. */
+    web_users: { username: string; password_hash: string }[];
     /** Shrink to the thin status line briefly after a button press. */
     pause_display_on_keypress: boolean;
     ntfy_url: string | null;
@@ -378,4 +380,25 @@ export async function annotate_recording(
     if (!response.ok) {
         throw new Error(await response.text());
     }
+}
+/** Add a web interface account, or change an existing one's password. */
+export async function set_web_user(username: string, password: string): Promise<string> {
+    const response = await fetch('/api/web-users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+    });
+    const body = await response.text();
+    if (!response.ok) throw new Error(body);
+    return body;
+}
+
+/** Remove a web interface account. */
+export async function delete_web_user(username: string): Promise<string> {
+    const response = await fetch(`/api/web-users/${encodeURIComponent(username)}/delete`, {
+        method: 'POST',
+    });
+    const body = await response.text();
+    if (!response.ok) throw new Error(body);
+    return body;
 }
