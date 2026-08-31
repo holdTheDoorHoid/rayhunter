@@ -5,6 +5,8 @@
 Rayhunter is a project for detecting IMSI catchers, also known as cell-site simulators or stingrays. It was first designed to run on a cheap mobile hotspot called the Orbic RC400L, but thanks to community efforts can [support some other devices as well](./supported-devices.md).
 It's also designed to be as easy to install and use as possible, regardless of your level of technical skills. This guide should provide you all you need to acquire a compatible device, install Rayhunter, and start catching IMSI catchers.
 
+**About this copy:** you are reading the documentation for a [fork of Rayhunter](https://github.com/holdTheDoorHoid/rayhunter), which adds features to the web interface, the device display, and the detectors. Those changes are being offered to the main EFF project one at a time. [Why This Fork Exists](./fork/index.md) explains the relationship, and [What It Adds](./fork/features.md) lists what is different. Where a page describes something the fork added, it says so.
+
 &rarr;  Check out the [installation guide](./installation.md) to get started.
 
 &rarr; To learn more about the aim of the project, and about IMSI catchers in general, please check out our [introductory blog post](https://www.eff.org/deeplinks/2025/03/meet-rayhunter-new-open-source-tool-eff-detect-cellular-spying). 
