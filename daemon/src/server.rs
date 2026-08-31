@@ -1393,40 +1393,103 @@ pub async fn run_terminal_command(
         return Err((StatusCode::BAD_REQUEST, "no command given".to_string()));
     }
 
-    let output = tokio::time::timeout(
-        TERMINAL_TIMEOUT,
-        tokio::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(command)
-            .output(),
-    )
-    .await;
+    // Scoped here: a different `AsyncReadExt` is in use elsewhere in this file.
+    use tokio::io::AsyncReadExt as _;
 
-    let (stdout, stderr, exit_code, timed_out) = match output {
-        Ok(Ok(out)) => (
-            String::from_utf8_lossy(&out.stdout).to_string(),
-            String::from_utf8_lossy(&out.stderr).to_string(),
-            out.status.code(),
-            false,
-        ),
-        Ok(Err(err)) => (String::new(), format!("failed to run: {err}"), None, false),
-        Err(_) => (
-            String::new(),
-            format!(
-                "still running after {} seconds, killed",
-                TERMINAL_TIMEOUT.as_secs()
-            ),
-            None,
-            true,
-        ),
+    let spawned = tokio::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(command)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        // Its own process group, so a command that starts other processes can
+        // be stopped as a whole. Killing only the shell leaves whatever it
+        // started running on a device with one slow core to spare.
+        .process_group(0)
+        // Covers the paths that return early without reaching the kill below.
+        .kill_on_drop(true)
+        .spawn();
+
+    let mut child = match spawned {
+        Ok(child) => child,
+        Err(err) => {
+            return Ok(Json(TerminalResponse {
+                stdout: String::new(),
+                stderr: format!("failed to run: {err}"),
+                exit_code: None,
+                timed_out: false,
+            }));
+        }
     };
 
+    let mut stdout_pipe = child.stdout.take();
+    let mut stderr_pipe = child.stderr.take();
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let finished = tokio::time::timeout(TERMINAL_TIMEOUT, async {
+        // Both pipes have to be drained while the command runs, not after it
+        // exits. A command writing more than the pipe buffer holds blocks until
+        // something reads it, so waiting for exit first would hang forever on
+        // exactly the noisy commands this is most useful for.
+        let read_out = async {
+            if let Some(pipe) = stdout_pipe.as_mut() {
+                let _ = pipe.read_to_end(&mut out).await;
+            }
+        };
+        let read_err = async {
+            if let Some(pipe) = stderr_pipe.as_mut() {
+                let _ = pipe.read_to_end(&mut err).await;
+            }
+        };
+        tokio::join!(read_out, read_err);
+        child.wait().await
+    })
+    .await;
+
+    let (exit_code, timed_out) = match finished {
+        Ok(Ok(status)) => (status.code(), false),
+        Ok(Err(wait_err)) => {
+            return Ok(Json(TerminalResponse {
+                stdout: String::new(),
+                stderr: format!("failed to run: {wait_err}"),
+                exit_code: None,
+                timed_out: false,
+            }));
+        }
+        Err(_) => {
+            kill_process_group(&mut child).await;
+            (None, true)
+        }
+    };
+
+    // Whatever it managed to print is kept, including when it was killed. A
+    // command that printed something useful and then hung should not come back
+    // empty. `timed_out` is what says it was killed, so no message is invented
+    // here: the caller would otherwise show the same thing twice.
     Ok(Json(TerminalResponse {
-        stdout: truncate_output(stdout),
-        stderr: truncate_output(stderr),
+        stdout: truncate_output(String::from_utf8_lossy(&out).to_string()),
+        stderr: truncate_output(String::from_utf8_lossy(&err).to_string()),
         exit_code,
         timed_out,
     }))
+}
+
+/// Kill a timed-out command and everything it started.
+///
+/// The child leads its own process group, so signalling the negative pid
+/// reaches the group. Without this the command carried on running after being
+/// reported as killed, which was both a lie and a way to load up a device that
+/// has very little to spare.
+async fn kill_process_group(child: &mut tokio::process::Child) {
+    if let Some(pid) = child.id() {
+        // Negative pid means "the whole group", which is why the child was put
+        // into one of its own.
+        unsafe {
+            libc::kill(-(pid as i32), libc::SIGKILL);
+        }
+    }
+    // Reap it, so it does not sit around as a zombie.
+    let _ = child.wait().await;
 }
 
 /// Cap output, saying so rather than silently cutting it off.
