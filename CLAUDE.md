@@ -125,6 +125,14 @@ V8 RRC packet has `earfcn` and `sib_mask` as **32 bit** fields.
 `AnalysisRow::is_empty`), so a detector that only emits informational events can
 never appear in the UI.
 
+For a protocol whose ASN.1 is **not** in `telcom-parser` (LPP was one), derive
+the layout by hand but verify against an independent reference encoder before
+trusting it — hand-derivation from memory of the spec missed the extension bit
+on `LPP-TransactionID`, a one-bit error that shifted every field after it. The
+reference bytes live as hex constants in the Rust tests
+(`lib/src/analysis/lpp.rs`); the encoder that produced them (pycrate, offline,
+throwaway) is not a dependency of anything.
+
 ## Talking to the right device
 
 Several Orbics may be connected at once, and they all serve on `192.168.1.1:8080` —
