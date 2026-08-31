@@ -124,6 +124,8 @@ export interface Config {
     status_bar_height: number | null;
     display_gifs: DisplayGifs;
     key_input_mode: number;
+    /** 0 never, 1 always, 2 only while plugged in. */
+    keep_screen_on: number;
     ntfy_url: string | null;
     enabled_notifications: enabled_notifications[];
     auto_check_updates: boolean;

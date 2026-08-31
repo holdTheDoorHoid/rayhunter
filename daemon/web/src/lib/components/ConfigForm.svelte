@@ -312,6 +312,52 @@
                     </select>
                 </div>
 
+                <div>
+                    <label
+                        for="keep_screen_on"
+                        class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                    >
+                        Keep the screen on
+                    </label>
+                    <select
+                        id="keep_screen_on"
+                        bind:value={config.keep_screen_on}
+                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                    >
+                        <option value={0}>Let the screen turn itself off</option>
+                        <option value={2}>Keep it on while plugged in</option>
+                        <option value={1}>Keep it on always</option>
+                    </select>
+                    {#if config.keep_screen_on === 1}
+                        <p class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                            On battery this will flatten the device considerably faster. Pick "while
+                            plugged in" unless you have a reason not to.
+                        </p>
+                    {/if}
+                    <Explainer
+                        summary="Why the screen goes dark while Rayhunter is plainly running."
+                    >
+                        <p>
+                            The device blanks its own screen on a timer, and drawing to the screen
+                            does not count as activity to that timer. So Rayhunter can be recording
+                            perfectly well with nothing to show for it, and the only way to check is
+                            to press a button. That defeats the point of a status light you are
+                            meant to notice out of the corner of your eye.
+                        </p>
+                        <p>
+                            Keeping it on holds the backlight and stops the device suspending. That
+                            is why the plugged in option exists, and why it is the one to pick: a
+                            backlight held on is one of the quickest ways to flatten one of these
+                            batteries. Set to plugged in, the screen stays lit on a desk and the
+                            device goes back to saving power the moment you unplug it.
+                        </p>
+                        <p>
+                            Currently implemented for the Orbic. Other devices accept the setting
+                            and ignore it rather than failing.
+                        </p>
+                    </Explainer>
+                </div>
+
                 <div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3">
                     <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
                         Notification Settings

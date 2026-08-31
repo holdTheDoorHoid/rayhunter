@@ -37,6 +37,28 @@ pub enum KeyInputMode {
     Disabled = 0,
     DoubleTapPower = 1,
 }
+
+/// Whether to stop the device's screen blanking on its own timer.
+///
+/// Three states rather than two booleans, because "do not keep the screen on,
+/// but only while plugged in" is not a thing anybody can mean, and a pair of
+/// flags would let a config express it.
+///
+/// `WhenPluggedIn` exists because an always-on backlight is the fastest way to
+/// flatten one of these batteries, which is the objection that closed the
+/// upstream attempt at this (EFForg/rayhunter#919). Left on a desk with power,
+/// which is what people actually asked for in #539, the cost is nothing.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize_repr, Deserialize_repr)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub enum KeepScreenOn {
+    /// Let the device blank the screen as it normally would.
+    Never = 0,
+    /// Hold the screen on whatever the power source.
+    Always = 1,
+    /// Hold the screen on only while external power is connected.
+    WhenPluggedIn = 2,
+}
 use crate::notifications::NotificationType;
 
 /// User-supplied overrides for the colors drawn on the device's own display.
@@ -153,6 +175,11 @@ pub struct Config {
     pub demo_mode: bool,
     /// Key input mode
     pub key_input_mode: KeyInputMode,
+    /// Whether to stop the screen blanking on the device's own timer.
+    ///
+    /// Device specific. Implemented for the Orbic; other devices ignore it
+    /// rather than failing, so the setting is safe to carry in any config.
+    pub keep_screen_on: KeepScreenOn,
     /// ntfy.sh URL
     pub ntfy_url: Option<String>,
     /// Vector containing the types of enabled notifications
@@ -247,6 +274,9 @@ impl Default for Config {
             display_gifs: DisplayGifs::default(),
             gif_store_path: "/data/rayhunter/gifs".to_string(),
             key_input_mode: KeyInputMode::Disabled,
+            // Off by default. It holds a backlight on, which is a real cost
+            // to a device that may be running on battery.
+            keep_screen_on: KeepScreenOn::Never,
             analyzers: AnalyzerConfig::default(),
             ntfy_url: None,
             enabled_notifications: vec![NotificationType::Warning, NotificationType::LowBattery],

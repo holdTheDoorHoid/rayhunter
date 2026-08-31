@@ -1,5 +1,6 @@
 <script lang="ts">
     import Explainer from './Explainer.svelte';
+    import { help } from '../helpVisibility.svelte';
     import {
         rsrp_quality,
         operator_name,
@@ -203,7 +204,11 @@
             </div>
         </div>
 
-        {#if stale}
+        <!-- Explanation only. The fact itself is already on screen and stays
+             there either way: the "measured N ago" beside the heading turns
+             amber on exactly this condition, so hiding this paragraph costs
+             the warning nothing. -->
+        {#if stale && help.shown}
             <p class="mt-2 text-xs text-amber-600 dark:text-amber-400">
                 This reading is not current. The modem only reports measurements while it is
                 actively working, so an attached device sitting idle stops sending them. The values
@@ -219,16 +224,21 @@
             >
                 <div class="text-xs text-gray-500 dark:text-gray-400">Protection in use</div>
                 <div class="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                    <!-- The name stays, the clause after it goes. These two
+                         headings are the only thing separating two identical
+                         looking pairs of Encryption and Integrity rows, so
+                         dropping them outright would leave four readings with
+                         nothing saying which layer each belongs to. -->
                     {#if encryption.rrc_cipher || encryption.rrc_integrity}
                         <div class="col-span-2 text-xs text-gray-500 dark:text-gray-400">
-                            Radio link, between your device and the tower
+                            Radio link{#if help.shown}, between your device and the tower{/if}
                         </div>
                         <div>Encryption: {encryption.rrc_cipher ?? 'not seen'}</div>
                         <div>Integrity: {encryption.rrc_integrity ?? 'not seen'}</div>
                     {/if}
                     {#if encryption.nas_cipher || encryption.nas_integrity}
                         <div class="col-span-2 mt-1 text-xs text-gray-500 dark:text-gray-400">
-                            Core network, signalling with your operator
+                            Core network{#if help.shown}, signalling with your operator{/if}
                         </div>
                         <div>Encryption: {encryption.nas_cipher ?? 'not seen'}</div>
                         <div>Integrity: {encryption.nas_integrity ?? 'not seen'}</div>
