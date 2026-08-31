@@ -18,6 +18,7 @@
     import Explainer from './Explainer.svelte';
     import { HEURISTICS } from '../heuristics';
     import { theme, type ThemePreference } from '../theme.svelte';
+    import { help } from '../helpVisibility.svelte';
 
     let { shown = $bindable() }: { shown: boolean } = $props();
     let config = $state<Config | null>(null);
@@ -205,6 +206,35 @@
                         Changes this web page only, not the device screen. Applies straight away and
                         is remembered in this browser, so it does not restart Rayhunter or interrupt
                         a recording.
+                    </p>
+                </div>
+
+                <div>
+                    <div class="flex items-center">
+                        <input
+                            id="show_help"
+                            type="checkbox"
+                            checked={help.shown}
+                            onchange={(e) => help.set(e.currentTarget.checked)}
+                            aria-describedby="show_help_description"
+                            class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
+                        />
+                        <label
+                            for="show_help"
+                            class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                        >
+                            Show explanations
+                        </label>
+                    </div>
+                    <p
+                        id="show_help_description"
+                        class="text-xs text-gray-500 dark:text-gray-400 mt-1"
+                    >
+                        Keeps the expandable "what this means" sections throughout the interface.
+                        Turn it off once you know your way around and the pages become considerably
+                        shorter. The one line summaries stay either way, since those are what make a
+                        reading legible at all. Applies to this browser only and takes effect
+                        immediately.
                     </p>
                 </div>
 
