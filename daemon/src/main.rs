@@ -19,6 +19,7 @@ mod server;
 mod sim_health;
 mod stats;
 mod subscriber_id;
+mod timing_advance;
 mod update;
 mod web_auth;
 mod webdav;

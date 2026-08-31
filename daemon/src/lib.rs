@@ -19,6 +19,7 @@ pub mod server;
 pub mod sim_health;
 pub mod stats;
 pub mod subscriber_id;
+pub mod timing_advance;
 pub mod update;
 pub mod web_auth;
 pub mod webdav;

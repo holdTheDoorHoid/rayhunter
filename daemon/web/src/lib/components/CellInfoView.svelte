@@ -12,6 +12,7 @@
         skipped_percent,
         health_verdict,
         sim_health_summary,
+        timing_advance_alert,
         tracking_area_changes,
         type CellInfo,
     } from '../cellInfo';
@@ -175,6 +176,20 @@
                 <span class="block text-xs opacity-90">{sim.detail}</span>
             {/if}
         </div>
+    {/if}
+
+    <!-- Only when a cell's distance actually changed. "Still where it was" is
+         not news, and most modems do not report this at all. -->
+    {#if info}
+        {@const moved = timing_advance_alert(info.timing_advance)}
+        {#if moved}
+            <div
+                class="mt-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+            >
+                <span class="font-medium">{moved.label}</span>
+                <span class="block text-xs opacity-90">{moved.detail}</span>
+            </div>
+        {/if}
     {/if}
 
     {#if !info?.has_data}

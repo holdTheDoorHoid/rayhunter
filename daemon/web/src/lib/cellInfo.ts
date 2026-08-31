@@ -121,10 +121,24 @@ export interface SimHealth {
     silent_for_minutes: number | null;
 }
 
+/**
+ * Whether a cell has started answering from a different distance.
+ *
+ * A tower does not move. The same identity reporting a noticeably different
+ * timing advance means either this device moved, or something else is
+ * transmitting that identity from somewhere else.
+ */
+export type TimingAdvanceStatus =
+    | { state: 'unsupported' }
+    | { state: 'learning' }
+    | { state: 'consistent' }
+    | { state: 'moved'; baseline: number; observed: number; metres: number };
+
 export interface CellInfo {
     encryption?: EncryptionStatus;
     health: DetectionHealth;
     sim_health: SimHealth;
+    timing_advance: TimingAdvanceStatus;
     serving: ServingCell | null;
     neighbors: NeighborCell[];
     history: CellObservation[];
@@ -333,6 +347,28 @@ export function sim_health_summary(health: SimHealth | undefined): {
                 tone: 'unknown',
             };
     }
+}
+
+/**
+ * The timing advance verdict in words, or null when there is nothing to say.
+ *
+ * Returns null for every state except a jump, because "this cell is where it
+ * was last time" is not news, and on most hardware the field is not reported
+ * at all. Movement is named as the likely explanation first: a hotspot carried
+ * around produces this honestly, and a detector that cries surveillance every
+ * time somebody walks somewhere gets ignored.
+ */
+export function timing_advance_alert(
+    status: TimingAdvanceStatus | undefined
+): { label: string; detail: string } | null {
+    if (status?.state !== 'moved') return null;
+    const km = Math.abs(status.metres) / 1000;
+    const direction = status.metres > 0 ? 'further away' : 'closer';
+    const distance = km >= 1 ? `${km.toFixed(1)} km` : `${Math.abs(status.metres)} m`;
+    return {
+        label: 'This cell changed distance',
+        detail: `The tower answering as this cell is now about ${distance} ${direction} than it was. If you have moved, that explains it. If you have not, the same cell identity is being transmitted from somewhere else, which is what a fake base station copying a real cell looks like.`,
+    };
 }
 
 /**

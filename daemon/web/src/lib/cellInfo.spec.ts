@@ -12,6 +12,7 @@ import {
     health_verdict,
     tracking_area_changes,
     sim_health_summary,
+    timing_advance_alert,
     type SimHealth,
 } from './cellInfo';
 
@@ -266,5 +267,50 @@ describe('sim_health_summary', () => {
     it('is unknown when there is nothing to go on', () => {
         expect(sim_health_summary(undefined).tone).toBe('unknown');
         expect(sim_health_summary({ ...base }).tone).toBe('unknown');
+    });
+});
+
+describe('timing_advance_alert', () => {
+    /* Silence in every state but a jump: most modems never report the field,
+       and "this cell is where it was" is not worth a banner. */
+    it('says nothing when there is nothing to say', () => {
+        expect(timing_advance_alert({ state: 'unsupported' })).toBeNull();
+        expect(timing_advance_alert({ state: 'learning' })).toBeNull();
+        expect(timing_advance_alert({ state: 'consistent' })).toBeNull();
+        expect(timing_advance_alert(undefined)).toBeNull();
+    });
+
+    it('reports a cell that moved further away, in kilometres', () => {
+        const a = timing_advance_alert({
+            state: 'moved',
+            baseline: 10,
+            observed: 90,
+            metres: 6245,
+        });
+        expect(a?.detail).toContain('6.2 km');
+        expect(a?.detail).toContain('further away');
+    });
+
+    it('reports a cell that moved closer, in metres when it is small', () => {
+        const a = timing_advance_alert({
+            state: 'moved',
+            baseline: 20,
+            observed: 10,
+            metres: -781,
+        });
+        expect(a?.detail).toContain('781 m');
+        expect(a?.detail).toContain('closer');
+    });
+
+    /* Movement has to be offered as the explanation first, or this reads as an
+       accusation every time somebody walks somewhere. */
+    it('names moving as the likely explanation', () => {
+        const a = timing_advance_alert({
+            state: 'moved',
+            baseline: 10,
+            observed: 90,
+            metres: 6245,
+        });
+        expect(a?.detail).toContain('If you have moved');
     });
 });

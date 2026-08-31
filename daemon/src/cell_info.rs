@@ -220,6 +220,10 @@ pub struct CellInfo {
     /// same as being accepted by the network, and only the second means the
     /// capture is worth anything.
     pub sim_health: crate::sim_health::SimHealth,
+    /// Whether a cell has started answering from a different distance than it
+    /// used to. `unsupported` on modems that do not report timing advance,
+    /// which includes the Orbic RC400L.
+    pub timing_advance: crate::timing_advance::TimingAdvanceStatus,
 }
 
 /// The identities this device has been seen sending about itself.
@@ -262,6 +266,9 @@ pub struct CellTracker {
     /// like. See `sim_health`.
     first_cell_seen: Option<DateTime<Local>>,
     last_nas_message: Option<DateTime<Local>>,
+    /// Timing advance per cell, watching for one identity answering from two
+    /// distances. See `timing_advance`.
+    timing_advance: crate::timing_advance::TimingAdvanceTracker,
 }
 
 /// Map an EARFCN to its LTE band, for the FDD downlink ranges.
@@ -440,6 +447,12 @@ impl CellTracker {
 
     /// Record a timing advance from a random access response.
     pub fn update_timing_advance(&mut self, ta: u16) {
+        // Only meaningful against a known cell: the check is whether one cell
+        // identity starts answering from a different distance.
+        if let Some(serving) = self.serving.as_ref() {
+            let (pci, earfcn) = (serving.pci, serving.earfcn);
+            self.timing_advance.observe(pci, earfcn, ta);
+        }
         if let Some(serving) = self.serving.as_mut() {
             serving.timing_advance = Some(ta);
         }
@@ -545,6 +558,7 @@ impl CellTracker {
             encryption: self.encryption.clone(),
             health: self.health.clone(),
             sim_health: self.sim_health(),
+            timing_advance: self.timing_advance.status(),
             has_data: self.serving.is_some() || !history.is_empty(),
             // Filled in by the server only when the operator has switched the
             // display on, so the tracker itself stays free of that policy.
