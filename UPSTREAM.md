@@ -53,6 +53,46 @@ merged and should not be held hostage to the feature that uncovered them.
 These have a clear upstream issue, and in each case a maintainer has said
 something encouraging on it.
 
+### sim-health
+Says whether the SIM is working, from evidence Rayhunter already collects.
+**Upstream:** [#882](https://github.com/EFForg/rayhunter/issues/882), opened by
+a maintainer, following #345 and related to #875.
+**Commits:** see `git log --grep="^Feature: sim-health"`.
+**Files:** `daemon/src/sim_health.rs`, `cell_info.rs` (`first_cell_seen`,
+`last_nas_message`, `update_nas_seen`, `sim_health`, the `CellInfo` field),
+`diag.rs` (recording that NAS was seen), `lib/cellInfo.ts`,
+`components/CellInfoView.svelte`.
+**Depends on:** nothing.
+**Note:** the discriminator is **NAS**, not an IP address and not "no messages
+seen". A modem with no usable SIM still hears towers, because cell broadcasts
+are sent to everyone, so a serving cell proves only that the radio works. NAS
+is the conversation with the network's core and cannot happen without a SIM
+the network accepts. This matters because the issue's own proposal, warning
+when nothing has been seen for a while, is what a maintainer suspected would
+"always work even without a SIM card", and it would.
+
+A data bearer is treated as sufficient but never necessary: the earlier
+attempt on #345 failed precisely because some SIMs register and are given no
+IP. `verdict` is a pure function with tests covering the two ways this gets
+embarrassing, calling a working-but-idle SIM broken, and calling an attach in
+progress a dead SIM.
+
+**Not included, and why.** The issue also wants the device's own display to
+warn. `SimVerdict::is_problem` exists for that and is deliberately in the
+daemon rather than the interface so both can share one judgement.
+
+There is no forced reattach. All three ways of making an Orbic RC400L
+reattach were tried and none is safe: writing to `/dev/at_usb0` left the
+device unable to enumerate on USB and needing a physical power cycle;
+`QCMAP_CLI` drives its menus fine but its QMI calls are refused
+(`WWAN status get fails, Error: 0x2`) because the firmware's own connection
+manager owns the session, and taking it over risks the hotspot's networking;
+and no internal SMD channel (`smd7`, `smd8`, `smd11`, `smd21`, `smd36`)
+answers AT at all. Anything that does drive `QCMAP_CLI` must read the menu and
+match labels rather than sending bare numbers, because
+**"Restore Factory Default Settings (Will Reboot Device)"** sits at option 7
+of the MobileAP submenu and menu numbering can differ between firmware.
+
 ### severity-counts
 Warning counts broken out per severity instead of one total, in the history and
 current recording panels.
