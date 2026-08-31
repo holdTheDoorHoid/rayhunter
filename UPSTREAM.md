@@ -94,6 +94,51 @@ serve, delete), `display/generic_framebuffer.rs` (`image_kind`,
 `components/DeviceGifSettings.svelte`, `utils.svelte.ts`.
 **Depends on:** nothing, but see `image-format-crash-fix`, which this needs.
 
+### legacy-radio-in-pcap
+2G and 3G signalling written to the PCAP instead of dropped, and traffic
+Rayhunter never analyses no longer listed as a parse failure.
+**Upstream:** [#1013](https://github.com/EFForg/rayhunter/issues/1013), opened
+by a maintainer, plus the noise half of
+[#457](https://github.com/EFForg/rayhunter/issues/457).
+**Commits:** `e913690`.
+**Files:** `lib/src/gsmtap/parser.rs` (`gsm_rr_subtype` and the four new log
+body arms), `lib/src/analysis/analyzer.rs` (`is_deliberately_unanalysed` and
+its two call sites).
+**Depends on:** nothing.
+**Note:** the 2G and 3G paths are unit tested but were not exercised end to
+end, because the test device only sees LTE. Anyone with 2G or 3G service
+should confirm before this goes up.
+
+## Already done upstream, nothing to send
+
+### check-json-output
+**Upstream:** [#570](https://github.com/EFForg/rayhunter/issues/570). Another
+contributor claimed it on the issue and
+[PR #1088](https://github.com/EFForg/rayhunter/pull/1088) is **merged**. Our
+fork already has it, since we branched after it landed: `rayhunter-check -j`.
+The only part of the issue arguably unmet is writing one JSON file per input
+when `-p` is given a directory, rather than a single output file.
+
+## Claimed by somebody else
+
+Check before starting. Duplicating claimed work wastes it and is unlikely to
+be merged.
+
+### neighbouring-cells (#326)
+`simonft` said on the issue that they are working on it, with a maintainer's
+encouragement. Most of what the issue asks for already exists in this fork
+under `cell-site-panel`. The parts it asks for that we do **not** have are an
+OpenCellID lookup or map link, and showing IMSI, TMSI and IMEI.
+
+### layer-2-mac (#457)
+A maintainer has a work in progress branch, `fix-457`, and laid out a three
+step plan on the issue. Step one, enabling LTE MAC logging, is already in this
+fork: `LOG_LTE_MAC_DL` and `LOG_LTE_MAC_UL` are in
+`LOG_CODES_FOR_RAW_PACKET_LOGGING`, and `lib/src/gsmtap/mac.rs` already builds
+GSMTAP for RACH responses. Steps two and three, writing MAC DL and UL to the
+PCAP and parsing them for analyzers, are not done. Timing advance is the prize
+there: it gives distance to the tower.
+
 ## Bug fixes worth offering on their own
 
 Each of these is small, self-contained, and fixes something that affects
