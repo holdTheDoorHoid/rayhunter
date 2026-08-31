@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
 use crate::analysis::diagnostic::DiagnosticAnalyzer;
+use crate::analysis::information_element::InformationElementError;
 use crate::diag::{DiagParsingError, Message, MessagesContainer};
 use crate::gsmtap::{GsmtapHeader, GsmtapMessage, GsmtapType, parser as gsmtap_parser};
 use crate::util::RuntimeMetadata;
@@ -238,6 +239,23 @@ pub struct AnalysisRow {
     pub events: Vec<Option<Event>>,
 }
 
+/// Whether a conversion failure is a kind of traffic Rayhunter never analyses.
+///
+/// Rayhunter's detectors are written against LTE RRC and NAS. 2G, 3G and LTE
+/// MAC messages are collected deliberately, and are written to the PCAP so they
+/// can be read in Wireshark, but there is nothing here that inspects them.
+/// Reporting each one as an unparsed message produces thousands of entries
+/// saying only that a known limitation is still a limitation, and buries the
+/// failures that do mean something.
+///
+/// This deliberately keys off the type rather than a list of subtypes, so a
+/// genuinely malformed LTE message still shows up: `UnsupportedGsmtapType`
+/// means "not a kind we read", while a decoding error on a kind we do read
+/// remains a real skip worth reporting.
+fn is_deliberately_unanalysed(err: &InformationElementError) -> bool {
+    matches!(err, InformationElementError::UnsupportedGsmtapType(_))
+}
+
 impl AnalysisRow {
     pub fn new() -> Self {
         Self::default()
@@ -425,7 +443,15 @@ impl Harness {
                     self.packet_num
                 );
                 debug!("{msg}");
-                row.skipped_message_reason = Some(msg);
+                // A message of a kind Rayhunter has never claimed to analyse is
+                // not a parsing failure, and listing it as one buries the real
+                // failures under thousands of entries that say nothing is
+                // wrong. 2G, 3G and LTE MAC traffic all land here, and they are
+                // now written to the PCAP for reading elsewhere.
+                // See EFForg/rayhunter#1013 and #457.
+                if !is_deliberately_unanalysed(&err) {
+                    row.skipped_message_reason = Some(msg);
+                }
                 return row;
             }
         };
@@ -460,7 +486,13 @@ impl Harness {
         let element = match InformationElement::try_from(&gsmtap_msg) {
             Ok(element) => element,
             Err(err) => {
-                row.skipped_message_reason = Some(format!("{err:?}"));
+                // Same reasoning as the PCAP path above: traffic Rayhunter
+                // never claimed to analyse is not a parsing failure. This is
+                // the path the daemon uses live, and it is where the thousands
+                // of entries were actually coming from.
+                if !is_deliberately_unanalysed(&err) {
+                    row.skipped_message_reason = Some(format!("{err:?}"));
+                }
                 return row;
             }
         };
@@ -566,5 +598,57 @@ mod tests {
             EventType::Informational
         );
         assert!(row.events[2].is_none());
+    }
+}
+
+#[cfg(test)]
+mod unanalysed_traffic_tests {
+    use super::*;
+    use crate::gsmtap::{UmSubtype, UmtsRrcSubtype};
+
+    /// 2G, 3G and LTE MAC are collected on purpose and written to the PCAP, but
+    /// nothing here analyses them. Listing each one as an unparsed message
+    /// produced thousands of entries saying only that a known limitation is
+    /// still a limitation, which buried the failures that do mean something.
+    #[test]
+    fn traffic_we_never_analyse_is_not_reported_as_a_failure() {
+        for gsmtap_type in [
+            GsmtapType::Um(UmSubtype::Bcch),
+            GsmtapType::UmtsRrc(UmtsRrcSubtype::DlDcch),
+            GsmtapType::LteMacFramed,
+            GsmtapType::LteMac,
+        ] {
+            assert!(
+                is_deliberately_unanalysed(&InformationElementError::UnsupportedGsmtapType(
+                    gsmtap_type
+                )),
+                "{gsmtap_type:?} should not be reported as an unparsed message"
+            );
+        }
+    }
+
+    /// A message of a kind Rayhunter does read, which then fails to decode, is
+    /// a real problem and has to keep showing up. Suppressing those would hide
+    /// exactly the parser bugs the unparsed list exists to surface.
+    ///
+    /// Asserted structurally rather than by building one of the foreign error
+    /// types: what matters is that only the "not a kind we read" variant is
+    /// suppressed, so a later variant added to the enum is reported by default.
+    #[test]
+    fn a_decoding_failure_on_traffic_we_do_read_is_still_reported() {
+        let unsupported = InformationElementError::UnsupportedGsmtapType(GsmtapType::LteMacFramed);
+        assert!(is_deliberately_unanalysed(&unsupported));
+
+        // Every other shape of failure is a real one. Written as an exhaustive
+        // match so that adding a variant to InformationElementError stops
+        // compiling here until somebody decides which side it belongs on.
+        fn classify(err: &InformationElementError) -> bool {
+            match err {
+                InformationElementError::UnsupportedGsmtapType(_) => true,
+                InformationElementError::RRCDecodingError(_) => false,
+                InformationElementError::NASDecodingError(_) => false,
+            }
+        }
+        assert!(classify(&unsupported));
     }
 }
