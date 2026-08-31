@@ -330,6 +330,36 @@ Commits earlier than `4f063d9` predate this and several bundle two or three
 features. Do not cherry-pick those; `UPSTREAM.md` lists which files belong to
 which feature so a clean branch can be built from `upstream/main` instead.
 
+## `ServerState.config` is a startup snapshot, not live settings
+
+It is cloned when the daemon starts and never updated. Anything the API can
+change during a run therefore cannot be read back from it, and writing the
+config file from it silently reverts whatever changed since boot.
+
+This produced two bugs at once with web accounts: a new account vanished from
+the settings page on the next reload, and was then erased from `config.toml`
+by the next save of any setting at all, because `set_config` rebuilt the file
+from the snapshot. Anything mutable at runtime belongs in its own lock on
+`ServerState` — see `web_users` — with every read site pointed at it. Grep for
+other `state.config.<field>` reads before adding a new settable field.
+
+## A top-level key appended to `config.toml` lands inside `[analyzers]`
+
+`dist/config.toml.in` ends with the `[analyzers]` table, so
+`config.push_str("\nterminal_enabled = true\n")` is parsed as
+`analyzers.terminal_enabled`. `AnalyzerConfig` is `#[serde(default)]` without
+`deny_unknown_fields`, so the key is dropped with no error and the setting
+simply never takes effect. This is why `--enable-terminal` did nothing for as
+long as it existed.
+
+Top-level keys go **above the first table header**. Use
+`set_top_level_bool` in `installer/src/connection.rs`. Check placement by
+parsing the result, not by reading the file:
+
+```python
+import tomllib; tomllib.loads(text)["terminal_enabled"]
+```
+
 ## Check the API docs build before tagging a release
 
 The release pipeline builds the OpenAPI spec with a feature nothing else uses,

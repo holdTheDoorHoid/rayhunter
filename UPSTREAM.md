@@ -145,16 +145,18 @@ lock anyone out.
 **Upstream:** none. The interface has never had any authentication, and on a
 hotspot that means anyone on the WiFi can read the recordings, so this is
 likely to interest upstream regardless of the rest of this fork.
-**Commits:** `30b4ce1`.
+**Commits:** `30b4ce1`, `d6e4b26`.
 **Files:** `web_auth.rs`, `config.rs` (`web_users`), `main.rs` (the middleware
-layer and two routes), `server.rs` (hash redaction, account preservation on
-save, `set_web_user`, `delete_web_user`, `write_web_users`),
-`components/ConfigForm.svelte`, `utils.svelte.ts`.
+layer, two routes, and seeding `ServerState.web_users`), `server.rs` (hash
+redaction, account preservation on save, `set_web_user`, `delete_web_user`,
+`write_web_users`), `components/ConfigForm.svelte`, `utils.svelte.ts`.
 **Depends on:** nothing.
 **Note:** there is no TLS on these devices, so this is a second factor beyond
 the WiFi password rather than a secure channel, and the interface says so. Keep
 the published test vectors: an unverified key derivation still looks like it
-works.
+works. Accounts live in `ServerState.web_users`, not in `ServerState.config`,
+which is a startup snapshot: reading them from the snapshot made a new account
+vanish on the next reload and then be erased by the next settings save.
 
 ### web-terminal
 Run one command on the device from the interface. Enabled only by the
@@ -162,7 +164,7 @@ installer's `--enable-terminal` flag, never from the interface itself.
 **Upstream:** none. Would need discussing before proposing: it gives root
 command execution to an interface that upstream still ships without
 authentication.
-**Commits:** `f76734f`.
+**Commits:** `f76734f`, `6db029f`.
 **Files:** `server.rs` (`run_terminal_command` and its types), `config.rs`
 (`terminal_enabled`), `main.rs` (the route),
 `components/Terminal.svelte`, `routes/+page.svelte`, `utils.svelte.ts`,
@@ -171,6 +173,10 @@ authentication.
 **Depends on:** `web-authentication` in practice, though not in code. Proposing
 the terminal without a way to put a password on the interface would be hard to
 justify.
+**Note:** the flag writes `terminal_enabled` above the first table header in
+`config.toml`, never at the end. The template finishes inside `[analyzers]`, so
+a key appended to it is read as `analyzers.terminal_enabled` and dropped in
+silence. `set_top_level_bool` and its tests exist for that reason.
 
 ## Bug fixes worth offering on their own
 
