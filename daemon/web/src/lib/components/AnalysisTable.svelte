@@ -2,8 +2,11 @@
     import { AnalysisRowType, type AnalysisReport } from '$lib/analysis.svelte';
     let {
         report,
+        /** Called with a packet number when somebody wants to see the message. */
+        onViewPacket = null,
     }: {
         report: AnalysisReport;
+        onViewPacket?: ((packetNum: number) => void) | null;
     } = $props();
 
     const date_formatter = new Intl.DateTimeFormat(undefined, {
@@ -41,6 +44,7 @@
                         <th class="p-2">Heuristic</th>
                         <th class="p-2">Warning</th>
                         <th class="p-2">Severity</th>
+                        {#if onViewPacket}<th class="p-2">Packet</th>{/if}
                     </tr>
                 </thead>
                 <tbody>
@@ -70,6 +74,25 @@
                                         <td class="p-2 {event_type_class} text-center"
                                             >{event.event_type}</td
                                         >
+                                        {#if onViewPacket}
+                                            <td class="p-2">
+                                                {#if row.packet_num !== undefined}
+                                                    <button
+                                                        type="button"
+                                                        onclick={() =>
+                                                            onViewPacket(row.packet_num!)}
+                                                        class="text-xs text-rayhunter-blue underline"
+                                                        >View packet {row.packet_num}</button
+                                                    >
+                                                {:else}
+                                                    <span
+                                                        class="text-xs text-gray-500 dark:text-gray-400"
+                                                        title="This recording was analysed before Rayhunter recorded packet numbers. Re-run the analysis to enable this."
+                                                        >not recorded</span
+                                                    >
+                                                {/if}
+                                            </td>
+                                        {/if}
                                     </tr>
                                 {/if}
                             {/each}

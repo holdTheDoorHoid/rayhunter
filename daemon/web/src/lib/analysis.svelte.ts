@@ -50,6 +50,13 @@ export type SkippedPacket = {
 
 export type PacketAnalysis = {
     type: AnalysisRowType.Analysis;
+    /**
+     * Which message in the recording produced this, counting from 1.
+     *
+     * Absent in reports written before the daemon recorded it, so anything
+     * offering to jump to the packet has to cope with not knowing which one.
+     */
+    packet_num?: number;
     packet_timestamp: Date;
     events: Event[];
 };
@@ -87,6 +94,8 @@ function get_rows(row_jsons: any[]): AnalysisRow[] {
             });
             rows.push({
                 type: AnalysisRowType.Analysis,
+                packet_num:
+                    typeof row_json.packet_num === 'number' ? row_json.packet_num : undefined,
                 packet_timestamp: new Date(row_json.packet_timestamp),
                 events,
             });

@@ -5,6 +5,7 @@
     import { AnalysisManager } from '$lib/analysisManager.svelte';
     import AnalysisTable from './AnalysisTable.svelte';
     import ReAnalyzeButton from './ReAnalyzeButton.svelte';
+    import PacketExplorer from './PacketExplorer.svelte';
     let {
         entry,
         manager,
@@ -14,6 +15,21 @@
         manager: AnalysisManager;
         current: boolean;
     } = $props();
+
+    // The explorer lives here because this is where warnings are shown, so
+    // "view packet" and the browse button can share one instance.
+    let explorerShown = $state(false);
+    let focusPacket = $state<number | null>(null);
+
+    function browse() {
+        focusPacket = null;
+        explorerShown = true;
+    }
+
+    function view_packet(packetNum: number) {
+        focusPacket = packetNum;
+        explorerShown = true;
+    }
 
     const date_formatter = new Intl.DateTimeFormat(undefined, {
         timeStyle: 'long',
@@ -48,10 +64,17 @@
                     {#if !current}
                         <ReAnalyzeButton {entry} {manager} />
                     {/if}
+                    <button
+                        type="button"
+                        onclick={browse}
+                        class="bg-blue-500 hover:bg-blue-700 text-white text-sm py-1 px-3 rounded-sm"
+                    >
+                        Packets
+                    </button>
                 </div>
             {/if}
             {#if entry.analysis_report.rows.length > 0}
-                <AnalysisTable report={entry.analysis_report} />
+                <AnalysisTable report={entry.analysis_report} onViewPacket={view_packet} />
             {:else}
                 <p>No warnings to display!</p>
             {/if}
@@ -87,3 +110,7 @@
         </div>
     {/if}
 </div>
+
+{#if explorerShown}
+    <PacketExplorer bind:shown={explorerShown} recording={entry.name} {focusPacket} />
+{/if}

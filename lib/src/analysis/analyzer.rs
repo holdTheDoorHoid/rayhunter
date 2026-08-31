@@ -47,7 +47,7 @@ impl Default for AnalyzerConfig {
     }
 }
 
-pub const REPORT_VERSION: u32 = 2;
+pub const REPORT_VERSION: u32 = 3;
 
 /// The severity level of an event.
 ///
@@ -225,6 +225,14 @@ impl AnalysisLineNormalizer {
 
 #[derive(Serialize, Debug, Default)]
 pub struct AnalysisRow {
+    /// Which message in the recording this row describes, counting from 1.
+    ///
+    /// Recorded so a warning can be traced back to the exact packet that
+    /// produced it. The number is also embedded in the warning text, but
+    /// reading it back out of prose would break the moment that wording
+    /// changed. Absent in reports written before this field existed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub packet_num: Option<usize>,
     pub packet_timestamp: Option<DateTime<FixedOffset>>,
     pub skipped_message_reason: Option<String>,
     pub events: Vec<Option<Event>>,
@@ -275,6 +283,10 @@ impl<'de> Deserialize<'de> for AnalysisRow {
 
         #[derive(Deserialize)]
         struct V2Format {
+            // Added in report version 3. Reports written before that omit it,
+            // so it defaults rather than failing to deserialize.
+            #[serde(default)]
+            packet_num: Option<usize>,
             packet_timestamp: Option<DateTime<FixedOffset>>,
             skipped_message_reason: Option<String>,
             events: Vec<Option<Event>>,
@@ -293,12 +305,14 @@ impl<'de> Deserialize<'de> for AnalysisRow {
                 // The caller needs to handle multiple rows differently for v1
                 if let Some(first_analysis) = v1.analysis.first() {
                     Ok(AnalysisRow {
+                        packet_num: None,
                         packet_timestamp: Some(first_analysis.timestamp),
                         skipped_message_reason: None,
                         events: first_analysis.events.clone(),
                     })
                 } else if let Some(first_reason) = v1.skipped_message_reasons.first() {
                     Ok(AnalysisRow {
+                        packet_num: None,
                         packet_timestamp: Some(v1.timestamp),
                         skipped_message_reason: Some(first_reason.clone()),
                         events: Vec::new(),
@@ -310,6 +324,7 @@ impl<'de> Deserialize<'de> for AnalysisRow {
                 }
             }
             RowFormat::V2(v2) => Ok(AnalysisRow {
+                packet_num: v2.packet_num,
                 packet_timestamp: v2.packet_timestamp,
                 skipped_message_reason: v2.skipped_message_reason,
                 events: v2.events,
@@ -381,6 +396,7 @@ impl Harness {
 
         let epoch = DateTime::parse_from_rfc3339("1980-01-06T00:00:00-00:00").unwrap();
         let mut row = AnalysisRow {
+            packet_num: Some(self.packet_num),
             packet_timestamp: Some(epoch + packet.timestamp),
             skipped_message_reason: None,
             events: Vec::new(),
@@ -422,6 +438,7 @@ impl Harness {
     ) -> AnalysisRow {
         let mut row = AnalysisRow::new();
         self.packet_num += 1;
+        row.packet_num = Some(self.packet_num);
 
         let qmdl_message = match maybe_qmdl_message {
             Ok(msg) => msg,

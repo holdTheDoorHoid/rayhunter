@@ -11,6 +11,7 @@ mod gps;
 mod http_client;
 mod key_input;
 mod notifications;
+mod packet_explorer;
 mod pcap;
 mod qmdl_store;
 mod server;
@@ -27,6 +28,7 @@ use crate::diag::run_diag_read_thread;
 use crate::error::RayhunterError;
 use crate::gps::{get_gps, post_gps};
 use crate::notifications::{NotificationService, run_notification_worker};
+use crate::packet_explorer::{get_packet, list_packets};
 use crate::pcap::get_pcap;
 use crate::qmdl_store::RecordingStore;
 use crate::server::{
@@ -82,6 +84,8 @@ fn get_router() -> AppRouter {
         .route("/api/analysis", get(get_analysis_status))
         .route("/api/analysis/{name}", post(start_analysis))
         .route("/api/cell-info", get(get_cell_info))
+        .route("/api/packets/{recording}", get(list_packets))
+        .route("/api/packets/{recording}/{packet_num}", get(get_packet))
         .route("/api/demo-warning", post(trigger_demo_warning))
         .route("/api/config", get(get_config))
         .route("/api/config", post(set_config))

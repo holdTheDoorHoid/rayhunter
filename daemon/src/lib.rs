@@ -11,6 +11,7 @@ pub mod gps;
 pub mod http_client;
 pub mod key_input;
 pub mod notifications;
+pub mod packet_explorer;
 pub mod pcap;
 pub mod qmdl_store;
 pub mod server;
