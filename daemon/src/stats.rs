@@ -312,11 +312,14 @@ async fn get_cmd_output(mut cmd: Command) -> Result<String, String> {
         .await
         .map_err(|e| format!("error running command {}: {}", cmd_str, e))?;
     if !output.status.success() {
-        return Err(format!(
-            "command {} failed with exit code {}",
-            cmd_str,
-            output.status.code().unwrap()
-        ));
+        // A command killed by a signal (the OOM killer, most likely here) has
+        // no exit code, and unwrapping one aborts the whole daemon under the
+        // firmware profile.
+        let reason = match output.status.code() {
+            Some(code) => format!("exit code {code}"),
+            None => "a signal".to_string(),
+        };
+        return Err(format!("command {cmd_str} failed with {reason}"));
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
@@ -441,4 +444,29 @@ pub async fn get_log() -> Result<String, (StatusCode, String)> {
     tokio::fs::read_to_string("/data/rayhunter/rayhunter.log")
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A helper killed by a signal has no exit code. That is exactly what the
+    /// OOM killer does on these devices, and unwrapping the absent code aborts
+    /// the daemon under the firmware profile.
+    #[tokio::test]
+    async fn a_command_killed_by_a_signal_is_an_error_not_a_panic() {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "kill -KILL $$"]);
+        let result = get_cmd_output(cmd).await;
+        let err = result.expect_err("a killed command must be an error");
+        assert!(err.contains("signal"), "unexpected message: {err}");
+    }
+
+    #[tokio::test]
+    async fn a_failing_command_reports_its_exit_code() {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "exit 3"]);
+        let err = get_cmd_output(cmd).await.expect_err("exit 3 is a failure");
+        assert!(err.contains("exit code 3"), "unexpected message: {err}");
+    }
 }
