@@ -16,6 +16,7 @@ mod packet_explorer;
 mod pcap;
 mod qmdl_store;
 mod server;
+mod sim_health;
 mod stats;
 mod subscriber_id;
 mod update;

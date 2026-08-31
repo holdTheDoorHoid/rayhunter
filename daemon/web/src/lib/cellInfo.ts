@@ -100,9 +100,31 @@ export interface SubscriberIdentities {
     tmsi_changes: number;
 }
 
+/**
+ * Whether the SIM appears to be working.
+ *
+ * A modem with no usable SIM still hears towers, because the broadcasts it
+ * measures are transmitted to everyone. What it cannot do is hold a NAS
+ * conversation with the network's core, so that is what separates a SIM the
+ * network accepts from one it does not.
+ */
+export type SimVerdict = 'working' | 'registered' | 'not_registering' | 'searching';
+
+export interface SimHealth {
+    verdict: SimVerdict;
+    /** A cellular interface carrying the default route, when there is one. */
+    data_interface: string | null;
+    nas_recent: boolean;
+    last_nas_message: string | null;
+    serving_cell: boolean;
+    /** Minutes spent hearing towers without ever reaching the core. */
+    silent_for_minutes: number | null;
+}
+
 export interface CellInfo {
     encryption?: EncryptionStatus;
     health: DetectionHealth;
+    sim_health: SimHealth;
     serving: ServingCell | null;
     neighbors: NeighborCell[];
     history: CellObservation[];
@@ -263,6 +285,54 @@ export function health_verdict(
     if (missed > 50) return 'blind';
     if (missed > 10) return 'degraded';
     return 'good';
+}
+
+/**
+ * The SIM verdict in words, for people who did not come here to learn what NAS
+ * is.
+ *
+ * `tone` is 'bad' only for the case that actually needs acting on. A SIM that
+ * registers and is given no data is fine for Rayhunter's purposes, and saying
+ * otherwise would send people hunting for a fault that is not there.
+ */
+export function sim_health_summary(health: SimHealth | undefined): {
+    label: string;
+    detail: string;
+    tone: 'good' | 'bad' | 'unknown';
+} {
+    switch (health?.verdict) {
+        case 'working':
+            return {
+                label: 'SIM is working',
+                detail: health.data_interface
+                    ? `Registered with the network and carrying data on ${health.data_interface}.`
+                    : 'Registered with the network and carrying data.',
+                tone: 'good',
+            };
+        case 'registered':
+            return {
+                label: 'SIM is working',
+                detail: health.nas_recent
+                    ? 'The network is talking to this SIM. There is no data connection, which is normal for a SIM bought only for this, and does not affect what Rayhunter can see.'
+                    : 'The network accepted this SIM earlier. It has been quiet since, which is what an idle device looks like.',
+                tone: 'good',
+            };
+        case 'not_registering': {
+            const minutes = health.silent_for_minutes;
+            const howLong = minutes && minutes > 0 ? ` for ${minutes} minutes` : '';
+            return {
+                label: 'SIM may not be working',
+                detail: `Towers are being heard${howLong}, but this SIM has never been accepted by the network. A modem picks up towers with no SIM at all, so this is what a dead, unactivated or badly seated SIM looks like. Check the SIM is seated, and that it is active.`,
+                tone: 'bad',
+            };
+        }
+        default:
+            return {
+                label: 'Checking the SIM',
+                detail: 'Nothing heard from the network yet. This is normal for the first minute or so, and while recording is stopped.',
+                tone: 'unknown',
+            };
+    }
 }
 
 /**

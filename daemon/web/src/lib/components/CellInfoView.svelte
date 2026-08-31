@@ -11,6 +11,7 @@
         missing_protections,
         skipped_percent,
         health_verdict,
+        sim_health_summary,
         tracking_area_changes,
         type CellInfo,
     } from '../cellInfo';
@@ -156,6 +157,25 @@
             </span>
         {/if}
     </div>
+
+    <!-- Whether the SIM is working at all. A capture from a SIM the network
+         never accepted looks like a quiet night, so this is the difference
+         between "nothing found" and "nothing was ever going to be found". -->
+    {#if info}
+        {@const sim = sim_health_summary(info.sim_health)}
+        <div
+            class="mt-2 rounded-md px-3 py-2 text-sm {sim.tone === 'bad'
+                ? 'bg-red-50 text-red-800 dark:bg-red-950 dark:text-red-200'
+                : sim.tone === 'good'
+                  ? 'bg-green-50 text-green-800 dark:bg-green-950 dark:text-green-200'
+                  : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'}"
+        >
+            <span class="font-medium">{sim.label}</span>
+            {#if help.shown || sim.tone === 'bad'}
+                <span class="block text-xs opacity-90">{sim.detail}</span>
+            {/if}
+        </div>
+    {/if}
 
     {#if !info?.has_data}
         <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">

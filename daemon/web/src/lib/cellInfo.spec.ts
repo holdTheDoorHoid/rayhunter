@@ -11,6 +11,8 @@ import {
     skipped_percent,
     health_verdict,
     tracking_area_changes,
+    sim_health_summary,
+    type SimHealth,
 } from './cellInfo';
 
 describe('rsrp_quality', () => {
@@ -218,5 +220,51 @@ describe('tracking_area_changes', () => {
                 obs(null, '2026-08-30T12:02:00Z'),
             ])
         ).toEqual([]);
+    });
+});
+
+describe('sim_health_summary', () => {
+    const base: SimHealth = {
+        verdict: 'searching',
+        data_interface: null,
+        nas_recent: false,
+        last_nas_message: null,
+        serving_cell: false,
+        silent_for_minutes: null,
+    };
+
+    it('calls a SIM carrying data good, and names the interface', () => {
+        const s = sim_health_summary({
+            ...base,
+            verdict: 'working',
+            data_interface: 'rmnet_data0',
+        });
+        expect(s.tone).toBe('good');
+        expect(s.detail).toContain('rmnet_data0');
+    });
+
+    /* Registering without a data bearer is normal for a SIM bought only for
+       this, and must not be reported as a fault. */
+    it('does not call a registered SIM without data a problem', () => {
+        const s = sim_health_summary({ ...base, verdict: 'registered', nas_recent: true });
+        expect(s.tone).toBe('good');
+        expect(s.label).toBe('SIM is working');
+    });
+
+    it('warns when towers are heard but the SIM never registers', () => {
+        const s = sim_health_summary({
+            ...base,
+            verdict: 'not_registering',
+            serving_cell: true,
+            silent_for_minutes: 42,
+        });
+        expect(s.tone).toBe('bad');
+        expect(s.detail).toContain('42 minutes');
+    });
+
+    /* An absent field must not render as a confident verdict. */
+    it('is unknown when there is nothing to go on', () => {
+        expect(sim_health_summary(undefined).tone).toBe('unknown');
+        expect(sim_health_summary({ ...base }).tone).toBe('unknown');
     });
 });

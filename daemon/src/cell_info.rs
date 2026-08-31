@@ -216,6 +216,10 @@ pub struct CellInfo {
     /// while recording is stopped. Lets the UI explain the emptiness rather
     /// than looking broken.
     pub has_data: bool,
+    /// Whether the SIM looks like it is working. Hearing towers is not the
+    /// same as being accepted by the network, and only the second means the
+    /// capture is worth anything.
+    pub sim_health: crate::sim_health::SimHealth,
 }
 
 /// The identities this device has been seen sending about itself.
@@ -252,6 +256,12 @@ pub struct CellTracker {
     encryption: Option<EncryptionStatus>,
     health: DetectionHealth,
     identities: SubscriberIdentities,
+    /// When a tower was first heard in this run, and when the SIM last spoke
+    /// to the network's core. Together these say whether a modem that can hear
+    /// towers is actually getting anywhere, which is what a failed SIM looks
+    /// like. See `sim_health`.
+    first_cell_seen: Option<DateTime<Local>>,
+    last_nas_message: Option<DateTime<Local>>,
 }
 
 /// Map an EARFCN to its LTE band, for the FDD downlink ranges.
@@ -333,6 +343,7 @@ impl CellTracker {
         search_threshold: Option<u32>,
     ) {
         let now = Local::now();
+        self.first_cell_seen.get_or_insert(now);
 
         // Carry the identity across measurements of the same cell, since it
         // arrives on a broadcast that is far less frequent than measurements.
@@ -390,6 +401,35 @@ impl CellTracker {
     }
 
     /// Note messages passing through, and how many could not be decoded.
+    /// Record that the SIM exchanged a NAS message with the network's core.
+    ///
+    /// This is the evidence a working SIM produces and a dead one cannot: the
+    /// broadcasts that give us a serving cell are transmitted whether or not
+    /// this device has a SIM the network will accept.
+    pub fn update_nas_seen(&mut self) {
+        self.last_nas_message = Some(Local::now());
+    }
+
+    /// What the evidence says about the SIM.
+    pub fn sim_health(&self) -> crate::sim_health::SimHealth {
+        let interface = crate::sim_health::cellular_default_route();
+        let (verdict, nas_recent, silent_for_minutes) = crate::sim_health::verdict(
+            interface.as_deref(),
+            self.last_nas_message,
+            self.first_cell_seen,
+            self.serving.is_some(),
+            Local::now(),
+        );
+        crate::sim_health::SimHealth {
+            verdict,
+            data_interface: interface,
+            nas_recent,
+            last_nas_message: self.last_nas_message,
+            serving_cell: self.serving.is_some(),
+            silent_for_minutes,
+        }
+    }
+
     pub fn record_messages(&mut self, seen: u64, skipped: u64) {
         self.health.messages_seen += seen;
         self.health.messages_skipped += skipped;
@@ -504,6 +544,7 @@ impl CellTracker {
         CellInfo {
             encryption: self.encryption.clone(),
             health: self.health.clone(),
+            sim_health: self.sim_health(),
             has_data: self.serving.is_some() || !history.is_empty(),
             // Filled in by the server only when the operator has switched the
             // display on, so the tracker itself stays free of that policy.
