@@ -139,6 +139,39 @@ GSMTAP for RACH responses. Steps two and three, writing MAC DL and UL to the
 PCAP and parsing them for analyzers, are not done. Timing advance is the prize
 there: it gives distance to the tower.
 
+### web-authentication
+Optional accounts for the web interface, off by default so an update cannot
+lock anyone out.
+**Upstream:** none. The interface has never had any authentication, and on a
+hotspot that means anyone on the WiFi can read the recordings, so this is
+likely to interest upstream regardless of the rest of this fork.
+**Commits:** `30b4ce1`.
+**Files:** `web_auth.rs`, `config.rs` (`web_users`), `main.rs` (the middleware
+layer and two routes), `server.rs` (hash redaction, account preservation on
+save, `set_web_user`, `delete_web_user`, `write_web_users`),
+`components/ConfigForm.svelte`, `utils.svelte.ts`.
+**Depends on:** nothing.
+**Note:** there is no TLS on these devices, so this is a second factor beyond
+the WiFi password rather than a secure channel, and the interface says so. Keep
+the published test vectors: an unverified key derivation still looks like it
+works.
+
+### web-terminal
+Run one command on the device from the interface. Enabled only by the
+installer's `--enable-terminal` flag, never from the interface itself.
+**Upstream:** none. Would need discussing before proposing: it gives root
+command execution to an interface that upstream still ships without
+authentication.
+**Commits:** `f76734f`.
+**Files:** `server.rs` (`run_terminal_command` and its types), `config.rs`
+(`terminal_enabled`), `main.rs` (the route),
+`components/Terminal.svelte`, `routes/+page.svelte`, `utils.svelte.ts`,
+`installer/src/connection.rs`, `installer/src/lib.rs`,
+`installer/src/orbic_network.rs`, `installer/src/moxee.rs`.
+**Depends on:** `web-authentication` in practice, though not in code. Proposing
+the terminal without a way to put a password on the interface would be hard to
+justify.
+
 ## Bug fixes worth offering on their own
 
 Each of these is small, self-contained, and fixes something that affects
