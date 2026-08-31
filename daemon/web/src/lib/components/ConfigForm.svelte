@@ -50,6 +50,51 @@
     let customRotationTime = $state(false);
     let customRotationSize = $state(false);
 
+    /**
+     * The sections of the configuration page.
+     *
+     * Named for what somebody came to change rather than for how the code is
+     * organised, which is why storage and GPS sit together under Recordings
+     * and the demo control sits with the heuristics it fakes.
+     */
+    const TABS = [
+        { id: 'display', label: 'Display', hint: 'What the device shows on its own screen' },
+        { id: 'detection', label: 'Detection', hint: 'Which heuristics run, and the demo control' },
+        {
+            id: 'recordings',
+            label: 'Recordings',
+            hint: 'Space, splitting recordings, and location',
+        },
+        {
+            id: 'notifications',
+            label: 'Notifications',
+            hint: 'Being told when something happens',
+        },
+        { id: 'network', label: 'Network', hint: 'WiFi, DNS and uploads' },
+    ] as const;
+
+    let active = $state<(typeof TABS)[number]['id']>('display');
+    let tab_buttons = $state<HTMLButtonElement[]>([]);
+
+    /**
+     * Arrow keys move between tabs, which is what a tablist is expected to do.
+     * Without it the role promises a behaviour that is not there, which is
+     * worse for a screen reader than plain buttons would have been.
+     */
+    function tab_keydown(event: KeyboardEvent) {
+        const keys = ['ArrowRight', 'ArrowLeft', 'Home', 'End'];
+        if (!keys.includes(event.key)) return;
+        event.preventDefault();
+        const current = TABS.findIndex((t) => t.id === active);
+        let next = current;
+        if (event.key === 'ArrowRight') next = (current + 1) % TABS.length;
+        if (event.key === 'ArrowLeft') next = (current - 1 + TABS.length) % TABS.length;
+        if (event.key === 'Home') next = 0;
+        if (event.key === 'End') next = TABS.length - 1;
+        active = TABS[next].id;
+        tab_buttons[next]?.focus();
+    }
+
     async function load_config() {
         try {
             loading = true;
@@ -200,6 +245,99 @@
         {#if loading}
             <div class="text-center py-4">Loading config...</div>
         {:else if config}
+            <!-- Kept out of the form on purpose. These two are stored in this
+                 browser and take effect the moment they change, while
+                 everything in the form below is written to the device and needs
+                 applying. Mixing them taught people to press Apply for a
+                 setting that never needed it. -->
+            <div class="rounded-md border border-gray-200 p-3 dark:border-gray-700">
+                <p class="mb-2 text-xs text-gray-500 dark:text-gray-400">
+                    These two are remembered by this browser and change straight away.
+                </p>
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <div>
+                        <label
+                            for="theme_preference"
+                            class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                        >
+                            Appearance of this page
+                        </label>
+                        <select
+                            id="theme_preference"
+                            value={theme.preference}
+                            onchange={(e) => theme.set(e.currentTarget.value as ThemePreference)}
+                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                        >
+                            <option value="system">Match my device</option>
+                            <option value="light">Light</option>
+                            <option value="dark">Dark</option>
+                        </select>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            This web page only. The device's own screen is set under Display.
+                        </p>
+                    </div>
+
+                    <div>
+                        <div class="flex items-center">
+                            <input
+                                id="show_help"
+                                type="checkbox"
+                                checked={help.shown}
+                                onchange={(e) => help.set(e.currentTarget.checked)}
+                                aria-describedby="show_help_description"
+                                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
+                            />
+                            <label
+                                for="show_help"
+                                class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                            >
+                                Show explanations
+                            </label>
+                        </div>
+                        <p
+                            id="show_help_description"
+                            class="text-xs text-gray-500 dark:text-gray-400 mt-1"
+                        >
+                            Keeps the "what this means" sections throughout the interface. Turn it
+                            off once you know your way around and the pages become considerably
+                            shorter. Readings, settings and their own labels stay either way; only
+                            the explanations go.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabs rather than one long scroll. The page had grown past
+                 the point where anything could be found by scrolling, and
+                 these five names are how people actually describe what they
+                 came to change. They wrap rather than scroll sideways, so
+                 every section stays visible on a phone. -->
+            <div
+                role="tablist"
+                aria-label="Configuration sections"
+                class="sticky top-0 z-10 -mx-2 mt-4 flex flex-wrap gap-1 border-b border-gray-200 bg-white px-2 pt-1 pb-2 dark:border-gray-700 dark:bg-gray-900"
+            >
+                {#each TABS as tab, i (tab.id)}
+                    <button
+                        type="button"
+                        role="tab"
+                        id="tab-{tab.id}"
+                        aria-selected={active === tab.id}
+                        aria-controls="panel-{tab.id}"
+                        tabindex={active === tab.id ? 0 : -1}
+                        title={tab.hint}
+                        bind:this={tab_buttons[i]}
+                        onclick={() => (active = tab.id)}
+                        onkeydown={tab_keydown}
+                        class="rounded-full px-3 py-1 text-sm {active === tab.id
+                            ? 'bg-rayhunter-blue text-white'
+                            : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800'}"
+                    >
+                        {tab.label}
+                    </button>
+                {/each}
+            </div>
+
             <form
                 class="space-y-4"
                 onsubmit={(e) => {
@@ -207,1028 +345,1056 @@
                     save_config();
                 }}
             >
-                <div>
-                    <label
-                        for="theme_preference"
-                        class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                {#if active === 'display'}
+                    <div
+                        id="panel-display"
+                        role="tabpanel"
+                        aria-labelledby="tab-display"
+                        class="space-y-4"
                     >
-                        Appearance of this page
-                    </label>
-                    <select
-                        id="theme_preference"
-                        value={theme.preference}
-                        onchange={(e) => theme.set(e.currentTarget.value as ThemePreference)}
-                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
-                    >
-                        <option value="system">Match my device</option>
-                        <option value="light">Light</option>
-                        <option value="dark">Dark</option>
-                    </select>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                        Changes this web page only, not the device screen. Applies straight away and
-                        is remembered in this browser, so it does not restart Rayhunter or interrupt
-                        a recording.
-                    </p>
-                </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">
+                            What the device itself shows, and how its buttons behave. None of this
+                            affects what is recorded or detected.
+                        </p>
 
-                <div>
-                    <div class="flex items-center">
-                        <input
-                            id="show_help"
-                            type="checkbox"
-                            checked={help.shown}
-                            onchange={(e) => help.set(e.currentTarget.checked)}
-                            aria-describedby="show_help_description"
-                            class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
-                        />
-                        <label
-                            for="show_help"
-                            class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
-                        >
-                            Show explanations
-                        </label>
-                    </div>
-                    <p
-                        id="show_help_description"
-                        class="text-xs text-gray-500 dark:text-gray-400 mt-1"
-                    >
-                        Keeps the expandable "what this means" sections throughout the interface.
-                        Turn it off once you know your way around and the pages become considerably
-                        shorter. The one line summaries stay either way, since those are what make a
-                        reading legible at all. Applies to this browser only and takes effect
-                        immediately.
-                    </p>
-                </div>
+                        <div>
+                            <label
+                                for="ui_level"
+                                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                            >
+                                Device UI Level
+                            </label>
+                            <select
+                                id="ui_level"
+                                bind:value={config.ui_level}
+                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                            >
+                                <option value={0}>Invisible mode</option>
+                                <option value={1}>Subtle mode (colored line)</option>
+                                <option value={4}>High visibility (full screen color)</option>
+                                <option value={5}>Custom image</option>
+                                <option value={2}>Demo mode (orca gif)</option>
+                                <option value={3}>EFF logo</option>
+                            </select>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                Note: Rayhunter draws over the device's native UI, so some
+                                flickering is expected
+                            </p>
+                        </div>
 
-                <div>
-                    <label
-                        for="ui_level"
-                        class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
-                    >
-                        Device UI Level
-                    </label>
-                    <select
-                        id="ui_level"
-                        bind:value={config.ui_level}
-                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
-                    >
-                        <option value={0}>Invisible mode</option>
-                        <option value={1}>Subtle mode (colored line)</option>
-                        <option value={4}>High visibility (full screen color)</option>
-                        <option value={5}>Custom image</option>
-                        <option value={2}>Demo mode (orca gif)</option>
-                        <option value={3}>EFF logo</option>
-                    </select>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                        Note: Rayhunter draws over the device's native UI, so some flickering is
-                        expected
-                    </p>
-                </div>
-
-                <!-- The status line is drawn in every mode but Invisible, so
+                        <!-- The status line is drawn in every mode but Invisible, so
                      hiding these anywhere else would hide a live setting. -->
-                {#if config.ui_level !== 0}
-                    <DeviceColorSettings bind:config />
-                {/if}
-
-                {#if config.ui_level === 5}
-                    <DeviceGifSettings bind:config />
-                {/if}
-
-                <div>
-                    <label
-                        for="key_input_mode"
-                        class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
-                    >
-                        Device Input Mode
-                    </label>
-                    <select
-                        id="key_input_mode"
-                        bind:value={config.key_input_mode}
-                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
-                    >
-                        <option value={0}>Disable button control</option>
-                        <option value={1}>Double-tap power button to start new recording</option>
-                    </select>
-                </div>
-
-                <div>
-                    <label
-                        for="keep_screen_on"
-                        class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
-                    >
-                        Keep the screen on
-                    </label>
-                    <select
-                        id="keep_screen_on"
-                        bind:value={config.keep_screen_on}
-                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
-                    >
-                        <option value={0}>Let the screen turn itself off</option>
-                        <option value={2}>Keep it on while plugged in</option>
-                        <option value={1}>Keep it on always</option>
-                    </select>
-                    {#if config.keep_screen_on === 1}
-                        <p class="mt-1 text-xs text-amber-600 dark:text-amber-400">
-                            On battery this will flatten the device considerably faster. Pick "while
-                            plugged in" unless you have a reason not to.
-                        </p>
-                    {/if}
-                    <div class="mt-3 flex items-center">
-                        <input
-                            id="pause_display_on_keypress"
-                            type="checkbox"
-                            bind:checked={config.pause_display_on_keypress}
-                            class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
-                        />
-                        <label
-                            for="pause_display_on_keypress"
-                            class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
-                        >
-                            Step aside briefly when a button is pressed
-                        </label>
-                    </div>
-                    <Explainer
-                        summary="Lets you read the device's own screens, the wifi password included, without losing the status indicator."
-                    >
-                        <p>
-                            Rayhunter paints over the device's own interface. In the display levels
-                            that fill the screen, a custom image or high visibility, that interface
-                            is completely hidden, and that includes the pages showing the wifi name
-                            and password. Somebody who has not written the password down can end up
-                            locked out of their own hotspot, which is a steep price for a change to
-                            the colour of a status light.
-                        </p>
-                        <p>
-                            With this on, pressing a button shrinks Rayhunter to its thin status
-                            line for twenty seconds, which is enough to find a password and type it
-                            somewhere. It does not go dark: a button press must never be able to
-                            hide a high severity warning, so the line stays and keeps its colour.
-                            Pressing more buttons extends the twenty seconds rather than cutting it
-                            short.
-                        </p>
-                        <p>
-                            Nothing about detection changes. Recording and analysis carry on
-                            throughout, and this only affects the levels that cover the screen; a
-                            thin line was never hiding anything to begin with.
-                        </p>
-                    </Explainer>
-
-                    <Explainer
-                        summary="Why the screen goes dark while Rayhunter is plainly running."
-                    >
-                        <p>
-                            The device blanks its own screen on a timer, and drawing to the screen
-                            does not count as activity to that timer. So Rayhunter can be recording
-                            perfectly well with nothing to show for it, and the only way to check is
-                            to press a button. That defeats the point of a status light you are
-                            meant to notice out of the corner of your eye.
-                        </p>
-                        <p>
-                            Keeping it on holds the backlight and stops the device suspending. That
-                            is why the plugged in option exists, and why it is the one to pick: a
-                            backlight held on is one of the quickest ways to flatten one of these
-                            batteries. Set to plugged in, the screen stays lit on a desk and the
-                            device goes back to saving power the moment you unplug it.
-                        </p>
-                        <p>
-                            Currently implemented for the Orbic. Other devices accept the setting
-                            and ignore it rather than failing.
-                        </p>
-                    </Explainer>
-                </div>
-
-                <div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3">
-                    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
-                        Notification Settings
-                    </h3>
-
-                    <div class="flex items-center">
-                        <input
-                            id="auto_check_updates"
-                            type="checkbox"
-                            bind:checked={config.auto_check_updates}
-                            class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
-                        />
-                        <label
-                            for="auto_check_updates"
-                            class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
-                        >
-                            Automatically check for software updates
-                        </label>
-                    </div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">
-                        When enabled, Rayhunter periodically checks GitHub for new releases and
-                        shows an update notice in the web UI.
-                    </p>
-
-                    <ExpandableInput
-                        bind:value={config.ntfy_url}
-                        checkboxId="ntfy_enabled"
-                        inputId="ntfy_url"
-                        label="Enable ntfy notifications"
-                        inputLabel="ntfy URL"
-                        inputPlaceholder="https://ntfy.sh/my-rayhunter"
-                        inputHelp="Test button below uses the saved configuration URL, not the input above"
-                    >
-                        <div>
-                            <button
-                                type="button"
-                                onclick={send_test_notification}
-                                disabled={testingNotification}
-                                class="bg-rayhunter-blue hover:bg-rayhunter-dark-blue disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-2 px-4 rounded-md flex flex-row gap-1 items-center"
-                            >
-                                {#if testingNotification}
-                                    <div
-                                        class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"
-                                    ></div>
-                                    Sending...
-                                {:else}
-                                    <svg
-                                        class="w-4 h-4"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        viewBox="0 0 24 24"
-                                    >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                                        ></path>
-                                    </svg>
-                                    Send Test Notification
-                                {/if}
-                            </button>
-                            {#if testMessage}
-                                <div
-                                    class="mt-2 p-2 rounded-sm text-sm {testMessageType === 'error'
-                                        ? 'bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300'
-                                        : 'bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-300'}"
-                                >
-                                    {testMessage}
-                                </div>
-                            {/if}
-                        </div>
-
-                        <div class="space-y-2">
-                            <div
-                                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
-                            >
-                                Enabled Notification Types
-                            </div>
-                            <div class="flex items-center">
-                                <input
-                                    type="checkbox"
-                                    id="enable_warning_notifications"
-                                    value="Warning"
-                                    bind:group={config.enabled_notifications}
-                                />
-                                <label
-                                    for="enable_warning_notifications"
-                                    class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
-                                >
-                                    Warnings
-                                </label>
-                            </div>
-                            <div class="flex items-center">
-                                <input
-                                    type="checkbox"
-                                    id="enable_lowbattery_notifications"
-                                    value="LowBattery"
-                                    bind:group={config.enabled_notifications}
-                                />
-                                <label
-                                    for="enable_lowbattery_notifications"
-                                    class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
-                                >
-                                    Low Battery
-                                </label>
-                            </div>
-                            <div class="flex items-center">
-                                <input
-                                    type="checkbox"
-                                    id="enable_update_notifications"
-                                    value={enabled_notifications.Update}
-                                    bind:group={config.enabled_notifications}
-                                />
-                                <label
-                                    for="enable_update_notifications"
-                                    class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
-                                >
-                                    Software Updates
-                                </label>
-                            </div>
-                        </div>
-                    </ExpandableInput>
-                </div>
-
-                <div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3">
-                    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
-                        Storage Management
-                    </h3>
-
-                    <div>
-                        <label
-                            for="min_space_to_start_recording_mb"
-                            class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
-                        >
-                            Minimum Space to Start Recording (MB)
-                        </label>
-                        <input
-                            id="min_space_to_start_recording_mb"
-                            type="number"
-                            min="1"
-                            bind:value={config.min_space_to_start_recording_mb}
-                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
-                        />
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                            Recording will not start if less than this amount of disk space is free
-                        </p>
-                    </div>
-
-                    <div>
-                        <label
-                            for="min_space_to_continue_recording_mb"
-                            class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
-                        >
-                            Minimum Space to Continue Recording (MB)
-                        </label>
-                        <input
-                            id="min_space_to_continue_recording_mb"
-                            type="number"
-                            min="1"
-                            bind:value={config.min_space_to_continue_recording_mb}
-                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
-                        />
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                            Recording will stop automatically if disk space drops below this level
-                        </p>
-                    </div>
-
-                    <div class="border-t border-gray-200 dark:border-gray-700 pt-3 mt-4">
-                        <div class="flex items-center">
-                            <input
-                                id="auto_delete_clean_recordings"
-                                type="checkbox"
-                                bind:checked={config.auto_delete_clean_recordings}
-                                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
-                            />
-                            <label
-                                for="auto_delete_clean_recordings"
-                                class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
-                            >
-                                Delete recordings that found nothing when space runs low
-                            </label>
-                        </div>
-                        <Explainer
-                            summary="Keeps the device recording instead of stopping when the disk fills, without ever removing a recording that found something."
-                        >
-                            <p>
-                                A device left running fills its storage and then stops recording,
-                                which is the moment it stops being a detector. Most recordings find
-                                nothing, and those are the ones safe to lose.
-                            </p>
-                            <p>
-                                Only recordings that have been analysed and raised no warning at all
-                                are removed, oldest first, and only as many as it takes to make
-                                room. A recording that raised anything is never touched. Neither is
-                                one still being written, one that has not been analysed yet, or one
-                                still waiting to be uploaded to a WebDAV server. Not knowing what is
-                                in a recording is not a reason to delete it.
-                            </p>
-                            <p>
-                                Giving a recording a name or notes also protects it. Stopping to
-                                label one says it matters to you, which is a better signal than
-                                anything the device can work out for itself.
-                            </p>
-                            <p>
-                                Informational notes do not count as findings. They are diagnostics
-                                rather than detections, so a recording carrying only those is still
-                                one that found nothing.
-                            </p>
-                            <p>
-                                Off unless you turn it on. Every deletion is written to the log with
-                                the name of what was removed.
-                            </p>
-                        </Explainer>
-                    </div>
-
-                    <div class="border-t border-gray-200 dark:border-gray-700 pt-3 mt-4">
-                        <h4 class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
-                            Start a new recording automatically
-                        </h4>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                            {rotation_summary(
-                                config.max_recording_size_mb,
-                                config.max_recording_minutes
-                            )}
-                        </p>
-
-                        <div class="grid gap-3 sm:grid-cols-2">
-                            <div>
-                                <label
-                                    for="max_recording_minutes"
-                                    class="block text-sm text-gray-700 dark:text-gray-200 mb-1"
-                                >
-                                    After a length of time
-                                </label>
-                                <select
-                                    id="max_recording_minutes"
-                                    value={customRotationTime
-                                        ? 'custom'
-                                        : String(config.max_recording_minutes ?? '')}
-                                    onchange={(e) => {
-                                        const picked = e.currentTarget.value;
-                                        if (picked === 'custom') {
-                                            customRotationTime = true;
-                                            if (!config) return;
-                                            config.max_recording_minutes ??= 45;
-                                        } else {
-                                            customRotationTime = false;
-                                            if (!config) return;
-                                            config.max_recording_minutes =
-                                                picked === '' ? null : Number(picked);
-                                        }
-                                    }}
-                                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
-                                >
-                                    <option value="">Never</option>
-                                    {#each TIME_PRESETS_MINUTES as minutes (minutes)}
-                                        <option value={String(minutes)}
-                                            >Every {format_interval(minutes)}</option
-                                        >
-                                    {/each}
-                                    <option value="custom">Another length of time</option>
-                                </select>
-                                {#if customRotationTime}
-                                    <div class="mt-2 flex items-center gap-2">
-                                        <input
-                                            type="number"
-                                            min={MIN_MINUTES}
-                                            aria-label="Minutes between recordings"
-                                            bind:value={config.max_recording_minutes}
-                                            class="w-28 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
-                                        />
-                                        <span class="text-sm text-gray-600 dark:text-gray-300"
-                                            >minutes</span
-                                        >
-                                    </div>
-                                {/if}
-                            </div>
-
-                            <div>
-                                <label
-                                    for="max_recording_size_mb"
-                                    class="block text-sm text-gray-700 dark:text-gray-200 mb-1"
-                                >
-                                    At a size
-                                </label>
-                                <select
-                                    id="max_recording_size_mb"
-                                    value={customRotationSize
-                                        ? 'custom'
-                                        : String(config.max_recording_size_mb ?? '')}
-                                    onchange={(e) => {
-                                        const picked = e.currentTarget.value;
-                                        if (picked === 'custom') {
-                                            customRotationSize = true;
-                                            if (!config) return;
-                                            config.max_recording_size_mb ??= 20;
-                                        } else {
-                                            customRotationSize = false;
-                                            if (!config) return;
-                                            config.max_recording_size_mb =
-                                                picked === '' ? null : Number(picked);
-                                        }
-                                    }}
-                                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
-                                >
-                                    <option value="">Never</option>
-                                    {#each SIZE_PRESETS_MB as mb (mb)}
-                                        <option value={String(mb)}>At {mb} MB</option>
-                                    {/each}
-                                    <option value="custom">Another size</option>
-                                </select>
-                                {#if customRotationSize}
-                                    <div class="mt-2 flex items-center gap-2">
-                                        <input
-                                            type="number"
-                                            min={MIN_SIZE_MB}
-                                            aria-label="Megabytes per recording"
-                                            bind:value={config.max_recording_size_mb}
-                                            class="w-28 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
-                                        />
-                                        <span class="text-sm text-gray-600 dark:text-gray-300"
-                                            >MB</span
-                                        >
-                                    </div>
-                                {/if}
-                            </div>
-                        </div>
-
-                        {#if rotation_warning(config.max_recording_size_mb, config.max_recording_minutes)}
-                            <p class="mt-2 text-xs text-amber-600 dark:text-amber-400">
-                                {rotation_warning(
-                                    config.max_recording_size_mb,
-                                    config.max_recording_minutes
-                                )}
-                            </p>
+                        {#if config.ui_level !== 0}
+                            <DeviceColorSettings bind:config />
                         {/if}
 
-                        <Explainer summary="What splitting a recording changes.">
-                            <p>
-                                A capture left running is one file that grows until the disk fills.
-                                Splitting it keeps any single recording small enough to download
-                                over the device's own wifi, and means each piece is analysed and
-                                readable while capture carries on rather than only once you stop it.
-                            </p>
-                            <p>
-                                Set both and whichever arrives first wins, so a size limit acts as a
-                                ceiling on a busy stretch while the time limit still divides a quiet
-                                one. Detection is unaffected either way: analysers run over each
-                                recording as it closes, exactly as they do when you stop one by
-                                hand.
-                            </p>
-                            <p>
-                                A warning already on the display stays there across an automatic
-                                split. Rotation is the device's own housekeeping, and letting it
-                                clear a warning you had not read yet would hide the one thing you
-                                are here for.
-                            </p>
-                        </Explainer>
-                    </div>
-                </div>
+                        {#if config.ui_level === 5}
+                            <DeviceGifSettings bind:config />
+                        {/if}
 
-                <div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3">
-                    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
-                        WebDAV Upload
-                    </h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">
-                        Once a recording has been closed for at least the configured age, both the
-                        .qmdl and .ndjson files are uploaded in the background to the WebDAV server.
-                    </p>
-
-                    <ExpandableInput
-                        bind:value={config.webdav.url}
-                        checkboxId="webdav_enabled"
-                        inputId="webdav_url"
-                        label="Enable WebDAV upload"
-                        inputLabel="Server URL"
-                        inputPlaceholder="https://dav.example.com/rayhunter/"
-                        inputHelp="Files are uploaded via HTTP PUT under this base URL. No folders are created, and folders in this base URL are assumed to exist already."
-                    >
                         <div>
                             <label
-                                for="webdav_username"
+                                for="key_input_mode"
                                 class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
                             >
-                                Username
+                                Device Input Mode
                             </label>
-                            <input
-                                id="webdav_username"
-                                type="text"
-                                bind:value={config.webdav.username}
+                            <select
+                                id="key_input_mode"
+                                bind:value={config.key_input_mode}
                                 class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
-                            />
-                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                Optional. Leave blank for unauthenticated uploads.
-                            </p>
+                            >
+                                <option value={0}>Disable button control</option>
+                                <option value={1}
+                                    >Double-tap power button to start new recording</option
+                                >
+                            </select>
                         </div>
 
                         <div>
                             <label
-                                for="webdav_password"
+                                for="keep_screen_on"
                                 class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
                             >
-                                Password
+                                Keep the screen on
                             </label>
-                            <input
-                                id="webdav_password"
-                                type="password"
-                                bind:value={config.webdav.password}
+                            <select
+                                id="keep_screen_on"
+                                bind:value={config.keep_screen_on}
                                 class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
-                            />
-                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                A password without a username will be rejected and the request will
-                                be sent unauthenticated.
-                            </p>
-                        </div>
-
-                        <div>
-                            <label
-                                for="webdav_upload_timeout_secs"
-                                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
                             >
-                                Upload Timeout (seconds)
-                            </label>
-                            <input
-                                id="webdav_upload_timeout_secs"
-                                type="number"
-                                min="1"
-                                bind:value={config.webdav.upload_timeout_secs}
-                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
-                            />
-                        </div>
-
-                        <div>
-                            <label
-                                for="webdav_poll_interval_secs"
-                                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
-                            >
-                                Poll Interval (seconds)
-                            </label>
-                            <input
-                                id="webdav_poll_interval_secs"
-                                type="number"
-                                min="1"
-                                bind:value={config.webdav.poll_interval_secs}
-                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
-                            />
-                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                How often the worker checks for new entries to upload.
-                            </p>
-                        </div>
-
-                        <div>
-                            <label
-                                for="webdav_min_age_secs"
-                                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
-                            >
-                                Minimum Age Before Upload (seconds)
-                            </label>
-                            <input
-                                id="webdav_min_age_secs"
-                                type="number"
-                                min="0"
-                                bind:value={config.webdav.min_age_secs}
-                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
-                            />
-                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                How long a recording must be closed before it becomes eligible for
-                                upload.
-                            </p>
-                        </div>
-
-                        <div class="flex items-center">
-                            <input
-                                id="webdav_delete_on_upload"
-                                type="checkbox"
-                                bind:checked={config.webdav.delete_on_upload}
-                                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
-                            />
-                            <label
-                                for="webdav_delete_on_upload"
-                                class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
-                            >
-                                Delete on successful upload
-                            </label>
-                        </div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400">
-                            When enabled, the local files are removed after a successful upload.
-                            Otherwise the manifest is just marked as uploaded.
-                        </p>
-                    </ExpandableInput>
-                </div>
-
-                {#if config.device === 'orbic' || config.device === 'moxee' || config.device === 'tmobile' || config.device === 'wingtech'}
-                    <div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3">
-                        <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
-                            WiFi Client Mode
-                        </h3>
-                        <p class="text-xs text-gray-500 dark:text-gray-400">
-                            Connect the device to an existing WiFi network for internet access (e.g.
-                            notifications, remote access). The hotspot AP stays running alongside
-                            WiFi client mode.
-                        </p>
-
-                        <div class="flex items-center">
-                            <input
-                                id="wifi_enabled"
-                                type="checkbox"
-                                bind:checked={config.wifi_enabled}
-                                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
-                            />
-                            <label
-                                for="wifi_enabled"
-                                class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
-                            >
-                                Enable WiFi
-                            </label>
-                        </div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400">
-                            Unchecking stops WiFi without clearing saved credentials.
-                        </p>
-
-                        {#if wifiStatus && config.wifi_enabled}
-                            {#if wifiStatus.state === 'connected'}
-                                <p class="text-xs text-green-600">
-                                    Connected to "{wifiStatus.ssid}" ({wifiStatus.ip})
-                                </p>
-                            {:else if wifiStatus.state === 'connecting'}
-                                <p class="text-xs text-amber-600 dark:text-amber-400">
-                                    Connecting...
-                                </p>
-                            {:else if wifiStatus.state === 'recovering'}
-                                <p class="text-xs text-amber-600 dark:text-amber-400">
-                                    Recovering connection...
-                                </p>
-                            {:else if wifiStatus.state === 'dataPathDead'}
-                                <p class="text-xs text-amber-600 dark:text-amber-400">
-                                    Data path stalled, attempting recovery...
-                                </p>
-                            {:else if wifiStatus.state === 'failed'}
-                                <p class="text-xs text-red-600 dark:text-red-400">
-                                    Failed: {wifiStatus.error}
+                                <option value={0}>Let the screen turn itself off</option>
+                                <option value={2}>Keep it on while plugged in</option>
+                                <option value={1}>Keep it on always</option>
+                            </select>
+                            {#if config.keep_screen_on === 1}
+                                <p class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                                    On battery this will flatten the device considerably faster.
+                                    Pick "while plugged in" unless you have a reason not to.
                                 </p>
                             {/if}
-                        {/if}
-
-                        <div>
-                            <label
-                                for="wifi_ssid"
-                                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
-                            >
-                                WiFi Network Name (SSID)
-                            </label>
-                            <div class="flex gap-2">
+                            <div class="mt-3 flex items-center">
                                 <input
-                                    id="wifi_ssid"
-                                    type="text"
-                                    bind:value={config.wifi_ssid}
-                                    placeholder="MyWiFiNetwork"
-                                    class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                    id="pause_display_on_keypress"
+                                    type="checkbox"
+                                    bind:checked={config.pause_display_on_keypress}
+                                    class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
                                 />
-                                <button
-                                    type="button"
-                                    onclick={do_scan}
-                                    disabled={scanning}
-                                    class="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 border border-gray-300 dark:border-gray-600 rounded-md"
+                                <label
+                                    for="pause_display_on_keypress"
+                                    class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
                                 >
-                                    {scanning ? 'Scanning...' : 'Scan'}
-                                </button>
+                                    Step aside briefly when a button is pressed
+                                </label>
                             </div>
-                        </div>
-
-                        {#if scanError}
-                            <p class="text-xs text-red-600 dark:text-red-400">{scanError}</p>
-                        {/if}
-
-                        {#if scanResults.length > 0}
-                            <div
-                                class="border border-gray-200 dark:border-gray-700 rounded-md max-h-40 overflow-y-auto divide-y divide-gray-200 dark:divide-gray-700"
+                            <Explainer
+                                summary="Lets you read the device's own screens, the wifi password included, without losing the status indicator."
                             >
-                                {#each scanResults as network}
-                                    <button
-                                        type="button"
-                                        class="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 flex justify-between"
-                                        onclick={() => select_network(network)}
-                                    >
-                                        <span>{network.ssid}</span>
-                                        <span class="text-gray-400 dark:text-gray-500"
-                                            >{network.signal_dbm} dBm &middot; {network.security}</span
-                                        >
-                                    </button>
+                                <p>
+                                    Rayhunter paints over the device's own interface. In the display
+                                    levels that fill the screen, a custom image or high visibility,
+                                    that interface is completely hidden, and that includes the pages
+                                    showing the wifi name and password. Somebody who has not written
+                                    the password down can end up locked out of their own hotspot,
+                                    which is a steep price for a change to the colour of a status
+                                    light.
+                                </p>
+                                <p>
+                                    With this on, pressing a button shrinks Rayhunter to its thin
+                                    status line for twenty seconds, which is enough to find a
+                                    password and type it somewhere. It does not go dark: a button
+                                    press must never be able to hide a high severity warning, so the
+                                    line stays and keeps its colour. Pressing more buttons extends
+                                    the twenty seconds rather than cutting it short.
+                                </p>
+                                <p>
+                                    Nothing about detection changes. Recording and analysis carry on
+                                    throughout, and this only affects the levels that cover the
+                                    screen; a thin line was never hiding anything to begin with.
+                                </p>
+                            </Explainer>
+
+                            <Explainer
+                                summary="Why the screen goes dark while Rayhunter is plainly running."
+                            >
+                                <p>
+                                    The device blanks its own screen on a timer, and drawing to the
+                                    screen does not count as activity to that timer. So Rayhunter
+                                    can be recording perfectly well with nothing to show for it, and
+                                    the only way to check is to press a button. That defeats the
+                                    point of a status light you are meant to notice out of the
+                                    corner of your eye.
+                                </p>
+                                <p>
+                                    Keeping it on holds the backlight and stops the device
+                                    suspending. That is why the plugged in option exists, and why it
+                                    is the one to pick: a backlight held on is one of the quickest
+                                    ways to flatten one of these batteries. Set to plugged in, the
+                                    screen stays lit on a desk and the device goes back to saving
+                                    power the moment you unplug it.
+                                </p>
+                                <p>
+                                    Currently implemented for the Orbic. Other devices accept the
+                                    setting and ignore it rather than failing.
+                                </p>
+                            </Explainer>
+                        </div>
+                    </div>
+                {:else if active === 'detection'}
+                    <div
+                        id="panel-detection"
+                        role="tabpanel"
+                        aria-labelledby="tab-detection"
+                        class="space-y-4"
+                    >
+                        <div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6">
+                            <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-2">
+                                Analyzer Heuristic Settings
+                            </h3>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                                Each of these watches for a different sign that a tower is not
+                                behaving the way a real one should. Leaving them on costs you
+                                nothing except the occasional false alarm. Open any entry to read
+                                what it looks for and why it matters.
+                            </p>
+                            <div class="space-y-4">
+                                {#each HEURISTICS as h (h.key)}
+                                    <div>
+                                        <div class="flex items-center">
+                                            <input
+                                                id={h.key}
+                                                type="checkbox"
+                                                bind:checked={config.analyzers[h.key]}
+                                                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
+                                            />
+                                            <label
+                                                for={h.key}
+                                                class="ml-2 block text-sm font-medium text-gray-700 dark:text-gray-200"
+                                            >
+                                                {h.title}
+                                            </label>
+                                            {#if h.tag === 'noisy'}
+                                                <span
+                                                    class="ml-2 rounded-sm bg-amber-100 dark:bg-amber-950 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:text-amber-300"
+                                                    >very noisy</span
+                                                >
+                                            {:else if h.tag === 'informational'}
+                                                <span
+                                                    class="ml-2 rounded-sm bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300"
+                                                    >notes only</span
+                                                >
+                                            {/if}
+                                        </div>
+                                        <div class="ml-6">
+                                            <Explainer summary={h.summary}>
+                                                <p>
+                                                    <strong>What it looks for.</strong>
+                                                    {h.detects}
+                                                </p>
+                                                <p><strong>Why it matters.</strong> {h.matters}</p>
+                                                {#if h.noise}
+                                                    <p><strong>Worth knowing.</strong> {h.noise}</p>
+                                                {/if}
+                                            </Explainer>
+                                        </div>
+                                    </div>
                                 {/each}
                             </div>
-                        {/if}
-
-                        {#if config.wifi_ssid}
-                            <div>
-                                <label
-                                    for="wifi_security"
-                                    class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
-                                >
-                                    Security Type
-                                </label>
-                                <select
-                                    id="wifi_security"
-                                    bind:value={config.wifi_security}
-                                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
-                                >
-                                    <option value="wpa_psk">WPA2 (WPA-PSK)</option>
-                                    <option value="sae">WPA3 (SAE)</option>
-                                </select>
-                            </div>
-                        {/if}
-
-                        <div>
-                            <label
-                                for="wifi_password"
-                                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
-                            >
-                                WiFi Password
-                            </label>
-                            <input
-                                id="wifi_password"
-                                type="password"
-                                bind:value={config.wifi_password}
-                                placeholder="Enter password"
-                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
-                            />
-                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                Changing the network requires re-entering the password.
-                            </p>
                         </div>
+                        <div
+                            class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3"
+                        >
+                            <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
+                                Demonstration
+                            </h3>
+                            <div class="flex items-center">
+                                <input
+                                    id="demo_mode"
+                                    type="checkbox"
+                                    bind:checked={config.demo_mode}
+                                    aria-describedby="demo_mode_description"
+                                    class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
+                                />
+                                <label
+                                    for="demo_mode"
+                                    class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                                >
+                                    Enable the demo warning button
+                                </label>
+                            </div>
+                            <Explainer
+                                keepSummary
+                                summary="Adds a button to the main page that fakes a surveillance detection, for showing Rayhunter to an audience."
+                            >
+                                <p>
+                                    The button injects a synthetic message into the recording that
+                                    looks to Rayhunter like a tower switching encryption off, which
+                                    is one of the clearest signs of a fake base station. It goes
+                                    through the real detectors, so the warning appears in the
+                                    history and turns the device red exactly as a genuine one would.
+                                    That is the point: it demonstrates how Rayhunter actually works
+                                    rather than painting a warning on screen.
+                                </p>
+                                <p>
+                                    <strong>The fake message is written into your recording.</strong
+                                    > Every warning it produces is labelled as a demo in its own text,
+                                    so it can be recognised later by somebody who was not present. Even
+                                    so, do not send a recording containing demo data to EFF or treat it
+                                    as evidence.
+                                </p>
+                                <p>
+                                    Leave this off when you are actually hunting. It only adds a
+                                    button, and the device refuses the request entirely while this
+                                    is unchecked, but there is no reason to have it available by
+                                    accident.
+                                </p>
+                            </Explainer>
+                        </div>
+                    </div>
+                {:else if active === 'recordings'}
+                    <div
+                        id="panel-recordings"
+                        role="tabpanel"
+                        aria-labelledby="tab-recordings"
+                        class="space-y-4"
+                    >
+                        <div
+                            class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3"
+                        >
+                            <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
+                                Storage Management
+                            </h3>
 
-                        {#if config.wifi_ssid}
                             <div>
                                 <label
-                                    for="dns_servers"
+                                    for="min_space_to_start_recording_mb"
                                     class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
                                 >
-                                    DNS Servers
+                                    Minimum Space to Start Recording (MB)
                                 </label>
                                 <input
-                                    id="dns_servers"
-                                    type="text"
-                                    bind:value={dnsServersInput}
-                                    placeholder="9.9.9.9, 149.112.112.112"
+                                    id="min_space_to_start_recording_mb"
+                                    type="number"
+                                    min="1"
+                                    bind:value={config.min_space_to_start_recording_mb}
                                     class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
                                 />
                                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                    Comma-separated. Used when WiFi is active. Defaults to 9.9.9.9,
-                                    149.112.112.112 (Quad9).
+                                    Recording will not start if less than this amount of disk space
+                                    is free
                                 </p>
                             </div>
-                        {/if}
-                    </div>
-                {/if}
 
-                <div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6">
-                    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-2">
-                        Analyzer Heuristic Settings
-                    </h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
-                        Each of these watches for a different sign that a tower is not behaving the
-                        way a real one should. Leaving them on costs you nothing except the
-                        occasional false alarm. Open any entry to read what it looks for and why it
-                        matters.
-                    </p>
-                    <div class="space-y-4">
-                        {#each HEURISTICS as h (h.key)}
                             <div>
+                                <label
+                                    for="min_space_to_continue_recording_mb"
+                                    class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                >
+                                    Minimum Space to Continue Recording (MB)
+                                </label>
+                                <input
+                                    id="min_space_to_continue_recording_mb"
+                                    type="number"
+                                    min="1"
+                                    bind:value={config.min_space_to_continue_recording_mb}
+                                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                />
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    Recording will stop automatically if disk space drops below this
+                                    level
+                                </p>
+                            </div>
+
+                            <div class="border-t border-gray-200 dark:border-gray-700 pt-3 mt-4">
                                 <div class="flex items-center">
                                     <input
-                                        id={h.key}
+                                        id="auto_delete_clean_recordings"
                                         type="checkbox"
-                                        bind:checked={config.analyzers[h.key]}
+                                        bind:checked={config.auto_delete_clean_recordings}
                                         class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
                                     />
                                     <label
-                                        for={h.key}
-                                        class="ml-2 block text-sm font-medium text-gray-700 dark:text-gray-200"
+                                        for="auto_delete_clean_recordings"
+                                        class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
                                     >
-                                        {h.title}
+                                        Delete recordings that found nothing when space runs low
                                     </label>
-                                    {#if h.tag === 'noisy'}
-                                        <span
-                                            class="ml-2 rounded-sm bg-amber-100 dark:bg-amber-950 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:text-amber-300"
-                                            >very noisy</span
+                                </div>
+                                <Explainer
+                                    summary="Keeps the device recording instead of stopping when the disk fills, without ever removing a recording that found something."
+                                >
+                                    <p>
+                                        A device left running fills its storage and then stops
+                                        recording, which is the moment it stops being a detector.
+                                        Most recordings find nothing, and those are the ones safe to
+                                        lose.
+                                    </p>
+                                    <p>
+                                        Only recordings that have been analysed and raised no
+                                        warning at all are removed, oldest first, and only as many
+                                        as it takes to make room. A recording that raised anything
+                                        is never touched. Neither is one still being written, one
+                                        that has not been analysed yet, or one still waiting to be
+                                        uploaded to a WebDAV server. Not knowing what is in a
+                                        recording is not a reason to delete it.
+                                    </p>
+                                    <p>
+                                        Giving a recording a name or notes also protects it.
+                                        Stopping to label one says it matters to you, which is a
+                                        better signal than anything the device can work out for
+                                        itself.
+                                    </p>
+                                    <p>
+                                        Informational notes do not count as findings. They are
+                                        diagnostics rather than detections, so a recording carrying
+                                        only those is still one that found nothing.
+                                    </p>
+                                    <p>
+                                        Off unless you turn it on. Every deletion is written to the
+                                        log with the name of what was removed.
+                                    </p>
+                                </Explainer>
+                            </div>
+
+                            <div class="border-t border-gray-200 dark:border-gray-700 pt-3 mt-4">
+                                <h4
+                                    class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                >
+                                    Start a new recording automatically
+                                </h4>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                                    {rotation_summary(
+                                        config.max_recording_size_mb,
+                                        config.max_recording_minutes
+                                    )}
+                                </p>
+
+                                <div class="grid gap-3 sm:grid-cols-2">
+                                    <div>
+                                        <label
+                                            for="max_recording_minutes"
+                                            class="block text-sm text-gray-700 dark:text-gray-200 mb-1"
                                         >
-                                    {:else if h.tag === 'informational'}
-                                        <span
-                                            class="ml-2 rounded-sm bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300"
-                                            >notes only</span
+                                            After a length of time
+                                        </label>
+                                        <select
+                                            id="max_recording_minutes"
+                                            value={customRotationTime
+                                                ? 'custom'
+                                                : String(config.max_recording_minutes ?? '')}
+                                            onchange={(e) => {
+                                                const picked = e.currentTarget.value;
+                                                if (picked === 'custom') {
+                                                    customRotationTime = true;
+                                                    if (!config) return;
+                                                    config.max_recording_minutes ??= 45;
+                                                } else {
+                                                    customRotationTime = false;
+                                                    if (!config) return;
+                                                    config.max_recording_minutes =
+                                                        picked === '' ? null : Number(picked);
+                                                }
+                                            }}
+                                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
                                         >
+                                            <option value="">Never</option>
+                                            {#each TIME_PRESETS_MINUTES as minutes (minutes)}
+                                                <option value={String(minutes)}
+                                                    >Every {format_interval(minutes)}</option
+                                                >
+                                            {/each}
+                                            <option value="custom">Another length of time</option>
+                                        </select>
+                                        {#if customRotationTime}
+                                            <div class="mt-2 flex items-center gap-2">
+                                                <input
+                                                    type="number"
+                                                    min={MIN_MINUTES}
+                                                    aria-label="Minutes between recordings"
+                                                    bind:value={config.max_recording_minutes}
+                                                    class="w-28 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                                />
+                                                <span
+                                                    class="text-sm text-gray-600 dark:text-gray-300"
+                                                    >minutes</span
+                                                >
+                                            </div>
+                                        {/if}
+                                    </div>
+
+                                    <div>
+                                        <label
+                                            for="max_recording_size_mb"
+                                            class="block text-sm text-gray-700 dark:text-gray-200 mb-1"
+                                        >
+                                            At a size
+                                        </label>
+                                        <select
+                                            id="max_recording_size_mb"
+                                            value={customRotationSize
+                                                ? 'custom'
+                                                : String(config.max_recording_size_mb ?? '')}
+                                            onchange={(e) => {
+                                                const picked = e.currentTarget.value;
+                                                if (picked === 'custom') {
+                                                    customRotationSize = true;
+                                                    if (!config) return;
+                                                    config.max_recording_size_mb ??= 20;
+                                                } else {
+                                                    customRotationSize = false;
+                                                    if (!config) return;
+                                                    config.max_recording_size_mb =
+                                                        picked === '' ? null : Number(picked);
+                                                }
+                                            }}
+                                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                        >
+                                            <option value="">Never</option>
+                                            {#each SIZE_PRESETS_MB as mb (mb)}
+                                                <option value={String(mb)}>At {mb} MB</option>
+                                            {/each}
+                                            <option value="custom">Another size</option>
+                                        </select>
+                                        {#if customRotationSize}
+                                            <div class="mt-2 flex items-center gap-2">
+                                                <input
+                                                    type="number"
+                                                    min={MIN_SIZE_MB}
+                                                    aria-label="Megabytes per recording"
+                                                    bind:value={config.max_recording_size_mb}
+                                                    class="w-28 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                                />
+                                                <span
+                                                    class="text-sm text-gray-600 dark:text-gray-300"
+                                                    >MB</span
+                                                >
+                                            </div>
+                                        {/if}
+                                    </div>
+                                </div>
+
+                                {#if rotation_warning(config.max_recording_size_mb, config.max_recording_minutes)}
+                                    <p class="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                                        {rotation_warning(
+                                            config.max_recording_size_mb,
+                                            config.max_recording_minutes
+                                        )}
+                                    </p>
+                                {/if}
+
+                                <Explainer summary="What splitting a recording changes.">
+                                    <p>
+                                        A capture left running is one file that grows until the disk
+                                        fills. Splitting it keeps any single recording small enough
+                                        to download over the device's own wifi, and means each piece
+                                        is analysed and readable while capture carries on rather
+                                        than only once you stop it.
+                                    </p>
+                                    <p>
+                                        Set both and whichever arrives first wins, so a size limit
+                                        acts as a ceiling on a busy stretch while the time limit
+                                        still divides a quiet one. Detection is unaffected either
+                                        way: analysers run over each recording as it closes, exactly
+                                        as they do when you stop one by hand.
+                                    </p>
+                                    <p>
+                                        A warning already on the display stays there across an
+                                        automatic split. Rotation is the device's own housekeeping,
+                                        and letting it clear a warning you had not read yet would
+                                        hide the one thing you are here for.
+                                    </p>
+                                </Explainer>
+                            </div>
+                        </div>
+                        <div
+                            class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3"
+                        >
+                            <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
+                                GPS Settings
+                            </h3>
+                            <div>
+                                <label
+                                    for="gps_mode"
+                                    class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                    >GPS Mode</label
+                                >
+                                <select
+                                    id="gps_mode"
+                                    bind:value={config.gps_mode}
+                                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-rayhunter-blue"
+                                >
+                                    <option value={GpsMode.Disabled}>Disabled</option>
+                                    <option value={GpsMode.Fixed}>Fixed coordinates</option>
+                                    <option value={GpsMode.Api}>API endpoint</option>
+                                </select>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    {#if config.gps_mode === GpsMode.Api}
+                                        POST latitude and longitude to <code>/api/gps</code> from any
+                                        device on the network. Timestamp is derived from packet capture
+                                        timing.
+                                    {:else if config.gps_mode === GpsMode.Fixed}
+                                        GPS coordinates are fixed to the values below.
+                                    {:else}
+                                        GPS is disabled; no coordinates will be tracked.
+                                    {/if}
+                                </p>
+                            </div>
+                            {#if config.gps_mode === GpsMode.Fixed}
+                                <div>
+                                    <label
+                                        for="gps_fixed_latitude"
+                                        class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                        >Fixed Latitude</label
+                                    >
+                                    <input
+                                        id="gps_fixed_latitude"
+                                        type="number"
+                                        min="-90"
+                                        max="90"
+                                        step="any"
+                                        required
+                                        bind:value={config.gps_fixed_latitude}
+                                        placeholder="e.g. 37.7749"
+                                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-rayhunter-blue"
+                                    />
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        Decimal degrees, -90 to 90
+                                    </p>
+                                </div>
+                                <div>
+                                    <label
+                                        for="gps_fixed_longitude"
+                                        class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                        >Fixed Longitude</label
+                                    >
+                                    <input
+                                        id="gps_fixed_longitude"
+                                        type="number"
+                                        min="-180"
+                                        max="180"
+                                        step="any"
+                                        required
+                                        bind:value={config.gps_fixed_longitude}
+                                        placeholder="e.g. -122.4194"
+                                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-rayhunter-blue"
+                                    />
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        Decimal degrees, -180 to 180
+                                    </p>
+                                </div>
+                            {/if}
+                        </div>
+                    </div>
+                {:else if active === 'notifications'}
+                    <div
+                        id="panel-notifications"
+                        role="tabpanel"
+                        aria-labelledby="tab-notifications"
+                        class="space-y-4"
+                    >
+                        <div
+                            class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3"
+                        >
+                            <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
+                                Notification Settings
+                            </h3>
+
+                            <div class="flex items-center">
+                                <input
+                                    id="auto_check_updates"
+                                    type="checkbox"
+                                    bind:checked={config.auto_check_updates}
+                                    class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
+                                />
+                                <label
+                                    for="auto_check_updates"
+                                    class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                                >
+                                    Automatically check for software updates
+                                </label>
+                            </div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">
+                                When enabled, Rayhunter periodically checks GitHub for new releases
+                                and shows an update notice in the web UI.
+                            </p>
+
+                            <ExpandableInput
+                                bind:value={config.ntfy_url}
+                                checkboxId="ntfy_enabled"
+                                inputId="ntfy_url"
+                                label="Enable ntfy notifications"
+                                inputLabel="ntfy URL"
+                                inputPlaceholder="https://ntfy.sh/my-rayhunter"
+                                inputHelp="Test button below uses the saved configuration URL, not the input above"
+                            >
+                                <div>
+                                    <button
+                                        type="button"
+                                        onclick={send_test_notification}
+                                        disabled={testingNotification}
+                                        class="bg-rayhunter-blue hover:bg-rayhunter-dark-blue disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-2 px-4 rounded-md flex flex-row gap-1 items-center"
+                                    >
+                                        {#if testingNotification}
+                                            <div
+                                                class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"
+                                            ></div>
+                                            Sending...
+                                        {:else}
+                                            <svg
+                                                class="w-4 h-4"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                viewBox="0 0 24 24"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+                                                ></path>
+                                            </svg>
+                                            Send Test Notification
+                                        {/if}
+                                    </button>
+                                    {#if testMessage}
+                                        <div
+                                            class="mt-2 p-2 rounded-sm text-sm {testMessageType ===
+                                            'error'
+                                                ? 'bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300'
+                                                : 'bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-300'}"
+                                        >
+                                            {testMessage}
+                                        </div>
                                     {/if}
                                 </div>
-                                <div class="ml-6">
-                                    <Explainer summary={h.summary}>
-                                        <p><strong>What it looks for.</strong> {h.detects}</p>
-                                        <p><strong>Why it matters.</strong> {h.matters}</p>
-                                        {#if h.noise}
-                                            <p><strong>Worth knowing.</strong> {h.noise}</p>
-                                        {/if}
-                                    </Explainer>
+
+                                <div class="space-y-2">
+                                    <div
+                                        class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                    >
+                                        Enabled Notification Types
+                                    </div>
+                                    <div class="flex items-center">
+                                        <input
+                                            type="checkbox"
+                                            id="enable_warning_notifications"
+                                            value="Warning"
+                                            bind:group={config.enabled_notifications}
+                                        />
+                                        <label
+                                            for="enable_warning_notifications"
+                                            class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                                        >
+                                            Warnings
+                                        </label>
+                                    </div>
+                                    <div class="flex items-center">
+                                        <input
+                                            type="checkbox"
+                                            id="enable_lowbattery_notifications"
+                                            value="LowBattery"
+                                            bind:group={config.enabled_notifications}
+                                        />
+                                        <label
+                                            for="enable_lowbattery_notifications"
+                                            class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                                        >
+                                            Low Battery
+                                        </label>
+                                    </div>
+                                    <div class="flex items-center">
+                                        <input
+                                            type="checkbox"
+                                            id="enable_update_notifications"
+                                            value={enabled_notifications.Update}
+                                            bind:group={config.enabled_notifications}
+                                        />
+                                        <label
+                                            for="enable_update_notifications"
+                                            class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                                        >
+                                            Software Updates
+                                        </label>
+                                    </div>
                                 </div>
-                            </div>
-                        {/each}
+                            </ExpandableInput>
+                        </div>
                     </div>
-                </div>
-
-                <div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3">
-                    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
-                        Demonstration
-                    </h3>
-                    <div class="flex items-center">
-                        <input
-                            id="demo_mode"
-                            type="checkbox"
-                            bind:checked={config.demo_mode}
-                            aria-describedby="demo_mode_description"
-                            class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
-                        />
-                        <label
-                            for="demo_mode"
-                            class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
-                        >
-                            Enable the demo warning button
-                        </label>
-                    </div>
-                    <Explainer
-                        keepSummary
-                        summary="Adds a button to the main page that fakes a surveillance detection, for showing Rayhunter to an audience."
+                {:else if active === 'network'}
+                    <div
+                        id="panel-network"
+                        role="tabpanel"
+                        aria-labelledby="tab-network"
+                        class="space-y-4"
                     >
-                        <p>
-                            The button injects a synthetic message into the recording that looks to
-                            Rayhunter like a tower switching encryption off, which is one of the
-                            clearest signs of a fake base station. It goes through the real
-                            detectors, so the warning appears in the history and turns the device
-                            red exactly as a genuine one would. That is the point: it demonstrates
-                            how Rayhunter actually works rather than painting a warning on screen.
-                        </p>
-                        <p>
-                            <strong>The fake message is written into your recording.</strong> Every warning
-                            it produces is labelled as a demo in its own text, so it can be recognised
-                            later by somebody who was not present. Even so, do not send a recording containing
-                            demo data to EFF or treat it as evidence.
-                        </p>
-                        <p>
-                            Leave this off when you are actually hunting. It only adds a button, and
-                            the device refuses the request entirely while this is unchecked, but
-                            there is no reason to have it available by accident.
-                        </p>
-                    </Explainer>
-                </div>
+                        {#if config.device === 'orbic' || config.device === 'moxee' || config.device === 'tmobile' || config.device === 'wingtech'}
+                            <div
+                                class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3"
+                            >
+                                <h3
+                                    class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4"
+                                >
+                                    WiFi Client Mode
+                                </h3>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">
+                                    Connect the device to an existing WiFi network for internet
+                                    access (e.g. notifications, remote access). The hotspot AP stays
+                                    running alongside WiFi client mode.
+                                </p>
 
-                <div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3">
-                    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
-                        GPS Settings
-                    </h3>
-                    <div>
-                        <label
-                            for="gps_mode"
-                            class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
-                            >GPS Mode</label
+                                <div class="flex items-center">
+                                    <input
+                                        id="wifi_enabled"
+                                        type="checkbox"
+                                        bind:checked={config.wifi_enabled}
+                                        class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
+                                    />
+                                    <label
+                                        for="wifi_enabled"
+                                        class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                                    >
+                                        Enable WiFi
+                                    </label>
+                                </div>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">
+                                    Unchecking stops WiFi without clearing saved credentials.
+                                </p>
+
+                                {#if wifiStatus && config.wifi_enabled}
+                                    {#if wifiStatus.state === 'connected'}
+                                        <p class="text-xs text-green-600">
+                                            Connected to "{wifiStatus.ssid}" ({wifiStatus.ip})
+                                        </p>
+                                    {:else if wifiStatus.state === 'connecting'}
+                                        <p class="text-xs text-amber-600 dark:text-amber-400">
+                                            Connecting...
+                                        </p>
+                                    {:else if wifiStatus.state === 'recovering'}
+                                        <p class="text-xs text-amber-600 dark:text-amber-400">
+                                            Recovering connection...
+                                        </p>
+                                    {:else if wifiStatus.state === 'dataPathDead'}
+                                        <p class="text-xs text-amber-600 dark:text-amber-400">
+                                            Data path stalled, attempting recovery...
+                                        </p>
+                                    {:else if wifiStatus.state === 'failed'}
+                                        <p class="text-xs text-red-600 dark:text-red-400">
+                                            Failed: {wifiStatus.error}
+                                        </p>
+                                    {/if}
+                                {/if}
+
+                                <div>
+                                    <label
+                                        for="wifi_ssid"
+                                        class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                    >
+                                        WiFi Network Name (SSID)
+                                    </label>
+                                    <div class="flex gap-2">
+                                        <input
+                                            id="wifi_ssid"
+                                            type="text"
+                                            bind:value={config.wifi_ssid}
+                                            placeholder="MyWiFiNetwork"
+                                            class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                        />
+                                        <button
+                                            type="button"
+                                            onclick={do_scan}
+                                            disabled={scanning}
+                                            class="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 border border-gray-300 dark:border-gray-600 rounded-md"
+                                        >
+                                            {scanning ? 'Scanning...' : 'Scan'}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {#if scanError}
+                                    <p class="text-xs text-red-600 dark:text-red-400">
+                                        {scanError}
+                                    </p>
+                                {/if}
+
+                                {#if scanResults.length > 0}
+                                    <div
+                                        class="border border-gray-200 dark:border-gray-700 rounded-md max-h-40 overflow-y-auto divide-y divide-gray-200 dark:divide-gray-700"
+                                    >
+                                        {#each scanResults as network}
+                                            <button
+                                                type="button"
+                                                class="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 flex justify-between"
+                                                onclick={() => select_network(network)}
+                                            >
+                                                <span>{network.ssid}</span>
+                                                <span class="text-gray-400 dark:text-gray-500"
+                                                    >{network.signal_dbm} dBm &middot; {network.security}</span
+                                                >
+                                            </button>
+                                        {/each}
+                                    </div>
+                                {/if}
+
+                                {#if config.wifi_ssid}
+                                    <div>
+                                        <label
+                                            for="wifi_security"
+                                            class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                        >
+                                            Security Type
+                                        </label>
+                                        <select
+                                            id="wifi_security"
+                                            bind:value={config.wifi_security}
+                                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                        >
+                                            <option value="wpa_psk">WPA2 (WPA-PSK)</option>
+                                            <option value="sae">WPA3 (SAE)</option>
+                                        </select>
+                                    </div>
+                                {/if}
+
+                                <div>
+                                    <label
+                                        for="wifi_password"
+                                        class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                    >
+                                        WiFi Password
+                                    </label>
+                                    <input
+                                        id="wifi_password"
+                                        type="password"
+                                        bind:value={config.wifi_password}
+                                        placeholder="Enter password"
+                                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                    />
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        Changing the network requires re-entering the password.
+                                    </p>
+                                </div>
+
+                                {#if config.wifi_ssid}
+                                    <div>
+                                        <label
+                                            for="dns_servers"
+                                            class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                        >
+                                            DNS Servers
+                                        </label>
+                                        <input
+                                            id="dns_servers"
+                                            type="text"
+                                            bind:value={dnsServersInput}
+                                            placeholder="9.9.9.9, 149.112.112.112"
+                                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                        />
+                                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                            Comma-separated. Used when WiFi is active. Defaults to
+                                            9.9.9.9, 149.112.112.112 (Quad9).
+                                        </p>
+                                    </div>
+                                {/if}
+                            </div>
+                        {/if}
+                        <div
+                            class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3"
                         >
-                        <select
-                            id="gps_mode"
-                            bind:value={config.gps_mode}
-                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-rayhunter-blue"
-                        >
-                            <option value={GpsMode.Disabled}>Disabled</option>
-                            <option value={GpsMode.Fixed}>Fixed coordinates</option>
-                            <option value={GpsMode.Api}>API endpoint</option>
-                        </select>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                            {#if config.gps_mode === GpsMode.Api}
-                                POST latitude and longitude to <code>/api/gps</code> from any device on
-                                the network. Timestamp is derived from packet capture timing.
-                            {:else if config.gps_mode === GpsMode.Fixed}
-                                GPS coordinates are fixed to the values below.
-                            {:else}
-                                GPS is disabled; no coordinates will be tracked.
-                            {/if}
-                        </p>
+                            <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
+                                WebDAV Upload
+                            </h3>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">
+                                Once a recording has been closed for at least the configured age,
+                                both the .qmdl and .ndjson files are uploaded in the background to
+                                the WebDAV server.
+                            </p>
+
+                            <ExpandableInput
+                                bind:value={config.webdav.url}
+                                checkboxId="webdav_enabled"
+                                inputId="webdav_url"
+                                label="Enable WebDAV upload"
+                                inputLabel="Server URL"
+                                inputPlaceholder="https://dav.example.com/rayhunter/"
+                                inputHelp="Files are uploaded via HTTP PUT under this base URL. No folders are created, and folders in this base URL are assumed to exist already."
+                            >
+                                <div>
+                                    <label
+                                        for="webdav_username"
+                                        class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                    >
+                                        Username
+                                    </label>
+                                    <input
+                                        id="webdav_username"
+                                        type="text"
+                                        bind:value={config.webdav.username}
+                                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                    />
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        Optional. Leave blank for unauthenticated uploads.
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <label
+                                        for="webdav_password"
+                                        class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                    >
+                                        Password
+                                    </label>
+                                    <input
+                                        id="webdav_password"
+                                        type="password"
+                                        bind:value={config.webdav.password}
+                                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                    />
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        A password without a username will be rejected and the
+                                        request will be sent unauthenticated.
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <label
+                                        for="webdav_upload_timeout_secs"
+                                        class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                    >
+                                        Upload Timeout (seconds)
+                                    </label>
+                                    <input
+                                        id="webdav_upload_timeout_secs"
+                                        type="number"
+                                        min="1"
+                                        bind:value={config.webdav.upload_timeout_secs}
+                                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label
+                                        for="webdav_poll_interval_secs"
+                                        class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                    >
+                                        Poll Interval (seconds)
+                                    </label>
+                                    <input
+                                        id="webdav_poll_interval_secs"
+                                        type="number"
+                                        min="1"
+                                        bind:value={config.webdav.poll_interval_secs}
+                                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                    />
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        How often the worker checks for new entries to upload.
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <label
+                                        for="webdav_min_age_secs"
+                                        class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                    >
+                                        Minimum Age Before Upload (seconds)
+                                    </label>
+                                    <input
+                                        id="webdav_min_age_secs"
+                                        type="number"
+                                        min="0"
+                                        bind:value={config.webdav.min_age_secs}
+                                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                    />
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        How long a recording must be closed before it becomes
+                                        eligible for upload.
+                                    </p>
+                                </div>
+
+                                <div class="flex items-center">
+                                    <input
+                                        id="webdav_delete_on_upload"
+                                        type="checkbox"
+                                        bind:checked={config.webdav.delete_on_upload}
+                                        class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
+                                    />
+                                    <label
+                                        for="webdav_delete_on_upload"
+                                        class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                                    >
+                                        Delete on successful upload
+                                    </label>
+                                </div>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">
+                                    When enabled, the local files are removed after a successful
+                                    upload. Otherwise the manifest is just marked as uploaded.
+                                </p>
+                            </ExpandableInput>
+                        </div>
                     </div>
-                    {#if config.gps_mode === GpsMode.Fixed}
-                        <div>
-                            <label
-                                for="gps_fixed_latitude"
-                                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
-                                >Fixed Latitude</label
-                            >
-                            <input
-                                id="gps_fixed_latitude"
-                                type="number"
-                                min="-90"
-                                max="90"
-                                step="any"
-                                required
-                                bind:value={config.gps_fixed_latitude}
-                                placeholder="e.g. 37.7749"
-                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-rayhunter-blue"
-                            />
-                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                Decimal degrees, -90 to 90
-                            </p>
-                        </div>
-                        <div>
-                            <label
-                                for="gps_fixed_longitude"
-                                class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
-                                >Fixed Longitude</label
-                            >
-                            <input
-                                id="gps_fixed_longitude"
-                                type="number"
-                                min="-180"
-                                max="180"
-                                step="any"
-                                required
-                                bind:value={config.gps_fixed_longitude}
-                                placeholder="e.g. -122.4194"
-                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-rayhunter-blue"
-                            />
-                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                Decimal degrees, -180 to 180
-                            </p>
-                        </div>
-                    {/if}
-                </div>
+                {/if}
 
-                <div class="flex gap-2 pt-4">
+                <div
+                    class="sticky bottom-0 z-10 -mx-2 mt-4 flex flex-wrap items-center gap-3 border-t border-gray-200 bg-white px-2 py-3 dark:border-gray-700 dark:bg-gray-900"
+                >
                     <button
                         type="submit"
                         disabled={saving}
@@ -1256,6 +1422,9 @@
                             Apply and restart
                         {/if}
                     </button>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">
+                        Applies every section, not only the one on screen, and restarts Rayhunter.
+                    </p>
                 </div>
             </form>
             {#if message}
