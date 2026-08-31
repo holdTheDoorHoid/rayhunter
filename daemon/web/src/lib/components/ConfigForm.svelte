@@ -6,6 +6,7 @@
         get_wifi_status,
         scan_wifi_networks,
         GpsMode,
+        ClockSyncMode,
         enabled_notifications,
         set_web_user,
         delete_web_user,
@@ -835,6 +836,56 @@
                         aria-labelledby="tab-recordings"
                         class="space-y-4"
                     >
+                        <div class="space-y-3">
+                            <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
+                                Clock
+                            </h3>
+
+                            <div>
+                                <label
+                                    for="clock_sync_mode"
+                                    class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                >
+                                    Clock Sync
+                                </label>
+                                <select
+                                    id="clock_sync_mode"
+                                    bind:value={config.clock_sync_mode}
+                                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                >
+                                    <option value={ClockSyncMode.Prompt}>
+                                        Prompt (ask before syncing)
+                                    </option>
+                                    <option value={ClockSyncMode.Autosync}>
+                                        Autosync (copy browser clock automatically)
+                                    </option>
+                                    <option value={ClockSyncMode.Off}>
+                                        Off (never warn or sync)
+                                    </option>
+                                </select>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    What to do when the device's clock disagrees with your
+                                    browser's.
+                                </p>
+                            </div>
+
+                            <Explainer
+                                summary="Why this sits with recordings, and what syncing does not do."
+                            >
+                                <p>
+                                    Some devices have no battery-backed clock, so they lose the time
+                                    whenever they reboot. That matters here because every recording
+                                    is stamped with the device's clock: if it is wrong, so is the
+                                    record of when anything was seen.
+                                </p>
+                                <p>
+                                    Syncing applies an offset held in memory only. It is not written
+                                    to the device's clock and is lost when Rayhunter restarts, so
+                                    Autosync re-applies it each time you open the web interface.
+                                </p>
+                            </Explainer>
+                        </div>
+
                         <div
                             class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3"
                         >
