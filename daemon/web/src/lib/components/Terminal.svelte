@@ -43,15 +43,23 @@
         if (!text || running) return;
         running = true;
         recall = -1;
-        const entry: Entry = { command: text };
-        history = [...history, entry];
+        // Where this command's entry will sit, so the result can be written
+        // back through the array below.
+        const index = history.length;
+        history = [...history, { command: text }];
         command = '';
         try {
-            entry.result = await run_terminal_command(text);
+            const result = await run_terminal_command(text);
+            // Through `history`, never through a reference kept from before it
+            // was added. Putting an object into a `$state` array stores a proxy
+            // of it, and the template reads that proxy; assigning to the plain
+            // object we started with writes past the proxy, so the output never
+            // appears and the entry reads "running" for ever. That was a real
+            // bug: the request succeeded and returned the output every time.
+            history[index].result = result;
         } catch (e) {
-            entry.error = `${e}`;
+            history[index].error = `${e}`;
         } finally {
-            history = [...history];
             running = false;
             // Scroll after the DOM has caught up with the new entry.
             queueMicrotask(() => output_el?.scrollTo({ top: output_el.scrollHeight }));
@@ -108,7 +116,9 @@
             {/if}
             {#each history as entry, i (i)}
                 <div class="mb-2">
-                    <div class="text-rayhunter-blue">$ {entry.command}</div>
+                    <!-- Rayhunter's blue is dark, which is fine on the light
+                         panel and too dim to read on the dark one. -->
+                    <div class="text-rayhunter-blue dark:text-indigo-300">$ {entry.command}</div>
                     {#if entry.error}
                         <pre
                             class="whitespace-pre-wrap text-red-600 dark:text-red-400">{entry.error}</pre>
