@@ -259,9 +259,9 @@ dedicated page** and must be deliberately parked somewhere:
 Blocking or shaping questions, per the Phase 0 instruction to be exhaustive. The
 starred ones need an answer before Phase 1 starts; the rest before their phase.
 
-1. ★ **Which device does `quick-start.md` commit to?** The tutorial picks exactly one. The Orbic RC400L is the obvious choice (project's own test hardware, upstream's reference device, cheapest and best-documented) — confirm.
-2. ★ **Where will this book live, and under whose name?** `book.toml` still says `edit-url-template = github.com/efforg/rayhunter/...` (upstream), and the book title is upstream's. If the book documents the fork, the edit URL should point at the fork (`holdTheDoorHoid/rayhunter`) and the introduction needs a sentence about what this fork is. Publishing plan (GitHub Pages on the fork?) also decides whether relative links to repo files outside `doc/` are acceptable.
-3. ★ **`diagnostic_analyzer` UI text is wrong** ("connection diary" vs. what the code does — flag identity-exposing messages). Fix `heuristics.ts` (my recommendation; the docs must describe the code either way), or is there history behind that wording?
+1. ~~★ Which device does `quick-start.md` commit to?~~ **ANSWERED 2026-08-31: the Orbic RC400L** (maintainer's primary test hardware and development target). Recorded in the quick-start stub's brief.
+2. ~~★ Where will this book live?~~ **ANSWERED 2026-08-31: in this fork, on the `device-display-colors` branch.** `book.toml`'s edit URL now points there, and the introduction says whose book this is. Publishing mechanics (e.g. GitHub Pages) still open.
+3. ~~★ `diagnostic_analyzer` UI text is wrong~~ **ANSWERED 2026-08-31: fixed.** `heuristics.ts` now describes it as an identity-exposure diary matching `diagnostic.rs`, including that its notes surface only beside another detector's warning.
 4. **`incomplete_sib` presentation:** informational-only in code, presented as a warning-producer in the UI with no `informational` tag. Fix the UI entry, the code's severity, or just document the reality? (Docs will state the reality regardless.)
 5. **RRLP has no dedup** while both LPP analyzers dedup per transaction. Intentional (2G sessions expected rare/short) or an oversight worth fixing before its detector page freezes the behavior in writing?
 6. **PinePhone page:** present it as upstream does (PinePhone/Pro via headless profile), or document this fork's reality that the profile is also the EG25-G modem port under active work? Affects `pinephone.md` and `porting.md`.

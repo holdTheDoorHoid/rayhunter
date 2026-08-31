@@ -1,5 +1,16 @@
 # Working notes for Claude
 
+## The documentation book
+
+A full rewrite of `doc/` is underway. Before touching anything under `doc/`,
+read `DOCS_PROMPT.md` (the phased plan — Phase 0 is done, its output is
+`doc/INVENTORY.md` including the open questions) and `STYLE.md` (binding
+writing standards). Prefer one page per session, committed separately with
+the page name in the subject. Build with `mdbook build` from the repo root;
+`create-missing = false` makes a bad `SUMMARY.md` link fail the build.
+Decisions so far: quick-start targets the Orbic RC400L; the book lives on
+this fork's `device-display-colors` branch (see `book.toml`'s edit URL).
+
 ## Toolchains (installed to home dir, no sudo)
 
 - Node via nvm: `export NVM_DIR="$HOME/.nvm"; source "$NVM_DIR/nvm.sh"`
