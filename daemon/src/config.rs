@@ -165,6 +165,18 @@ pub struct Config {
     pub min_space_to_start_recording_mb: u64,
     /// Minimum disk space required to continue a recording
     pub min_space_to_continue_recording_mb: u64,
+    /// Close the current recording and open a new one once it reaches this
+    /// many megabytes. `None` leaves a recording running until it is stopped.
+    ///
+    /// Splitting a capture into pieces keeps any single file small enough to
+    /// download over the device's own wifi, and means a recording is analysed
+    /// and readable while capture continues rather than only at the end.
+    pub max_recording_size_mb: Option<u64>,
+    /// Close the current recording and open a new one once it has been running
+    /// this many minutes. `None` disables rotation on time.
+    ///
+    /// Set alongside `max_recording_size_mb`, whichever comes first wins.
+    pub max_recording_minutes: Option<u64>,
     /// GPS mode
     pub gps_mode: GpsMode,
     /// Fixed latitude used when gps_mode=1
@@ -241,6 +253,11 @@ impl Default for Config {
             auto_check_updates: true,
             min_space_to_start_recording_mb: 1,
             min_space_to_continue_recording_mb: 1,
+            // Off by default: rotation changes how recordings are grouped, and
+            // a device that silently split its capture into pieces nobody asked
+            // for would be surprising.
+            max_recording_size_mb: None,
+            max_recording_minutes: None,
             gps_mode: GpsMode::Disabled,
             gps_fixed_latitude: None,
             gps_fixed_longitude: None,

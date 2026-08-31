@@ -1,7 +1,7 @@
 use std::ops::DerefMut;
 use std::pin::pin;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::body::Body;
 use axum::extract::{Path, State};
@@ -71,6 +71,15 @@ pub struct DiagTask {
     notification_channel: tokio::sync::mpsc::Sender<Notification>,
     min_space_to_start_mb: u64,
     min_space_to_continue_mb: u64,
+    /// Rotate to a new recording at this size. `None` never rotates on size.
+    max_recording_bytes: Option<u64>,
+    /// Rotate to a new recording after this long. `None` never rotates on time.
+    max_recording_duration: Option<Duration>,
+    /// When the running recording began, for the time based limit. Measured
+    /// with a monotonic clock so that a clock correction, which these devices
+    /// do apply once they have a network time, cannot make a recording look
+    /// hours old the moment it lands.
+    recording_started_at: Option<Instant>,
     gps_mode: GpsMode,
     gps_fixed_coords: Option<(f64, f64)>,
     state: DiagState,
@@ -116,6 +125,23 @@ fn check_disk_space(path: &std::path::Path, warning_mb: u64, critical_mb: u64) -
     }
 }
 
+/// The configured size limit in bytes, or `None` for no limit.
+///
+/// A zero from a hand edited config means the same thing as the field being
+/// absent. Taken literally it would rotate on every container that arrived,
+/// which spends the device on opening and closing files instead of recording.
+fn rotation_bytes(mb: Option<u64>) -> Option<u64> {
+    mb.filter(|mb| *mb > 0)
+        .map(|mb| mb.saturating_mul(1024 * 1024))
+}
+
+/// The configured time limit, or `None` for no limit. Zero means no limit.
+fn rotation_duration(minutes: Option<u64>) -> Option<Duration> {
+    minutes
+        .filter(|m| *m > 0)
+        .map(|m| Duration::from_secs(m.saturating_mul(60)))
+}
+
 impl DiagTask {
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -125,6 +151,8 @@ impl DiagTask {
         notification_channel: tokio::sync::mpsc::Sender<Notification>,
         min_space_to_start_mb: u64,
         min_space_to_continue_mb: u64,
+        max_recording_size_mb: Option<u64>,
+        max_recording_minutes: Option<u64>,
         gps_mode: GpsMode,
         gps_fixed_coords: Option<(f64, f64)>,
         cell_tracker: Arc<RwLock<CellTracker>>,
@@ -136,6 +164,9 @@ impl DiagTask {
             notification_channel,
             min_space_to_start_mb,
             min_space_to_continue_mb,
+            max_recording_bytes: rotation_bytes(max_recording_size_mb),
+            max_recording_duration: rotation_duration(max_recording_minutes),
+            recording_started_at: None,
             gps_mode,
             gps_fixed_coords,
             cell_tracker,
@@ -206,6 +237,7 @@ impl DiagTask {
             qmdl_writer,
             analysis_writer: Box::new(analysis_writer),
         };
+        self.recording_started_at = Some(Instant::now());
 
         if let Err(e) = self
             .ui_update_sender
@@ -217,9 +249,20 @@ impl DiagTask {
         Ok(())
     }
 
-    /// Stop recording, optionally annotating the entry with a reason.
-    async fn stop(&mut self, qmdl_store: &mut RecordingStore, reason: Option<String>) {
+    /// Close the running recording and queue it for analysis.
+    ///
+    /// Split out of `stop` so that rotating to a new recording can finish the
+    /// old one without also telling the display that recording has paused.
+    /// Sending Paused and then Recording a moment later reads on the device as
+    /// a blink to the stopped colour, which on a detector is exactly the wrong
+    /// thing to show when nothing has actually stopped.
+    async fn finish_current_entry(
+        &mut self,
+        qmdl_store: &mut RecordingStore,
+        reason: Option<String>,
+    ) {
         self.stop_current_recording(qmdl_store).await;
+        self.recording_started_at = None;
         if let Some(reason) = reason
             && let Err(e) = qmdl_store.set_current_stop_reason(reason).await
         {
@@ -238,10 +281,58 @@ impl DiagTask {
         if let Err(e) = qmdl_store.close_current_entry().await {
             error!("couldn't close current entry: {e}");
         }
+    }
+
+    /// Stop recording, optionally annotating the entry with a reason.
+    async fn stop(&mut self, qmdl_store: &mut RecordingStore, reason: Option<String>) {
+        self.finish_current_entry(qmdl_store, reason).await;
         if let Err(e) = self
             .ui_update_sender
             .send(display::DisplayState::Paused)
             .await
+        {
+            warn!("couldn't send ui update message: {e}");
+        }
+    }
+
+    /// Close the running recording and immediately open a new one.
+    ///
+    /// The highest severity seen is deliberately carried across. Rotation is
+    /// the device's own decision, not the operator's, and letting it reset the
+    /// display would mean an automatic housekeeping step could quietly clear a
+    /// warning nobody had looked at yet. It stays until a recording is started
+    /// by hand.
+    async fn rotate(&mut self, qmdl_store: &mut RecordingStore, reason: String) {
+        info!("{reason}");
+        let carried = self.max_type_seen;
+        self.finish_current_entry(qmdl_store, Some(reason)).await;
+
+        if let Err(e) = self.start(qmdl_store).await {
+            // Most likely the disk filled up. The old recording is safely
+            // closed either way, so report it and settle in the stopped state
+            // rather than pretending a recording is running.
+            let reason = format!("couldn't start the next recording after rotating: {e}");
+            error!("{reason}");
+            self.notification_channel
+                .send(Notification::new(
+                    NotificationType::Warning,
+                    reason.clone(),
+                    None,
+                ))
+                .await
+                .ok();
+            self.stop(qmdl_store, Some(reason)).await;
+            return;
+        }
+
+        self.max_type_seen = carried;
+        if carried > EventType::Informational
+            && let Err(e) = self
+                .ui_update_sender
+                .send(display::DisplayState::WarningDetected {
+                    event_type: carried,
+                })
+                .await
         {
             warn!("couldn't send ui update message: {e}");
         }
@@ -364,6 +455,11 @@ impl DiagTask {
             debug!("skipping non-userspace diag messages...");
             return;
         }
+        // Set when a size or time limit is reached. Rotating has to happen once
+        // the borrow of `self.state` below has ended, since opening the next
+        // recording replaces the writers this block is holding.
+        let mut rotate_reason: Option<String> = None;
+
         // keep track of how many bytes were written to the QMDL file so we can read
         // a valid block of data from it in the HTTP server
         if let DiagState::Recording {
@@ -431,6 +527,31 @@ impl DiagTask {
                     return;
                 }
                 debug!("done!");
+
+                // Size limit. Checked against the file on disk rather than a
+                // running total, so it means what it says on the manifest.
+                if let Some(max) = self.max_recording_bytes
+                    && file_size as u64 >= max
+                {
+                    rotate_reason = Some(format!(
+                        "Started a new recording automatically: reached the {} MB limit",
+                        max / 1024 / 1024
+                    ));
+                }
+            }
+
+            // Time limit. Second, so that a recording which hits both in the
+            // same container is described by its size, which is the more
+            // surprising of the two to arrive early.
+            if rotate_reason.is_none()
+                && let (Some(limit), Some(started)) =
+                    (self.max_recording_duration, self.recording_started_at)
+                && started.elapsed() >= limit
+            {
+                rotate_reason = Some(format!(
+                    "Started a new recording automatically: reached the {} minute limit",
+                    limit.as_secs() / 60
+                ));
             }
 
             // Extract the latest packet timestamp from this container
@@ -490,6 +611,10 @@ impl DiagTask {
             }
         } else {
             debug!("no qmdl_writer set, continuing...");
+        }
+
+        if let Some(reason) = rotate_reason {
+            self.rotate(qmdl_store, reason).await;
         }
     }
 }
@@ -650,6 +775,8 @@ pub fn run_diag_read_thread(
     notification_channel: tokio::sync::mpsc::Sender<Notification>,
     min_space_to_start_mb: u64,
     min_space_to_continue_mb: u64,
+    max_recording_size_mb: Option<u64>,
+    max_recording_minutes: Option<u64>,
     gps_mode: GpsMode,
     gps_fixed_coords: Option<(f64, f64)>,
     cell_tracker: Arc<RwLock<CellTracker>>,
@@ -669,6 +796,8 @@ pub fn run_diag_read_thread(
             notification_channel,
             min_space_to_start_mb,
             min_space_to_continue_mb,
+            max_recording_size_mb,
+            max_recording_minutes,
             gps_mode,
             gps_fixed_coords,
             cell_tracker,
@@ -973,4 +1102,42 @@ pub async fn get_analysis_report(
     let headers = [(CONTENT_TYPE, "application/x-ndjson")];
     let body = Body::from_stream(normalized_stream);
     Ok((headers, body).into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Zero has to mean "no limit", not "rotate immediately".
+    ///
+    /// A config written by hand is the likely source of one, and taken
+    /// literally it would close and reopen a recording for every container
+    /// that arrived. The device would spend itself on file handling and stop
+    /// keeping up with the radio, which is a detector that has stopped
+    /// detecting.
+    #[test]
+    fn zero_limits_mean_no_rotation() {
+        assert_eq!(rotation_bytes(Some(0)), None);
+        assert_eq!(rotation_duration(Some(0)), None);
+        assert_eq!(rotation_bytes(None), None);
+        assert_eq!(rotation_duration(None), None);
+    }
+
+    #[test]
+    fn limits_convert_to_bytes_and_seconds() {
+        assert_eq!(rotation_bytes(Some(5)), Some(5 * 1024 * 1024));
+        assert_eq!(rotation_duration(Some(15)), Some(Duration::from_secs(900)));
+        assert_eq!(rotation_duration(Some(60)), Some(Duration::from_secs(3600)));
+    }
+
+    /// A nonsense value from a hand edited config must not wrap around into a
+    /// small limit, which would rotate constantly instead of never.
+    #[test]
+    fn absurd_limits_saturate_rather_than_wrapping() {
+        assert_eq!(rotation_bytes(Some(u64::MAX)), Some(u64::MAX));
+        assert_eq!(
+            rotation_duration(Some(u64::MAX)),
+            Some(Duration::from_secs(u64::MAX))
+        );
+    }
 }

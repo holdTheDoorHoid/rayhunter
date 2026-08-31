@@ -19,6 +19,15 @@
     import { HEURISTICS } from '../heuristics';
     import { theme, type ThemePreference } from '../theme.svelte';
     import { help } from '../helpVisibility.svelte';
+    import {
+        TIME_PRESETS_MINUTES,
+        SIZE_PRESETS_MB,
+        MIN_MINUTES,
+        MIN_SIZE_MB,
+        format_interval,
+        rotation_summary,
+        rotation_warning,
+    } from '../recordingRotation';
 
     let { shown = $bindable() }: { shown: boolean } = $props();
     let config = $state<Config | null>(null);
@@ -35,6 +44,11 @@
     let scanning = $state(false);
     let scanResults = $state<WifiNetwork[]>([]);
     let dnsServersInput = $state('');
+    // Whether each rotation limit is being typed in rather than picked from the
+    // dropdown. Sticky, so choosing "Other" and then happening to type a value
+    // that matches a preset does not snap the control back under the cursor.
+    let customRotationTime = $state(false);
+    let customRotationSize = $state(false);
 
     async function load_config() {
         try {
@@ -60,6 +74,14 @@
                 warning_high: colors?.warning_high ?? null,
             };
             dnsServersInput = config.dns_servers ? config.dns_servers.join(', ') : '';
+            // A daemon older than this UI sends neither, and both mean "never
+            // rotate", which is what null already says.
+            config.max_recording_size_mb = config.max_recording_size_mb ?? null;
+            config.max_recording_minutes = config.max_recording_minutes ?? null;
+            const minutes = config.max_recording_minutes;
+            customRotationTime = minutes !== null && !TIME_PRESETS_MINUTES.includes(minutes);
+            const sizeMb = config.max_recording_size_mb;
+            customRotationSize = sizeMb !== null && !SIZE_PRESETS_MB.includes(sizeMb);
             message = '';
             messageType = null;
             poll_wifi_status();
@@ -456,6 +478,151 @@
                         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                             Recording will stop automatically if disk space drops below this level
                         </p>
+                    </div>
+
+                    <div class="border-t border-gray-200 dark:border-gray-700 pt-3 mt-4">
+                        <h4 class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
+                            Start a new recording automatically
+                        </h4>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                            {rotation_summary(
+                                config.max_recording_size_mb,
+                                config.max_recording_minutes
+                            )}
+                        </p>
+
+                        <div class="grid gap-3 sm:grid-cols-2">
+                            <div>
+                                <label
+                                    for="max_recording_minutes"
+                                    class="block text-sm text-gray-700 dark:text-gray-200 mb-1"
+                                >
+                                    After a length of time
+                                </label>
+                                <select
+                                    id="max_recording_minutes"
+                                    value={customRotationTime
+                                        ? 'custom'
+                                        : String(config.max_recording_minutes ?? '')}
+                                    onchange={(e) => {
+                                        const picked = e.currentTarget.value;
+                                        if (picked === 'custom') {
+                                            customRotationTime = true;
+                                            if (!config) return;
+                                            config.max_recording_minutes ??= 45;
+                                        } else {
+                                            customRotationTime = false;
+                                            if (!config) return;
+                                            config.max_recording_minutes =
+                                                picked === '' ? null : Number(picked);
+                                        }
+                                    }}
+                                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                >
+                                    <option value="">Never</option>
+                                    {#each TIME_PRESETS_MINUTES as minutes (minutes)}
+                                        <option value={String(minutes)}
+                                            >Every {format_interval(minutes)}</option
+                                        >
+                                    {/each}
+                                    <option value="custom">Another length of time</option>
+                                </select>
+                                {#if customRotationTime}
+                                    <div class="mt-2 flex items-center gap-2">
+                                        <input
+                                            type="number"
+                                            min={MIN_MINUTES}
+                                            aria-label="Minutes between recordings"
+                                            bind:value={config.max_recording_minutes}
+                                            class="w-28 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                        />
+                                        <span class="text-sm text-gray-600 dark:text-gray-300"
+                                            >minutes</span
+                                        >
+                                    </div>
+                                {/if}
+                            </div>
+
+                            <div>
+                                <label
+                                    for="max_recording_size_mb"
+                                    class="block text-sm text-gray-700 dark:text-gray-200 mb-1"
+                                >
+                                    At a size
+                                </label>
+                                <select
+                                    id="max_recording_size_mb"
+                                    value={customRotationSize
+                                        ? 'custom'
+                                        : String(config.max_recording_size_mb ?? '')}
+                                    onchange={(e) => {
+                                        const picked = e.currentTarget.value;
+                                        if (picked === 'custom') {
+                                            customRotationSize = true;
+                                            if (!config) return;
+                                            config.max_recording_size_mb ??= 20;
+                                        } else {
+                                            customRotationSize = false;
+                                            if (!config) return;
+                                            config.max_recording_size_mb =
+                                                picked === '' ? null : Number(picked);
+                                        }
+                                    }}
+                                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                >
+                                    <option value="">Never</option>
+                                    {#each SIZE_PRESETS_MB as mb (mb)}
+                                        <option value={String(mb)}>At {mb} MB</option>
+                                    {/each}
+                                    <option value="custom">Another size</option>
+                                </select>
+                                {#if customRotationSize}
+                                    <div class="mt-2 flex items-center gap-2">
+                                        <input
+                                            type="number"
+                                            min={MIN_SIZE_MB}
+                                            aria-label="Megabytes per recording"
+                                            bind:value={config.max_recording_size_mb}
+                                            class="w-28 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                        />
+                                        <span class="text-sm text-gray-600 dark:text-gray-300"
+                                            >MB</span
+                                        >
+                                    </div>
+                                {/if}
+                            </div>
+                        </div>
+
+                        {#if rotation_warning(config.max_recording_size_mb, config.max_recording_minutes)}
+                            <p class="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                                {rotation_warning(
+                                    config.max_recording_size_mb,
+                                    config.max_recording_minutes
+                                )}
+                            </p>
+                        {/if}
+
+                        <Explainer summary="What splitting a recording changes.">
+                            <p>
+                                A capture left running is one file that grows until the disk fills.
+                                Splitting it keeps any single recording small enough to download
+                                over the device's own wifi, and means each piece is analysed and
+                                readable while capture carries on rather than only once you stop it.
+                            </p>
+                            <p>
+                                Set both and whichever arrives first wins, so a size limit acts as a
+                                ceiling on a busy stretch while the time limit still divides a quiet
+                                one. Detection is unaffected either way: analysers run over each
+                                recording as it closes, exactly as they do when you stop one by
+                                hand.
+                            </p>
+                            <p>
+                                A warning already on the display stays there across an automatic
+                                split. Rotation is the device's own housekeeping, and letting it
+                                clear a warning you had not read yet would hide the one thing you
+                                are here for.
+                            </p>
+                        </Explainer>
                     </div>
                 </div>
 

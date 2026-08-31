@@ -130,6 +130,10 @@ export interface Config {
     analyzers: AnalyzerConfig;
     min_space_to_start_recording_mb: number;
     min_space_to_continue_recording_mb: number;
+    /** Start a new recording at this size. Null or 0 keeps one running. */
+    max_recording_size_mb: number | null;
+    /** Start a new recording after this long. Null or 0 keeps one running. */
+    max_recording_minutes: number | null;
     wifi_ssid: string | null;
     wifi_password: string | null;
     wifi_security: 'wpa_psk' | 'sae' | null;

@@ -264,6 +264,8 @@ async fn run_with_config(
             notification_service.new_handler(),
             config.min_space_to_start_recording_mb,
             config.min_space_to_continue_recording_mb,
+            config.max_recording_size_mb,
+            config.max_recording_minutes,
             config.gps_mode,
             gps_fixed_coords,
             cell_tracker.clone(),
