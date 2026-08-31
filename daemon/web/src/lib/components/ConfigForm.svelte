@@ -433,46 +433,61 @@
                                     Pick "while plugged in" unless you have a reason not to.
                                 </p>
                             {/if}
-                            <div class="mt-3 flex items-center">
-                                <input
-                                    id="pause_display_on_keypress"
-                                    type="checkbox"
-                                    bind:checked={config.pause_display_on_keypress}
-                                    class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
-                                />
-                                <label
-                                    for="pause_display_on_keypress"
-                                    class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                            <!-- Only offered for the levels that actually cover the
+                                 device's own screens. Mirrors covers_the_screen in
+                                 daemon/src/display/generic_framebuffer.rs. In Subtle
+                                 a thin line was never hiding anything, so there would
+                                 be nothing to step aside from and this would be a
+                                 control that visibly does nothing. -->
+                            {#if [2, 3, 4, 5].includes(config.ui_level)}
+                                <div class="mt-3 flex items-center">
+                                    <input
+                                        id="pause_display_on_keypress"
+                                        type="checkbox"
+                                        bind:checked={config.pause_display_on_keypress}
+                                        class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
+                                    />
+                                    <label
+                                        for="pause_display_on_keypress"
+                                        class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                                    >
+                                        Step aside briefly when a button is pressed
+                                    </label>
+                                </div>
+                                <Explainer
+                                    summary="Lets you read the device's own screens, the wifi password included, without losing the status indicator."
                                 >
-                                    Step aside briefly when a button is pressed
-                                </label>
-                            </div>
-                            <Explainer
-                                summary="Lets you read the device's own screens, the wifi password included, without losing the status indicator."
-                            >
-                                <p>
-                                    Rayhunter paints over the device's own interface. In the display
-                                    levels that fill the screen, a custom image or high visibility,
-                                    that interface is completely hidden, and that includes the pages
-                                    showing the wifi name and password. Somebody who has not written
-                                    the password down can end up locked out of their own hotspot,
-                                    which is a steep price for a change to the colour of a status
-                                    light.
-                                </p>
-                                <p>
-                                    With this on, pressing a button shrinks Rayhunter to its thin
-                                    status line for twenty seconds, which is enough to find a
-                                    password and type it somewhere. It does not go dark: a button
-                                    press must never be able to hide a high severity warning, so the
-                                    line stays and keeps its colour. Pressing more buttons extends
-                                    the twenty seconds rather than cutting it short.
-                                </p>
-                                <p>
-                                    Nothing about detection changes. Recording and analysis carry on
-                                    throughout, and this only affects the levels that cover the
-                                    screen; a thin line was never hiding anything to begin with.
-                                </p>
-                            </Explainer>
+                                    <p>
+                                        Rayhunter paints over the device's own interface. In the
+                                        display levels that fill the screen, a custom image or high
+                                        visibility, that interface is completely hidden, and that
+                                        includes the pages showing the wifi name and password.
+                                        Somebody who has not written the password down can end up
+                                        locked out of their own hotspot, which is a steep price for
+                                        a change to the colour of a status light.
+                                    </p>
+                                    <p>
+                                        With this on, pressing a button shrinks Rayhunter to its
+                                        thin status line for twenty seconds, which is enough to find
+                                        a password and type it somewhere. It does not go dark: a
+                                        button press must never be able to hide a high severity
+                                        warning, so the line stays and keeps its colour. Pressing
+                                        more buttons extends the twenty seconds rather than cutting
+                                        it short.
+                                    </p>
+                                    <p>
+                                        Nothing about detection changes. Recording and analysis
+                                        carry on throughout, and this only affects the levels that
+                                        cover the screen; a thin line was never hiding anything to
+                                        begin with.
+                                    </p>
+                                    <p>
+                                        The line left behind uses the height set above. On a device
+                                        whose top rows are not visible, a two pixel line cannot be
+                                        seen at all, so raise it until it can.
+                                    </p>
+                                </Explainer>
+                            {/if}
 
                             <Explainer
                                 summary="Why the screen goes dark while Rayhunter is plainly running."

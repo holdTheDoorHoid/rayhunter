@@ -47,13 +47,34 @@
         },
     ];
 
-    const SUBTLE = 1;
+    const INVISIBLE = 0;
+    const DEMO = 2;
+    const EFF_LOGO = 3;
     const HIGH_VISIBILITY = 4;
     const CUSTOM_GIF = 5;
     const DEFAULT_BAR_HEIGHT = 2;
 
-    /** High visibility always fills the screen, so the slider is fixed there. */
-    let height_locked = $derived(config.ui_level === HIGH_VISIBILITY);
+    /**
+     * The levels that fill the screen, mirroring `covers_the_screen` in
+     * daemon/src/display/generic_framebuffer.rs. These are the ones where a
+     * button press can step aside, because they are the ones hiding the
+     * device's own screens in the first place.
+     */
+    const COVERS_SCREEN = [DEMO, EFF_LOGO, HIGH_VISIBILITY, CUSTOM_GIF];
+    let covers_screen = $derived(COVERS_SCREEN.includes(config.ui_level));
+
+    /**
+     * Whether the chosen height is what gets drawn when a button is pressed.
+     *
+     * In the full screen levels the height is otherwise unused, so it looked
+     * safe to lock the slider. It is not: stepping aside draws the status line
+     * at this height, and on a device whose top rows are not visible a two
+     * pixel line is no line at all. The Moxee needs about six.
+     */
+    let pause_uses_height = $derived(covers_screen && config.pause_display_on_keypress);
+
+    /** Only truly fixed when nothing will ever draw it at the chosen height. */
+    let height_locked = $derived(config.ui_level === HIGH_VISIBILITY && !pause_uses_height);
     let bar_height = $derived(
         height_locked ? DEVICE_SCREEN_PX : (config.status_bar_height ?? DEFAULT_BAR_HEIGHT)
     );
@@ -142,13 +163,13 @@
     </p>
 
     <!-- Height first: it governs the shape of everything previewed below. -->
-    {#if config.ui_level === SUBTLE || height_locked}
+    {#if config.ui_level !== INVISIBLE}
         <div>
             <label
                 for="status_bar_height"
                 class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
             >
-                Line height — {bar_height}
+                Line height: {bar_height}
                 {bar_height === 1 ? 'pixel' : 'pixels'}
                 {#if bar_height >= DEVICE_SCREEN_PX}<span
                         class="font-normal text-gray-500 dark:text-gray-400">(full screen)</span
@@ -170,11 +191,16 @@
                 class="text-xs text-gray-500 dark:text-gray-400 mt-1"
             >
                 {#if height_locked}
-                    High visibility always fills the screen. Switch to Subtle mode to choose a
-                    height.
+                    High visibility always fills the screen, so this has nothing to draw. Turn on
+                    "step aside briefly when a button is pressed" below and it becomes the height of
+                    the line left behind while the device's own screens show.
+                {:else if pause_uses_height}
+                    This is the line drawn while a button press holds the full screen back. Some
+                    devices do not show their top rows at all, so if nothing appears during that
+                    moment, raise this. The Moxee needs about 6.
                 {:else}
-                    How tall the line is on the device's {DEVICE_SCREEN_PX}-pixel screen. At the
-                    maximum this fills the screen, which is what High visibility mode does.
+                    How tall the line is on the device's {DEVICE_SCREEN_PX} pixel screen. At the maximum
+                    it fills the screen, which is what High visibility mode does.
                 {/if}
             </p>
             {#if !height_locked && bar_height <= 2}

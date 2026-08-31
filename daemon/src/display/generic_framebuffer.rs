@@ -465,7 +465,12 @@ pub fn update_ui(
             // which is not a trade worth making for either side of it.
             let paused_for_keypress = covers_the_screen && suppression.active();
             if paused_for_keypress {
-                status_bar_height = DEFAULT_STATUS_BAR_HEIGHT.clamp(1, fb.dimensions().height);
+                // `status_bar_height` is already the configured height, so the
+                // line drawn here is the one the person chose. Forcing the
+                // built-in 2px instead made this invisible on devices whose top
+                // rows are not shown at all: the Moxee needs about 6px before
+                // anything appears, which is exactly why the height is settable.
+                // Stepping aside is no use if what remains cannot be seen.
                 if status_bar_height > 0 {
                     let (color, pattern) =
                         display_style_from_state(state, colorblind_mode, &display_colors);
