@@ -30,7 +30,7 @@ use utoipa::OpenApi;
 #[derive(OpenApi)]
 #[openapi(
     info(
-        description = "OpenAPI documentation for Rayhunter daemon\n\n**Note:** API endpoints are subject to change as needs arise, though we will try to keep them as stable as possible and notify about breaking changes in the changelogs for new versions.\n\nNo endpoints require any authentication. To use the in-browser execution on this page, you may need to disable CORS temporarily for your browser.",
+        description = "OpenAPI documentation for Rayhunter daemon\n\n**Note:** API endpoints are subject to change as needs arise, though we will try to keep them as stable as possible and notify about breaking changes in the changelogs for new versions.\n\nBy default no endpoint requires authentication. If any accounts are configured under `web_users`, every endpoint requires HTTP Basic credentials. To use the in-browser execution on this page, you may need to disable CORS temporarily for your browser.",
         license(
             name = "GNU General Public License v3.0",
             url = "https://github.com/EFForg/rayhunter/blob/main/LICENSE"
@@ -57,6 +57,18 @@ use utoipa::OpenApi;
         server::get_time,
         server::set_time_offset,
         server::debug_set_display_state,
+        server::debug_keypress,
+        server::get_cell_info,
+        server::annotate_recording,
+        server::set_display_gif,
+        server::get_display_gif,
+        server::delete_display_gif,
+        server::trigger_demo_warning,
+        server::set_web_user,
+        server::delete_web_user,
+        server::run_terminal_command,
+        packet_explorer::list_packets,
+        packet_explorer::get_packet,
         gps::post_gps,
         gps::get_gps
     ),

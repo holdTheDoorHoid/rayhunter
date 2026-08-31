@@ -329,3 +329,32 @@ stuck behind the feature that uncovered them.
 Commits earlier than `4f063d9` predate this and several bundle two or three
 features. Do not cherry-pick those; `UPSTREAM.md` lists which files belong to
 which feature so a clean branch can be built from `upstream/main` instead.
+
+## Check the API docs build before tagging a release
+
+The release pipeline builds the OpenAPI spec with a feature nothing else uses,
+so code that compiles and passes every test can still fail the release. This is
+what broke the v0.12.1 attempt: `chrono::DateTime<Local>` has no `ToSchema`
+impl, so any new API type with a timestamp field needs the annotation the
+manifest already uses:
+
+```rust
+#[cfg_attr(feature = "apidocs", schema(value_type = String))]
+pub last_seen: DateTime<Local>,
+```
+
+Run exactly what CI runs, from the repo root:
+
+```bash
+cargo run --bin gen_api --features apidocs -- /tmp/openapi.json
+```
+
+**Do not use `-p rayhunter-daemon --features apidocs`.** That skips workspace
+feature unification, so `rayhunter/apidocs` never turns on and you get a dozen
+errors about `Device`, `AnalyzerConfig` and `EventType` that do not exist in
+CI. They are an artifact of the invocation, not real.
+
+A new endpoint also has to be listed in the `paths(...)` block of `ApiDocs` in
+`daemon/src/lib.rs`, and its request and response types declared with
+`request_body(content = ...)` and `body = ...`, or it compiles fine and is
+silently missing from the published docs.

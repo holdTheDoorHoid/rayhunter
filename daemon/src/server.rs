@@ -1190,6 +1190,10 @@ pub struct WebUserRequest {
     post,
     path = "/api/web-users",
     tag = "Configuration",
+    request_body(
+        content = WebUserRequest,
+        description = "The account to add, or whose password to change. The password is hashed on the device and the plaintext is never stored."
+    ),
     responses(
         (status = StatusCode::ACCEPTED, description = "Account saved; restart to apply"),
         (status = StatusCode::BAD_REQUEST, description = "Empty username or password"),
@@ -1327,8 +1331,12 @@ const TERMINAL_MAX_OUTPUT: usize = 256 * 1024;
     post,
     path = "/api/terminal",
     tag = "Debug",
+    request_body(
+        content = TerminalRequest,
+        description = "The command to run. Runs as root in a fresh shell, with no state carried between requests."
+    ),
     responses(
-        (status = StatusCode::OK, description = "Command ran; see the body for its output"),
+        (status = StatusCode::OK, description = "Command ran; see the body for its output", body = TerminalResponse),
         (status = StatusCode::FORBIDDEN, description = "Terminal not enabled on this device"),
         (status = StatusCode::BAD_REQUEST, description = "Empty command"),
     ),

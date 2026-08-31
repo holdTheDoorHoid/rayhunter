@@ -232,8 +232,8 @@
                     </p>
                     <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                         To capture them, start a recording and then make the device reattach, by
-                        toggling airplane mode or restarting it. A network asking again later,
-                        while a recording is running, is the case worth noticing.
+                        toggling airplane mode or restarting it. A network asking again later, while
+                        a recording is running, is the case worth noticing.
                     </p>
                 {/if}
                 <div class="mt-1 grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">

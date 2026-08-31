@@ -92,6 +92,7 @@ pub struct ServingCell {
     /// which is not continuous, so this is the last value seen rather than a
     /// live one.
     pub timing_advance: Option<u16>,
+    #[cfg_attr(feature = "apidocs", schema(value_type = String))]
     pub last_seen: DateTime<Local>,
 }
 
@@ -118,7 +119,9 @@ pub struct CellObservation {
     pub pci: u16,
     pub earfcn: u32,
     pub identity: Option<CellIdentity>,
+    #[cfg_attr(feature = "apidocs", schema(value_type = String))]
     pub first_seen: DateTime<Local>,
+    #[cfg_attr(feature = "apidocs", schema(value_type = String))]
     pub last_seen: DateTime<Local>,
     /// Strongest RSRP seen while attached to this cell, in dBm.
     pub best_rsrp_dbm: f32,
@@ -142,6 +145,7 @@ pub struct EncryptionStatus {
     pub nas_cipher: Option<String>,
     /// Integrity algorithm for that signalling.
     pub nas_integrity: Option<String>,
+    #[cfg_attr(feature = "apidocs", schema(value_type = String))]
     pub last_seen: DateTime<Local>,
 }
 
@@ -189,6 +193,7 @@ pub struct DetectionHealth {
     pub messages_skipped: u64,
     /// When a message last arrived. A stream that has stalled leaves this
     /// behind while everything else still looks healthy.
+    #[cfg_attr(feature = "apidocs", schema(value_type = String))]
     pub last_message: Option<DateTime<Local>>,
 }
 
