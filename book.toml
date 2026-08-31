@@ -1,3 +1,8 @@
+[build]
+# A SUMMARY.md link to a page that does not exist fails the build rather than
+# silently creating an empty file (see STYLE.md section 9).
+create-missing = false
+
 [book]
 authors = ["The Rayhunter Team"]
 language = "en"
