@@ -300,3 +300,32 @@ curl -s -X POST http://localhost:9090/api/config -H 'Content-Type: application/j
 
 Every config POST also **restarts the daemon**, which takes about 60 seconds
 before the web UI answers again.
+
+## One feature per commit
+
+Upstream takes one feature per pull request, so commits here have to be
+separable. **See `UPSTREAM.md`** for what the features on this branch are and
+what each would need to stand alone.
+
+From now on: one feature per commit, subject names the feature, and two
+trailers so they can be found later.
+
+```
+Feature: keep-screen-on
+Upstream: EFForg/rayhunter#916, EFForg/rayhunter#539
+```
+
+`Upstream: none` when no issue exists. Then:
+
+```
+git log --grep="^Feature: " --format="%h %s"      # every feature commit
+git log --grep="^Feature: keep-screen-on"          # one feature's commits
+```
+
+A bug fix found while building a feature gets **its own commit and its own
+slug**. Fixes are the easiest thing to get merged upstream and should not be
+stuck behind the feature that uncovered them.
+
+Commits earlier than `4f063d9` predate this and several bundle two or three
+features. Do not cherry-pick those; `UPSTREAM.md` lists which files belong to
+which feature so a clean branch can be built from `upstream/main` instead.
