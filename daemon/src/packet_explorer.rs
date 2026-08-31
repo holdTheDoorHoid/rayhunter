@@ -42,6 +42,15 @@ const DEFAULT_LIMIT: usize = 100;
 /// Largest raw payload rendered as hex in a detail view.
 const MAX_HEX_BYTES: usize = 2048;
 
+/// Largest decoded rendering returned for one packet.
+///
+/// Real messages measured on a device run from a few hundred characters to
+/// about eleven thousand, so this is generous. It exists because indentation
+/// multiplies the size of a deeply nested message, and the device has around
+/// twenty megabytes of memory free: one pathological packet should not be able
+/// to spend it.
+const MAX_DECODED_CHARS: usize = 200_000;
+
 /// One row in the packet list. Deliberately small: enough to scan and filter,
 /// with nothing decoded that a person has not asked to see.
 #[derive(Debug, Clone, Serialize)]
@@ -280,6 +289,22 @@ fn message_name(debug: &str) -> Option<String> {
     if name.is_empty() { None } else { Some(name) }
 }
 
+/// Cut a rendering to a length, on a character boundary, saying so.
+fn truncate_decoded(text: String) -> String {
+    if text.len() <= MAX_DECODED_CHARS {
+        return text;
+    }
+    let mut cut = MAX_DECODED_CHARS;
+    while cut > 0 && !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!(
+        "{}\n\n[truncated: the decoded message is larger than this view shows. \
+         Download the recording to see all of it.]",
+        &text[..cut]
+    )
+}
+
 /// Indent a debug rendering so nesting is readable.
 ///
 /// The decoders emit a single very long line. This does not attempt to
@@ -479,7 +504,7 @@ pub async fn get_packet(
             decoded: classified
                 .element
                 .as_ref()
-                .map(|e| prettify(&format!("{e:?}"))),
+                .map(|e| truncate_decoded(prettify(&format!("{e:?}")))),
             decode_error: classified.error.clone(),
             raw_hex: if classified.payload.is_empty() {
                 None
@@ -658,6 +683,27 @@ mod tests {
     fn message_names_are_absent_rather_than_guessed() {
         assert_eq!(message_name("BcchBch(SomethingElse { .. })"), None);
         assert_eq!(message_name("C1("), None);
+    }
+
+    #[test]
+    fn decoded_output_is_bounded() {
+        let small = "a".repeat(100);
+        assert_eq!(truncate_decoded(small.clone()), small);
+
+        let huge = "b".repeat(MAX_DECODED_CHARS + 5_000);
+        let cut = truncate_decoded(huge);
+        assert!(cut.len() < MAX_DECODED_CHARS + 200);
+        assert!(cut.contains("truncated"));
+    }
+
+    /// Cutting must land on a character boundary, or the response is not valid
+    /// UTF-8 and the whole request fails rather than one field being short.
+    #[test]
+    fn truncation_does_not_split_a_character() {
+        let text = "é".repeat(MAX_DECODED_CHARS);
+        let cut = truncate_decoded(text);
+        // Reaching here at all means no panic; this confirms it stayed valid.
+        assert!(cut.contains("truncated"));
     }
 
     #[test]

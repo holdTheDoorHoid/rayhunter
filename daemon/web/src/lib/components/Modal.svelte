@@ -30,19 +30,25 @@
         };
     });
 
+    // Holding the page still while a dialog is open means pinning the body,
+    // which has to be undone on the way out. Releasing it from a teardown
+    // rather than an else branch covers being unmounted while still open: that
+    // path skipped the else entirely and left the page unable to scroll, with
+    // nothing on screen to explain why.
     $effect(() => {
-        if (shown) {
-            const scrollY = document.documentElement.style.getPropertyValue('--scroll-y');
-            const body = document.body;
-            body.style.position = 'fixed';
-            body.style.top = `-${scrollY}`;
-        } else {
-            const body = document.body;
-            const scrollY = body.style.top;
+        if (!shown) return;
+
+        const body = document.body;
+        const scrollY = document.documentElement.style.getPropertyValue('--scroll-y');
+        body.style.position = 'fixed';
+        body.style.top = `-${scrollY}`;
+
+        return () => {
+            const offset = body.style.top;
             body.style.position = '';
             body.style.top = '';
-            window.scrollTo(0, parseInt(scrollY || '0') * -1);
-        }
+            window.scrollTo(0, parseInt(offset || '0') * -1);
+        };
     });
 </script>
 

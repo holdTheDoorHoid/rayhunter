@@ -111,6 +111,7 @@
     {/if}
 </div>
 
-{#if explorerShown}
-    <PacketExplorer bind:shown={explorerShown} recording={entry.name} {focusPacket} />
-{/if}
+<!-- Not wrapped in {#if}: Modal handles its own visibility, and destroying it
+     while it still thinks it is open skips the cleanup that unlocks page
+     scrolling. -->
+<PacketExplorer bind:shown={explorerShown} recording={entry.name} {focusPacket} />
