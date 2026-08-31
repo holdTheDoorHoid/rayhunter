@@ -169,7 +169,7 @@ async fn setup_rayhunter(mut adb_device: ADBUSBDevice, reset_config: bool) -> Re
         let mut conn = AdbConnection {
             device: &mut adb_device,
         };
-        install_config(&mut conn, "orbic", reset_config).await?;
+        install_config(&mut conn, "orbic", reset_config, false).await?;
         install_wifi_tools(&mut conn).await?;
     }
 

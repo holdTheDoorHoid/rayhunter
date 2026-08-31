@@ -130,6 +130,8 @@ export interface Config {
     show_subscriber_identity: boolean;
     /** Accounts allowed to use the web interface. Empty means no password. */
     web_users: { username: string; password_hash: string }[];
+    /** Whether the terminal is available. Only settable when flashing. */
+    terminal_enabled: boolean;
     /** Shrink to the thin status line briefly after a button press. */
     pause_display_on_keypress: boolean;
     ntfy_url: string | null;
@@ -401,4 +403,21 @@ export async function delete_web_user(username: string): Promise<string> {
     const body = await response.text();
     if (!response.ok) throw new Error(body);
     return body;
+}
+export interface TerminalResult {
+    stdout: string;
+    stderr: string;
+    exit_code: number | null;
+    timed_out: boolean;
+}
+
+/** Run one command on the device. Requires the terminal to be enabled. */
+export async function run_terminal_command(command: string): Promise<TerminalResult> {
+    const response = await fetch('/api/terminal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command }),
+    });
+    if (!response.ok) throw new Error(await response.text());
+    return response.json();
 }

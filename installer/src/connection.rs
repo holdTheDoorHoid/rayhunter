@@ -29,16 +29,32 @@ pub async fn install_config<C: DeviceConnection>(
     conn: &mut C,
     device_type: &str,
     reset_config: bool,
+    enable_terminal: bool,
 ) -> Result<()> {
     let config_path = "/data/rayhunter/config.toml";
     if reset_config || !file_exists(conn, config_path).await {
-        let config = crate::CONFIG_TOML.replace(
+        let mut config = crate::CONFIG_TOML.replace(
             r#"#device = "orbic""#,
             &format!(r#"device = "{device_type}""#),
         );
+        // Only settable here, never from the web interface. The daemon runs as
+        // root, so the terminal is the difference between an interface that
+        // reads data and one that can do anything at all; turning it on should
+        // take physical access to the device.
+        if enable_terminal {
+            config.push_str("\nterminal_enabled = true\n");
+            println!(
+                "  the web terminal is ENABLED on this device. Anyone who can reach the web\n                   interface can run commands as root. Set up a password under Configuration."
+            );
+        }
         conn.write_file(config_path, config.as_bytes()).await?;
     } else {
         println!("Config file already exists, skipping (use --reset-config to overwrite)");
+        if enable_terminal {
+            println!(
+                "  --enable-terminal had no effect: the existing config was kept.\n                   Use --reset-config as well to write a fresh one."
+            );
+        }
     }
     Ok(())
 }

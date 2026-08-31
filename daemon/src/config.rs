@@ -185,6 +185,14 @@ pub struct Config {
     /// knowing the WiFi password rather than protection against someone able
     /// to capture the traffic itself.
     pub web_users: Vec<crate::web_auth::WebUser>,
+    /// Whether the web interface may run commands on the device.
+    ///
+    /// Deliberately not settable from the web interface: it can only be turned
+    /// on when flashing, with the installer's --enable-terminal flag. The
+    /// daemon runs as root, so this is the difference between an interface that
+    /// reads data and one that can do anything at all. Requiring physical
+    /// access to enable it means a mistake in the web interface cannot.
+    pub terminal_enabled: bool,
     /// Whether to disclose this device's own IMSI, IMEI and temporary identity
     /// over the web API.
     ///
@@ -311,6 +319,7 @@ impl Default for Config {
             key_input_mode: KeyInputMode::Disabled,
             show_subscriber_identity: false,
             web_users: Vec::new(),
+            terminal_enabled: false,
             // Off by default. It holds a backlight on, which is a real cost
             // to a device that may be running on battery.
             keep_screen_on: KeepScreenOn::Never,

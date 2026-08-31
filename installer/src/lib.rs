@@ -129,6 +129,15 @@ struct OrbicNetworkArgs {
     /// Must not be /data/rayhunter.
     #[arg(long)]
     data_dir: Option<String>,
+    /// Let the web interface run commands on the device.
+    ///
+    /// Off unless given here, and deliberately not settable from the web
+    /// interface: the daemon runs as root, so this is the difference between an
+    /// interface that reads data and one that can do anything at all. Requiring
+    /// it at flash time means enabling it takes physical access to the device.
+    /// Set a password under Configuration if you use this.
+    #[arg(long)]
+    enable_terminal: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -153,6 +162,15 @@ struct MoxeeArgs {
     /// Must not be /data/rayhunter.
     #[arg(long)]
     data_dir: Option<String>,
+    /// Let the web interface run commands on the device.
+    ///
+    /// Off unless given here, and deliberately not settable from the web
+    /// interface: the daemon runs as root, so this is the difference between an
+    /// interface that reads data and one that can do anything at all. Requiring
+    /// it at flash time means enabling it takes physical access to the device.
+    /// Set a password under Configuration if you use this.
+    #[arg(long)]
+    enable_terminal: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -286,7 +304,7 @@ async fn run(args: Args) -> Result<(), Error> {
             .context("Failed to install rayhunter on the Pinephone's Quectel modem")?,
         #[cfg(not(target_os = "android"))]
         Command::OrbicUsb(args) => orbic::install(args.reset_config).await.context("\nFailed to install rayhunter on the Orbic RC400L (USB installer)")?,
-        Command::Orbic(args) => orbic_network::install(args.admin_ip, args.admin_username, args.admin_password, args.reset_config, args.data_dir).await.context("\nFailed to install rayhunter on the Orbic RC400L")?,
+        Command::Orbic(args) => orbic_network::install(args.admin_ip, args.admin_username, args.admin_password, args.reset_config, args.data_dir, args.enable_terminal).await.context("\nFailed to install rayhunter on the Orbic RC400L")?,
         Command::Moxee(args) => moxee::install(args).await.context("\nFailed to install rayhunter on the Moxee Hotspot")?,
         Command::Wingtech(args) => wingtech::install(args).await.context("\nFailed to install rayhunter on the Wingtech CT2MHS01")?,
         Command::Util(subcommand) => {

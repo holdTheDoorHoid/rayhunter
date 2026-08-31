@@ -283,6 +283,9 @@ pub async fn set_config(
     // the way out, so a client saving the settings page would otherwise post
     // blanks back and lock everybody out of the device.
     config_to_write.web_users = state.config.web_users.clone();
+    // Same for the terminal, which by design can only be switched on when
+    // flashing and must never be turnable on from the interface itself.
+    config_to_write.terminal_enabled = state.config.terminal_enabled;
     config_to_write.wifi_ssid = None;
     config_to_write.wifi_password = None;
     config_to_write.wifi_security = None;
@@ -1280,4 +1283,115 @@ async fn write_web_users(
         )
     })?;
     Ok(())
+}
+
+/// A command to run on the device.
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct TerminalRequest {
+    pub command: String,
+}
+
+/// What running it produced.
+#[derive(Debug, serde::Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct TerminalResponse {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: Option<i32>,
+    /// True when the command was still running when its time ran out.
+    pub timed_out: bool,
+}
+
+/// Longest a command may run before it is killed.
+///
+/// Without this a command that waits forever holds a task and a shell open on
+/// a device with very little of either to spare.
+const TERMINAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Most output returned. Enough for a directory listing or a log tail, far
+/// short of what it takes to exhaust memory on this hardware.
+const TERMINAL_MAX_OUTPUT: usize = 256 * 1024;
+
+/// Run one command on the device and return what it printed.
+///
+/// Off unless `terminal_enabled` is set in the config, which the web interface
+/// deliberately cannot do: it is set when flashing, with the installer's
+/// `--enable-terminal` flag. The daemon runs as root, so this is the difference
+/// between an interface that reads data and one that can do anything at all,
+/// and turning it on should take physical access to the device.
+///
+/// Not a session. Each request is one command with no state carried between
+/// them, so there is no shell to hijack and nothing to leave open.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/terminal",
+    tag = "Debug",
+    responses(
+        (status = StatusCode::OK, description = "Command ran; see the body for its output"),
+        (status = StatusCode::FORBIDDEN, description = "Terminal not enabled on this device"),
+        (status = StatusCode::BAD_REQUEST, description = "Empty command"),
+    ),
+    summary = "Run a command on the device",
+))]
+pub async fn run_terminal_command(
+    State(state): State<Arc<ServerState>>,
+    Json(body): Json<TerminalRequest>,
+) -> Result<Json<TerminalResponse>, (StatusCode, String)> {
+    if !state.config.terminal_enabled {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "the terminal is not enabled on this device. It can only be turned on when \
+             flashing, with the installer's --enable-terminal flag."
+                .to_string(),
+        ));
+    }
+    let command = body.command.trim();
+    if command.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "no command given".to_string()));
+    }
+
+    let output = tokio::time::timeout(
+        TERMINAL_TIMEOUT,
+        tokio::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(command)
+            .output(),
+    )
+    .await;
+
+    let (stdout, stderr, exit_code, timed_out) = match output {
+        Ok(Ok(out)) => (
+            String::from_utf8_lossy(&out.stdout).to_string(),
+            String::from_utf8_lossy(&out.stderr).to_string(),
+            out.status.code(),
+            false,
+        ),
+        Ok(Err(err)) => (String::new(), format!("failed to run: {err}"), None, false),
+        Err(_) => (
+            String::new(),
+            format!(
+                "still running after {} seconds, killed",
+                TERMINAL_TIMEOUT.as_secs()
+            ),
+            None,
+            true,
+        ),
+    };
+
+    Ok(Json(TerminalResponse {
+        stdout: truncate_output(stdout),
+        stderr: truncate_output(stderr),
+        exit_code,
+        timed_out,
+    }))
+}
+
+/// Cap output, saying so rather than silently cutting it off.
+fn truncate_output(mut text: String) -> String {
+    if text.len() > TERMINAL_MAX_OUTPUT {
+        text.truncate(TERMINAL_MAX_OUTPUT);
+        text.push_str("\n[output truncated]");
+    }
+    text
 }

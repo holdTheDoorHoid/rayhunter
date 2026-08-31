@@ -166,6 +166,7 @@ pub async fn install(
     admin_password: Option<String>,
     reset_config: bool,
     data_dir: Option<String>,
+    enable_terminal: bool,
 ) -> Result<()> {
     let Some(admin_password) = admin_password else {
         eprintln!(
@@ -190,7 +191,7 @@ pub async fn install(
     println!("done");
 
     let data_dir = data_dir.unwrap_or_else(|| "/data/rayhunter-data".to_string());
-    setup_rayhunter(&admin_ip, reset_config, &data_dir).await
+    setup_rayhunter(&admin_ip, reset_config, &data_dir, enable_terminal).await
 }
 
 async fn wait_for_telnet(admin_ip: &str) -> Result<()> {
@@ -214,7 +215,12 @@ async fn wait_for_telnet(admin_ip: &str) -> Result<()> {
     Ok(())
 }
 
-async fn setup_rayhunter(admin_ip: &str, reset_config: bool, data_dir: &str) -> Result<()> {
+async fn setup_rayhunter(
+    admin_ip: &str,
+    reset_config: bool,
+    data_dir: &str,
+    enable_terminal: bool,
+) -> Result<()> {
     let addr = SocketAddr::from_str(&format!("{admin_ip}:{TELNET_PORT}"))?;
     let rayhunter_daemon_bin = crate::get_file!("FILE_RAYHUNTER_DAEMON");
 
@@ -250,7 +256,7 @@ async fn setup_rayhunter(admin_ip: &str, reset_config: bool, data_dir: &str) -> 
 
     install_wifi_tools(&mut conn).await?;
 
-    install_config(&mut conn, "orbic", reset_config).await?;
+    install_config(&mut conn, "orbic", reset_config, enable_terminal).await?;
 
     telnet_send_file(
         addr,

@@ -21,6 +21,7 @@
     import DeleteAllButton from '$lib/components/DeleteAllButton.svelte';
     import RecordingControls from '$lib/components/RecordingControls.svelte';
     import ConfigForm from '$lib/components/ConfigForm.svelte';
+    import Terminal from '$lib/components/Terminal.svelte';
     import ActionErrors from '$lib/components/ActionErrors.svelte';
     import ClockDriftAlert from '$lib/components/ClockDriftAlert.svelte';
     import LogView from '$lib/components/LogView.svelte';
@@ -35,6 +36,15 @@
     let update_error: string | undefined = $state(undefined);
     let logview_shown: boolean = $state(false);
     let config_shown: boolean = $state(false);
+    let terminal_shown: boolean = $state(false);
+    /**
+     * Whether this device offers the terminal at all.
+     *
+     * Comes from the running config, which can only be given it when flashing.
+     * Devices without it never see the button rather than seeing one that
+     * fails.
+     */
+    let terminal_available: boolean = $state(false);
     let gps_data: GpsData | null = $state(null);
     let gps_mode: GpsMode = $state(GpsMode.Disabled);
     let update_status: UpdateStatus | null = $state(null);
@@ -75,6 +85,7 @@
                 const config = await get_config();
                 gps_mode = config.gps_mode;
                 demo_mode = config.demo_mode ?? false;
+                terminal_available = config.terminal_enabled ?? false;
                 // Allowed to fail. The endpoint returns 404 when GPS is
                 // disabled, and letting that throw here meant one optional
                 // reading being absent left the whole page saying "Loading"
@@ -101,6 +112,7 @@
 
 <LogView bind:shown={logview_shown} />
 <ConfigForm bind:shown={config_shown} />
+<Terminal bind:shown={terminal_shown} />
 <div
     class="p-4 xl:px-8 bg-rayhunter-blue drop-shadow-sm flex flex-row justify-between items-center"
 >
@@ -154,6 +166,34 @@
                 />
             </svg>
         </button>
+        <!-- Only offered where the device actually has it. The daemon refuses
+             the request otherwise, so a button here would be one that never
+             works. -->
+        {#if terminal_available}
+            <button onclick={() => (terminal_shown = true)} class="flex flex-row gap-1 group">
+                <span
+                    class="hidden text-white group-hover:text-gray-400 dark:group-hover:text-gray-500 lg:flex"
+                    >Terminal</span
+                >
+                <svg
+                    class="w-6 h-6 text-white group-hover:text-gray-400 dark:group-hover:text-gray-500"
+                    aria-hidden="true"
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="24"
+                    height="24"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                >
+                    <path
+                        stroke="currentColor"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="m7 8 4 4-4 4m6 0h5M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z"
+                    />
+                </svg>
+            </button>
+        {/if}
         <button onclick={() => (config_shown = true)} class="flex flex-row gap-1 group">
             <span
                 class="hidden text-white group-hover:text-gray-400 dark:group-hover:text-gray-500 lg:flex"
