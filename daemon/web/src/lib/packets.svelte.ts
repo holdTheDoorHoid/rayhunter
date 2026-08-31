@@ -18,6 +18,12 @@ export interface PacketSummary {
     message_type: string | null;
     payload_len: number;
     parse_status: 'decoded' | 'undecodable' | 'not a signalling message';
+    /** Physical cell identity of the tower involved. */
+    pci: number | null;
+    earfcn: number | null;
+    /** System frame number, the radio's own 10ms clock. */
+    sfn: number | null;
+    subfn: number | null;
 }
 
 export interface PacketDetail extends PacketSummary {
@@ -25,6 +31,8 @@ export interface PacketDetail extends PacketSummary {
     decode_error: string | null;
     raw_hex: string | null;
     raw_truncated: boolean;
+    /** Bytes of modem framing wrapped around the protocol data unit. */
+    framing_len: number | null;
 }
 
 export interface PacketList {
@@ -87,7 +95,13 @@ export function apply_filters(packets: PacketSummary[], filters: PacketFilters):
         if (filters.protocol === 'nas' && !p.protocol.includes('NAS')) return false;
         if (filters.direction !== 'all' && p.direction !== filters.direction) return false;
         if (needle) {
-            const haystack = [p.protocol, p.channel, p.message_type, String(p.packet_num)]
+            const haystack = [
+                p.protocol,
+                p.channel,
+                p.message_type,
+                String(p.packet_num),
+                p.pci !== null ? `pci${p.pci}` : null,
+            ]
                 .filter(Boolean)
                 .join(' ')
                 .toLowerCase();
@@ -102,4 +116,22 @@ export function direction_arrow(direction: string | null): string {
     if (direction === 'uplink') return '↑';
     if (direction === 'downlink') return '↓';
     return '';
+}
+
+/**
+ * Cells appearing in a set of packets, strongest first by how often they occur.
+ *
+ * A capture mixes messages from every cell in range. Knowing which cells are
+ * present, and how much traffic came from each, is often the fastest way to
+ * notice one that should not be there.
+ */
+export function cells_present(packets: PacketSummary[]): { pci: number; count: number }[] {
+    const counts = new Map<number, number>();
+    for (const p of packets) {
+        if (p.pci === null) continue;
+        counts.set(p.pci, (counts.get(p.pci) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+        .map(([pci, count]) => ({ pci, count }))
+        .sort((a, b) => b.count - a.count);
 }

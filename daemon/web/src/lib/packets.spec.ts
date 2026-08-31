@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     apply_filters,
     direction_arrow,
+    cells_present,
     DEFAULT_FILTERS,
     type PacketSummary,
 } from './packets.svelte';
@@ -15,6 +16,10 @@ const packet = (over: Partial<PacketSummary> = {}): PacketSummary => ({
     message_type: 'SystemInformationBlockType1',
     payload_len: 15,
     parse_status: 'decoded',
+    pci: 330,
+    earfcn: 2125,
+    sfn: 100,
+    subfn: 3,
     ...over,
 });
 
@@ -71,5 +76,36 @@ describe('direction_arrow', () => {
         expect(direction_arrow('downlink')).toBe('↓');
         expect(direction_arrow('uplink')).toBe('↑');
         expect(direction_arrow(null)).toBe('');
+    });
+});
+
+describe('cells_present', () => {
+    /**
+     * A capture mixes messages from every cell in range. Seeing which cells are
+     * there, and how much came from each, is often how an unexpected one gets
+     * noticed at all.
+     */
+    it('counts packets per cell, busiest first', () => {
+        const packets = [
+            packet({ pci: 330 }),
+            packet({ packet_num: 2, pci: 330 }),
+            packet({ packet_num: 3, pci: 12 }),
+        ];
+        expect(cells_present(packets)).toEqual([
+            { pci: 330, count: 2 },
+            { pci: 12, count: 1 },
+        ]);
+    });
+
+    it('ignores packets with no cell identity rather than inventing one', () => {
+        expect(cells_present([packet({ pci: null })])).toEqual([]);
+        expect(cells_present([])).toEqual([]);
+    });
+});
+
+describe('search by cell', () => {
+    it('finds packets by their cell identity', () => {
+        const packets = [packet({ pci: 330 }), packet({ packet_num: 2, pci: 12 })];
+        expect(apply_filters(packets, { ...DEFAULT_FILTERS, search: 'pci330' })).toHaveLength(1);
     });
 });

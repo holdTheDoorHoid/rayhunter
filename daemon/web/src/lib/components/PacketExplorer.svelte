@@ -6,6 +6,7 @@
         list_packets,
         apply_filters,
         direction_arrow,
+        cells_present,
         DEFAULT_FILTERS,
         type PacketList,
         type PacketFilters,
@@ -35,6 +36,7 @@
     let contextMode = $state(false);
 
     let visible = $derived(list ? apply_filters(list.packets, filters) : []);
+    let cells = $derived(list ? cells_present(list.packets) : []);
     let hiddenCount = $derived(list ? list.packets.length - visible.length : 0);
 
     async function load(params: { offset?: number; around?: number }) {
@@ -131,6 +133,17 @@
             </label>
         </div>
 
+        {#if cells.length > 0}
+            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                Cells in this window:
+                {#each cells as c, i (c.pci)}{i > 0 ? ', ' : ' '}<button
+                        type="button"
+                        onclick={() => (filters.search = `pci${c.pci}`)}
+                        class="font-mono underline">{c.pci}</button
+                    >&nbsp;({c.count}){/each}
+            </p>
+        {/if}
+
         {#if contextMode}
             <p class="mt-2 text-xs text-amber-600 dark:text-amber-400">
                 Showing packet {focusPacket} with {CONTEXT} either side.
@@ -155,6 +168,7 @@
                                 <th class="px-2 py-1 font-normal">#</th>
                                 <th class="px-2 py-1 font-normal">Dir</th>
                                 <th class="px-2 py-1 font-normal">Protocol</th>
+                                <th class="px-2 py-1 font-normal">Cell</th>
                                 <th class="px-2 py-1 font-normal">Message</th>
                             </tr>
                         </thead>
@@ -175,6 +189,9 @@
                                                 class="text-gray-500 dark:text-gray-400"
                                                 >{p.channel}</span
                                             >{/if}
+                                    </td>
+                                    <td class="px-2 py-1 font-mono text-xs">
+                                        {p.pci ?? ''}
                                     </td>
                                     <td class="px-2 py-1">
                                         {p.message_type ??

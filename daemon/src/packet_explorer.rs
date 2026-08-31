@@ -68,6 +68,21 @@ pub struct PacketSummary {
     pub payload_len: usize,
     /// "decoded", "undecodable", or "not a signalling message".
     pub parse_status: String,
+    /// Physical cell identity of the tower this arrived from or went to.
+    ///
+    /// The most useful thing here after the message name. A capture is a
+    /// mixture of messages from whichever cells were in range, and without
+    /// this there is no way to tell which came from where. When something
+    /// suspicious appears, the first question is usually whether it came from
+    /// the cell everything else did.
+    pub pci: Option<u16>,
+    /// Frequency channel this was carried on.
+    pub earfcn: Option<u32>,
+    /// System frame and subframe number: the radio's own clock, in units of
+    /// ten milliseconds and one millisecond. Finer than the timestamp and
+    /// useful for ordering messages that share one.
+    pub sfn: Option<u32>,
+    pub subfn: Option<u8>,
 }
 
 /// A single packet, decoded on request.
@@ -86,9 +101,17 @@ pub struct PacketDetail {
     pub decoded: Option<String>,
     /// Why the message could not be decoded, when that is what happened.
     pub decode_error: Option<String>,
+    /// The protocol data unit alone, which is what the decoders read.
     pub raw_hex: Option<String>,
     /// True when the payload was longer than the hex shown.
     pub raw_truncated: bool,
+    /// How many bytes of framing the modem wrapped around that unit.
+    ///
+    /// Worth stating, because the payload on its own can look implausibly
+    /// short: a paging message really is a handful of bytes, and somebody
+    /// reasonably wonders where the rest went. The rest is this, and it is
+    /// summarised in the fields above rather than shown as bytes.
+    pub framing_len: Option<usize>,
 }
 
 /// Query parameters, parsed by hand.
@@ -145,6 +168,12 @@ pub struct PacketList {
 
 /// What a message is, as far as the shared decoding path can tell.
 struct Classified {
+    timestamp: Option<String>,
+    framing_len: Option<usize>,
+    pci: Option<u16>,
+    earfcn: Option<u32>,
+    sfn: Option<u32>,
+    subfn: Option<u8>,
     protocol: String,
     channel: Option<String>,
     direction: Option<String>,
@@ -157,6 +186,12 @@ struct Classified {
 /// Run one message through the same path the analysers use.
 fn classify(message: Result<Message, rayhunter::diag::DiagParsingError>) -> Classified {
     let mut out = Classified {
+        timestamp: None,
+        framing_len: None,
+        pci: None,
+        earfcn: None,
+        sfn: None,
+        subfn: None,
         protocol: "unknown".to_string(),
         channel: None,
         direction: None,
@@ -173,6 +208,11 @@ fn classify(message: Result<Message, rayhunter::diag::DiagParsingError>) -> Clas
             return out;
         }
     };
+
+    // Read the radio context off the log record before handing it on. The
+    // GSMTAP conversion keeps only the protocol data unit and drops everything
+    // wrapped around it, which is where the cell identity and timing live.
+    read_radio_context(&message, &mut out);
 
     let gsmtap = match gsmtap_parser::parse(message) {
         Ok(Some((_, gsmtap))) => gsmtap,
@@ -205,6 +245,40 @@ fn classify(message: Result<Message, rayhunter::diag::DiagParsingError>) -> Clas
         Err(err) => out.error = Some(format!("{err:?}")),
     }
     out
+}
+
+/// Pull the timestamp and radio context out of a diag log record.
+fn read_radio_context(message: &Message, out: &mut Classified) {
+    use rayhunter::diag::diaglog::LogBody;
+    use rayhunter::diag::diaglog::rrc::LteRrcOtaPacket;
+
+    let Message::Log {
+        timestamp, body, ..
+    } = message
+    else {
+        return;
+    };
+    out.timestamp = Some(timestamp.to_datetime().to_rfc3339());
+
+    if let LogBody::LteRrcOtaMessage { packet, .. } = body {
+        // Header fields the modem supplied around the protocol data unit.
+        out.framing_len = Some(match packet {
+            LteRrcOtaPacket::V0 { .. } => 11,
+            LteRrcOtaPacket::V5 { .. } => 13,
+            LteRrcOtaPacket::V8 { .. } => 18,
+            LteRrcOtaPacket::V25 { .. } => 20,
+        });
+        out.earfcn = Some(packet.get_earfcn());
+        out.sfn = Some(packet.get_sfn());
+        out.subfn = Some(packet.get_subfn());
+        // No accessor exists for the cell identity, so it is read per layout.
+        out.pci = match packet {
+            LteRrcOtaPacket::V0 { phy_cell_id, .. }
+            | LteRrcOtaPacket::V5 { phy_cell_id, .. }
+            | LteRrcOtaPacket::V8 { phy_cell_id, .. }
+            | LteRrcOtaPacket::V25 { phy_cell_id, .. } => Some(*phy_cell_id),
+        };
+    }
 }
 
 /// Fill in protocol, channel and message name from a decoded element.
@@ -363,13 +437,17 @@ fn summarize(packet_num: usize, classified: &Classified) -> PacketSummary {
     };
     PacketSummary {
         packet_num,
-        timestamp: None,
+        timestamp: classified.timestamp.clone(),
         protocol: classified.protocol.clone(),
         channel: classified.channel.clone(),
         direction: classified.direction.clone(),
         message_type: classified.message_type.clone(),
         payload_len: classified.payload.len(),
         parse_status: parse_status.to_string(),
+        pci: classified.pci,
+        earfcn: classified.earfcn,
+        sfn: classified.sfn,
+        subfn: classified.subfn,
     }
 }
 
@@ -512,6 +590,7 @@ pub async fn get_packet(
                 Some(to_hex(hex_slice))
             },
             raw_truncated: truncated,
+            framing_len: classified.framing_len,
         }));
     }
 
