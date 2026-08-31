@@ -1,5 +1,5 @@
 import { get_report, type AnalysisReport } from './analysis.svelte';
-import { req } from './utils.svelte';
+import { req_json } from './utils.svelte';
 
 export enum AnalysisStatus {
     // rayhunter is currently analyzing this entry (note that this is distinct
@@ -31,7 +31,7 @@ export class AnalysisManager {
     }
 
     public async update() {
-        const status: AnalysisStatusJson = JSON.parse(await req('GET', '/api/analysis'));
+        const status = await req_json<AnalysisStatusJson>('GET', '/api/analysis');
         if (status.running) {
             this.status.set(status.running, AnalysisStatus.Running);
         }

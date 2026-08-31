@@ -167,11 +167,57 @@ export interface WifiNetwork {
 }
 
 export async function get_wifi_status(): Promise<WifiStatus> {
-    return JSON.parse(await req('GET', '/api/wifi-status'));
+    return req_json<WifiStatus>('GET', '/api/wifi-status');
 }
 
 export async function scan_wifi_networks(): Promise<WifiNetwork[]> {
-    return JSON.parse(await req('POST', '/api/wifi-scan'));
+    return req_json<WifiNetwork[]>('POST', '/api/wifi-scan');
+}
+
+/**
+ * Whether a response body is a web page rather than the data that was asked for.
+ *
+ * This happens when something between the browser and the device answers for
+ * it: a phone that kept using mobile data instead of the device's own WiFi, a
+ * captive portal, a proxy, or simply the wrong address. The device itself
+ * never answers an API request with a page, so seeing one says the request did
+ * not reach it.
+ */
+export function looks_like_a_web_page(body: string): boolean {
+    return /^\s*(<!doctype|<html)/i.test(body);
+}
+
+/**
+ * The message to show when that happens.
+ *
+ * Kept as one sentence of what went wrong and one of what to try, because
+ * "Unexpected token '<'" is true and completely useless to somebody standing
+ * in front of a device wondering why the page is empty.
+ */
+export const NOT_THE_DEVICE_MESSAGE =
+    'Something other than your Rayhunter answered this request with a web page. ' +
+    'This usually means the request never reached the device: a phone still using ' +
+    'mobile data rather than the Rayhunter WiFi, a VPN or proxy, or a different ' +
+    'device at that address. Turn mobile data and any VPN off, check you are on ' +
+    'the Rayhunter WiFi, and reload.';
+
+/**
+ * A request whose response is expected to be JSON.
+ *
+ * Parses centrally so that a response which is not JSON is reported as what it
+ * actually is, rather than as a parser error from wherever it happened to be
+ * decoded.
+ */
+export async function req_json<T>(method: string, url: string, json_body?: unknown): Promise<T> {
+    const body = await req(method, url, json_body);
+    try {
+        return JSON.parse(body) as T;
+    } catch {
+        if (looks_like_a_web_page(body)) {
+            throw new Error(NOT_THE_DEVICE_MESSAGE);
+        }
+        throw new Error(`${url} did not return usable data: ${body.slice(0, 120)}`);
+    }
 }
 
 export async function req(method: string, url: string, json_body?: unknown): Promise<string> {
@@ -207,20 +253,30 @@ export async function user_action_req(
 }
 
 export async function get_manifest(): Promise<Manifest> {
-    const manifest_json = JSON.parse(await req('GET', '/api/qmdl-manifest'));
+    const manifest_json = await req_json<ConstructorParameters<typeof Manifest>[0]>(
+        'GET',
+        '/api/qmdl-manifest'
+    );
     return new Manifest(manifest_json);
 }
 
 export async function get_system_stats(): Promise<SystemStats> {
-    return JSON.parse(await req('GET', '/api/system-stats'));
+    return req_json<SystemStats>('GET', '/api/system-stats');
 }
 
 export async function get_logs(): Promise<string> {
-    return await req('GET', '/api/log');
+    const body = await req('GET', '/api/log');
+    // The logs are plain text, so a web page arriving here would otherwise be
+    // rendered as though the device had logged an HTML document, which is how
+    // this failure first showed up.
+    if (looks_like_a_web_page(body)) {
+        throw new Error(NOT_THE_DEVICE_MESSAGE);
+    }
+    return body;
 }
 
 export async function get_config(): Promise<Config> {
-    return JSON.parse(await req('GET', '/api/config'));
+    return req_json<Config>('GET', '/api/config');
 }
 
 export async function set_config(config: Config): Promise<void> {
@@ -276,11 +332,11 @@ export interface UpdateStatus {
 }
 
 export async function get_daemon_time(): Promise<TimeResponse> {
-    return JSON.parse(await req('GET', '/api/time'));
+    return req_json('GET', '/api/time');
 }
 
 export async function get_update_status(): Promise<UpdateStatus> {
-    return JSON.parse(await req('GET', '/api/update-status'));
+    return req_json('GET', '/api/update-status');
 }
 
 export interface GpsData {
