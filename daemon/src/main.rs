@@ -280,13 +280,24 @@ async fn run_with_config(
             Device::Pinephone => display::headless::update_ui,
             Device::Uz801 => display::uz801::update_ui,
         };
-        update_ui(&task_tracker, &config, shutdown_token.clone(), ui_update_rx);
+        // Shared between the display and the buttons: a press asks the display
+        // to step aside for a moment so the device's own screens can be read.
+        let suppression: display::SharedSuppression =
+            std::sync::Arc::new(display::DisplaySuppression::new());
+        update_ui(
+            &task_tracker,
+            &config,
+            suppression.clone(),
+            shutdown_token.clone(),
+            ui_update_rx,
+        );
 
         info!("Starting Key Input service");
         key_input::run_key_input_thread(
             &task_tracker,
             &config,
             diag_tx.clone(),
+            suppression,
             shutdown_token.clone(),
         );
 

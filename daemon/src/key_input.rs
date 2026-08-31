@@ -8,6 +8,7 @@ use tokio_util::task::TaskTracker;
 
 use crate::config::{self, KeyInputMode};
 use crate::diag::DiagDeviceCtrlMessage;
+use crate::display::{KEYPRESS_QUIET_PERIOD, SharedSuppression};
 
 #[derive(Debug)]
 enum Event {
@@ -21,9 +22,17 @@ pub fn run_key_input_thread(
     task_tracker: &TaskTracker,
     config: &config::Config,
     diag_tx: Sender<DiagDeviceCtrlMessage>,
+    suppression: SharedSuppression,
     cancellation_token: CancellationToken,
 ) {
-    if config.key_input_mode == KeyInputMode::Disabled {
+    let restart_on_double_tap = config.key_input_mode != KeyInputMode::Disabled;
+    let pause_on_keypress = config.pause_display_on_keypress;
+
+    // Reading the buttons is now worth doing for either reason, so the thread
+    // runs if either wants it. Previously it started only for the double tap
+    // gesture, which would have left the pause feature dead for anyone who had
+    // button control switched off.
+    if !restart_on_double_tap && !pause_on_keypress {
         return;
     }
 
@@ -59,6 +68,14 @@ pub fn run_key_input_thread(
 
             let now = Instant::now();
 
+            // Any button activity at all, before the debounce below. Somebody
+            // navigating the device's menus is exactly the repeated, bouncy
+            // input that debounce throws away, and they are the person this is
+            // for.
+            if pause_on_keypress {
+                suppression.suppress_for(KEYPRESS_QUIET_PERIOD);
+            }
+
             // On orbic it was observed that pressing the power button can trigger many successive
             // events. Drop events that are too close together.
             if let Some(last_time) = last_event_time
@@ -74,7 +91,8 @@ pub fn run_key_input_thread(
                     if let Some(last_keyup_instant) = last_keyup {
                         let elapsed = now.duration_since(last_keyup_instant);
 
-                        if elapsed >= Duration::from_millis(100)
+                        if restart_on_double_tap
+                            && elapsed >= Duration::from_millis(100)
                             && elapsed <= Duration::from_millis(800)
                         {
                             if let Err(e) = diag_tx.send(DiagDeviceCtrlMessage::StopRecording).await

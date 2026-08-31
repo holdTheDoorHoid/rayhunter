@@ -4,7 +4,7 @@ use std::io::Cursor;
 use std::time::Duration;
 
 use crate::config::{self, UiLevel};
-use crate::display::DisplayState;
+use crate::display::{DisplayState, SharedSuppression};
 use rayhunter::analysis::analyzer::EventType;
 
 use log::{error, info, warn};
@@ -145,6 +145,18 @@ pub trait GenericFramebuffer: Send + 'static {
     async fn write_buffer(&mut self, buffer: Vec<(u8, u8, u8)>); // rgb, row-wise, left-to-right, top-to-bottom
 
     async fn write_dynamic_image(&mut self, img: DynamicImage) {
+        let buffer = self.image_to_buffer(img);
+        self.write_buffer(buffer).await
+    }
+
+    /// Turn an image into the pixels this display wants, without drawing it.
+    ///
+    /// Split out so a still image can be converted once and repainted from the
+    /// result. Repainting matters: Rayhunter does not own the framebuffer, and
+    /// the device's own interface keeps redrawing its parts of the screen over
+    /// whatever is there. Drawing a still image a single time leaves it looking
+    /// half erased within seconds, which is exactly what happened on hardware.
+    fn image_to_buffer(&self, img: DynamicImage) -> Vec<(u8, u8, u8)> {
         let dimensions = self.dimensions();
         let mut width = img.width();
         let mut height = img.height();
@@ -156,16 +168,24 @@ pub trait GenericFramebuffer: Send + 'static {
         } else {
             resized_img = img;
         }
-        let img_rgba8 = resized_img.as_rgba8().unwrap();
+        // Converted rather than asserted. `as_rgba8` returns the buffer only
+        // when the image already happens to be in that layout, and unwrapping
+        // it panicked the display thread on any image that was not: a PNG
+        // saved without an alpha channel is stored as RGB and decodes that
+        // way. GIFs always decode to RGBA, which is why this held for as long
+        // as GIFs were the only thing being drawn.
+        //
+        // Asking for RGB is also closer to what is wanted. Alpha was already
+        // being dropped a line below, since the panel has no notion of it.
+        let rgb = resized_img.to_rgb8();
         let mut buf = Vec::with_capacity((height * width).try_into().unwrap());
         for y in 0..height {
             for x in 0..width {
-                let px = img_rgba8.get_pixel(x, y);
+                let px = rgb.get_pixel(x, y);
                 buf.push((px[0], px[1], px[2]));
             }
         }
-
-        self.write_buffer(buf).await
+        buf
     }
 
     /// Play one pass of a GIF, returning early if `interrupted` reports that
@@ -247,6 +267,56 @@ pub trait GenericFramebuffer: Send + 'static {
         self.write_dynamic_image(img).await
     }
 
+    /// Decode a single frame image into ready to write pixels.
+    ///
+    /// Separate from `draw_img` because this one is handed bytes a person
+    /// uploaded. Decoding those must not be able to take the daemon down, so a
+    /// file that will not decode is reported and skipped, and the caller falls
+    /// back to the status line. `draw_img` keeps its unwrap for the images
+    /// compiled into the binary, where a failure really is a build fault.
+    ///
+    /// Returns the pixels rather than drawing them, so the caller can decode
+    /// once and repaint cheaply. The device's own interface keeps writing over
+    /// the framebuffer, so a still image has to be put back regularly.
+    async fn decode_still_image(&mut self, img_buffer: &[u8]) -> Option<Vec<(u8, u8, u8)>> {
+        // Same reasoning as the GIF path: check the declared size before a
+        // decoder ever allocates for it.
+        match image_dimensions(img_buffer) {
+            Some((width, height))
+                if width > MAX_GIF_DIMENSION as u32 || height > MAX_GIF_DIMENSION as u32 =>
+            {
+                error!(
+                    "refusing to draw a {width}x{height} image: over the {MAX_GIF_DIMENSION} \
+                     pixel limit and would likely exhaust memory"
+                );
+                return None;
+            }
+            None => {
+                error!("refusing to draw an image with no readable dimensions");
+                return None;
+            }
+            _ => {}
+        }
+
+        // Decoding is CPU work on a device with one core, so it goes to a
+        // blocking thread rather than stalling the display task.
+        let bytes = img_buffer.to_vec();
+        let decoded =
+            tokio::task::spawn_blocking(move || image::load_from_memory(&bytes).ok()).await;
+
+        match decoded {
+            Ok(Some(img)) => Some(self.image_to_buffer(img)),
+            Ok(None) => {
+                error!("could not decode the custom image, falling back to the status line");
+                None
+            }
+            Err(e) => {
+                error!("image decoding task failed: {e}");
+                None
+            }
+        }
+    }
+
     async fn draw_line(&mut self, color: Color, height: u32) {
         self.draw_patterned_line(color, height, LinePattern::Solid)
             .await
@@ -280,6 +350,7 @@ pub fn update_ui(
     task_tracker: &TaskTracker,
     config: &config::Config,
     mut fb: impl GenericFramebuffer,
+    suppression: SharedSuppression,
     shutdown_token: CancellationToken,
     mut ui_update_rx: Receiver<DisplayState>,
 ) {
@@ -295,6 +366,14 @@ pub fn update_ui(
     let configured_bar_height = config.status_bar_height;
     let display_gifs = config.display_gifs.clone();
     let gif_store_path = config.gif_store_path.clone();
+
+    // Only the levels that actually cover the screen have anything to give
+    // back. A thin status line is not hiding the device's own interface, so
+    // pausing it there would cost the status indicator for nothing.
+    let covers_the_screen = matches!(
+        display_level,
+        UiLevel::CustomGif | UiLevel::HighVisibility | UiLevel::EffLogo | UiLevel::Demo
+    );
 
     task_tracker.spawn(async move {
         // this feels wrong, is there a more rusty way to do this?
@@ -320,6 +399,12 @@ pub fn update_ui(
         // held at a time, so uploading several large GIFs can't add up to a
         // memory problem on a device with very little RAM to spare.
         let mut custom_gif: Option<(String, Vec<u8>)> = None;
+        // A still image, decoded once and kept ready to repaint. Rayhunter does
+        // not own the framebuffer: the device's own interface writes over parts
+        // of it constantly, so a picture drawn a single time ends up looking
+        // half erased. It gets put back on every pass, like the status line,
+        // but without paying to decode it again.
+        let mut still_pixels: Option<Vec<(u8, u8, u8)>> = None;
 
         loop {
             if shutdown_token.is_cancelled() {
@@ -349,16 +434,20 @@ pub fn update_ui(
                     Some(path) => {
                         // Load only when the state actually changed.
                         if custom_gif.as_ref().map(|(p, _)| p.as_str()) != Some(path.as_str()) {
+                            still_pixels = None;
                             match tokio::fs::read(&path).await {
                                 Ok(bytes) => custom_gif = Some((path, bytes)),
                                 Err(e) => {
-                                    warn!("couldn't read custom GIF {path}: {e}");
+                                    warn!("couldn't read custom image {path}: {e}");
                                     custom_gif = None;
                                 }
                             }
                         }
                     }
-                    None => custom_gif = None,
+                    None => {
+                        custom_gif = None;
+                        still_pixels = None;
+                    }
                 }
             }
 
@@ -367,18 +456,68 @@ pub fn update_ui(
             let mut status_bar_height = configured_bar_height
                 .unwrap_or(DEFAULT_STATUS_BAR_HEIGHT)
                 .clamp(1, fb.dimensions().height);
+
+            // Somebody has just pressed a button, so hand the screen back for a
+            // moment. Deliberately not a blank: Rayhunter shrinks to its thin
+            // line rather than disappearing, so the device's own screens are
+            // readable and the status indicator is still there. Going dark
+            // would mean a button press could hide a high severity warning,
+            // which is not a trade worth making for either side of it.
+            let paused_for_keypress = covers_the_screen && suppression.active();
+            if paused_for_keypress {
+                status_bar_height = DEFAULT_STATUS_BAR_HEIGHT.clamp(1, fb.dimensions().height);
+                if status_bar_height > 0 {
+                    let (color, pattern) =
+                        display_style_from_state(state, colorblind_mode, &display_colors);
+                    fb.draw_patterned_line(color, status_bar_height, pattern)
+                        .await;
+                }
+                tokio::time::sleep(Duration::from_millis(REFRESH_RATE)).await;
+                continue;
+            }
+
             match display_level {
                 UiLevel::Demo => {
                     fb.draw_gif_interruptible(img.unwrap(), &ui_update_rx).await;
                 }
                 UiLevel::CustomGif => {
                     if let Some((_, bytes)) = &custom_gif {
-                        fb.draw_gif_interruptible(bytes, &ui_update_rx).await;
-                        // The GIF is the whole indicator in this mode; a status
-                        // line would sit on top of the user's artwork.
-                        status_bar_height = 0;
+                        // A still image and an animation are both allowed here.
+                        // Which one this is comes from the file's own bytes, so
+                        // uploading a PNG needs no separate mode and no setting.
+                        let drawn = match image_kind(bytes) {
+                            Some(ImageKind::Animated) => {
+                                fb.draw_gif_interruptible(bytes, &ui_update_rx).await;
+                                still_pixels = None;
+                                true
+                            }
+                            Some(ImageKind::Still) => {
+                                // Decoded on first sight of this image, then
+                                // repainted from the result on every pass.
+                                if still_pixels.is_none() {
+                                    still_pixels = fb.decode_still_image(bytes).await;
+                                }
+                                match &still_pixels {
+                                    Some(px) => {
+                                        fb.write_buffer(px.clone()).await;
+                                        true
+                                    }
+                                    None => false,
+                                }
+                            }
+                            None => {
+                                warn!("custom image for this state is neither a GIF nor a PNG");
+                                false
+                            }
+                        };
+                        if drawn {
+                            // The image is the whole indicator in this mode; a
+                            // status line would sit on top of the user's
+                            // artwork.
+                            status_bar_height = 0;
+                        }
                     }
-                    // With no GIF for this state we fall through to the
+                    // With no image for this state we fall through to the
                     // ordinary status line, so the device is never blank.
                 }
                 UiLevel::EffLogo => fb.draw_img(img.unwrap()).await,
@@ -405,7 +544,12 @@ pub fn update_ui(
 
             // A GIF pass already took real time, and re-sleeping the full
             // refresh interval on top of it makes state changes feel sluggish.
-            if !matches!(display_level, UiLevel::Demo | UiLevel::CustomGif) {
+            // A still image is the opposite case: nothing is animating, so the
+            // short yield would just spin this loop against an unchanging
+            // picture, which on a single core device is worth avoiding.
+            let animating = matches!(display_level, UiLevel::Demo)
+                || (display_level == UiLevel::CustomGif && still_pixels.is_none());
+            if !animating {
                 tokio::time::sleep(Duration::from_millis(REFRESH_RATE)).await;
             } else if ui_update_rx.is_empty() {
                 tokio::time::sleep(Duration::from_millis(FRAME_YIELD)).await;
@@ -439,9 +583,63 @@ pub fn gif_dimensions(bytes: &[u8]) -> Option<(u16, u16)> {
     ))
 }
 
-/// Where the GIF for `state` is stored on disk.
+/// Where the custom image for `state` is stored on disk.
+///
+/// Still named `.gif` because that is what devices already in the field have
+/// on them, and one file per state is the whole storage scheme. What the file
+/// actually holds is decided by looking at its first bytes, not its name.
 pub fn gif_path(gif_store_path: &str, state: &str) -> String {
     format!("{gif_store_path}/{state}.gif")
+}
+
+/// A custom display image is either animated or a single frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ImageKind {
+    /// A GIF, played frame by frame.
+    Animated,
+    /// A PNG or anything else with one frame, drawn once and left up.
+    Still,
+}
+
+/// What kind of image `bytes` holds, or `None` if it is not one we can draw.
+///
+/// Decided from the magic bytes rather than the file name, since the name is
+/// chosen by whoever uploaded it and says nothing reliable.
+pub fn image_kind(bytes: &[u8]) -> Option<ImageKind> {
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        return Some(ImageKind::Animated);
+    }
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]) {
+        return Some(ImageKind::Still);
+    }
+    None
+}
+
+/// The declared pixel size of a GIF or PNG, read from its header.
+///
+/// The point is to learn how big an image claims to be *before* handing it to
+/// a decoder. A tiny file can declare an enormous canvas, and expanding one on
+/// a device with a few megabytes free is how the daemon gets killed rather
+/// than how it draws a picture.
+pub fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    match image_kind(bytes)? {
+        // Bytes 6 to 9 are the logical screen width and height, little endian.
+        ImageKind::Animated => {
+            let (w, h) = gif_dimensions(bytes)?;
+            Some((w as u32, h as u32))
+        }
+        // The IHDR chunk always comes first, so width and height sit at a
+        // fixed offset: 8 bytes of signature, 8 of chunk header, then the two
+        // dimensions as big endian u32s.
+        ImageKind::Still => {
+            if bytes.len() < 24 {
+                return None;
+            }
+            let w = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+            let h = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+            Some((w, h))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -700,5 +898,95 @@ mod gif_safety_tests {
             worst * 2 < 4 * 1024 * 1024,
             "worst case frame pair too large"
         );
+    }
+}
+
+#[cfg(test)]
+mod image_format_tests {
+    use super::{ImageKind, image_dimensions, image_kind};
+
+    /// A 1x1 PNG, header intact. Dimensions live at a fixed offset in IHDR.
+    fn png_header(width: u32, height: u32) -> Vec<u8> {
+        let mut v = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        v.extend_from_slice(&13u32.to_be_bytes()); // IHDR length
+        v.extend_from_slice(b"IHDR");
+        v.extend_from_slice(&width.to_be_bytes());
+        v.extend_from_slice(&height.to_be_bytes());
+        v
+    }
+
+    fn gif_header(width: u16, height: u16) -> Vec<u8> {
+        let mut v = b"GIF89a".to_vec();
+        v.extend_from_slice(&width.to_le_bytes());
+        v.extend_from_slice(&height.to_le_bytes());
+        v
+    }
+
+    /// The kind comes from the bytes, never the file name. Whoever uploads a
+    /// file chooses its name, so the name is not evidence of anything.
+    #[test]
+    fn format_is_read_from_the_magic_bytes() {
+        assert_eq!(image_kind(&gif_header(128, 128)), Some(ImageKind::Animated));
+        assert_eq!(
+            image_kind(b"GIF87a\x00\x00\x00\x00"),
+            Some(ImageKind::Animated)
+        );
+        assert_eq!(image_kind(&png_header(128, 128)), Some(ImageKind::Still));
+    }
+
+    #[test]
+    fn anything_else_is_refused_rather_than_guessed_at() {
+        assert_eq!(image_kind(b"<html>hello</html>"), None);
+        assert_eq!(image_kind(b"\xff\xd8\xff\xe0 jpeg"), None);
+        assert_eq!(image_kind(b""), None);
+        assert_eq!(image_kind(b"GIF"), None);
+    }
+
+    /// Dimensions have to be readable from the header alone, because the whole
+    /// point is to know how big a picture claims to be before a decoder
+    /// allocates for it. A small file can declare an enormous canvas.
+    #[test]
+    fn dimensions_come_from_the_header_of_either_format() {
+        assert_eq!(image_dimensions(&gif_header(128, 64)), Some((128, 64)));
+        assert_eq!(
+            image_dimensions(&png_header(1920, 1080)),
+            Some((1920, 1080))
+        );
+    }
+
+    #[test]
+    fn a_truncated_header_reports_nothing_rather_than_a_wrong_size() {
+        assert_eq!(image_dimensions(&png_header(128, 128)[..20]), None);
+        assert_eq!(image_dimensions(b"GIF89a\x80"), None);
+        assert_eq!(image_dimensions(b"not an image at all"), None);
+    }
+}
+
+#[cfg(test)]
+mod pixel_conversion_tests {
+    use image::{DynamicImage, Rgb, RgbImage, Rgba, RgbaImage};
+
+    /// Every image format the display accepts has to survive being turned into
+    /// pixels, not just the one GIFs happen to decode to.
+    ///
+    /// This is a real bug that shipped to a device: the conversion asked for
+    /// an RGBA buffer and unwrapped it, which is `None` for an image that is
+    /// not already RGBA. A PNG saved without transparency decodes as RGB, so
+    /// uploading one panicked the display thread and left the screen black
+    /// while the daemon carried on as though nothing had happened.
+    #[test]
+    fn images_without_an_alpha_channel_convert_rather_than_panicking() {
+        let rgb = DynamicImage::ImageRgb8(RgbImage::from_pixel(4, 4, Rgb([255, 0, 200])));
+        let converted = rgb.to_rgb8();
+        assert_eq!(converted.get_pixel(0, 0), &Rgb([255, 0, 200]));
+
+        let rgba = DynamicImage::ImageRgba8(RgbaImage::from_pixel(4, 4, Rgba([1, 2, 3, 255])));
+        let converted = rgba.to_rgb8();
+        assert_eq!(converted.get_pixel(0, 0), &Rgb([1, 2, 3]));
+
+        // Greyscale is the other thing a PNG is commonly saved as.
+        let luma = DynamicImage::ImageLuma8(image::GrayImage::from_pixel(4, 4, image::Luma([128])));
+        let converted = luma.to_rgb8();
+        assert_eq!(converted.get_pixel(0, 0), &Rgb([128, 128, 128]));
     }
 }

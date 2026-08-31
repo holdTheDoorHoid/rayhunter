@@ -61,7 +61,7 @@
         return new Promise((resolve) => {
             if (file.size > MAX_GIF_BYTES) {
                 resolve({
-                    error: `That GIF is ${human_size(file.size)}. The limit is ${human_size(MAX_GIF_BYTES)} — the device has very little memory.`,
+                    error: `That image is ${human_size(file.size)}. The limit is ${human_size(MAX_GIF_BYTES)}, because the device has very little memory.`,
                 });
                 return;
             }
@@ -74,11 +74,11 @@
                     resolve({});
                 } else if (w !== h) {
                     resolve({
-                        notice: `This GIF is ${w}×${h}. The device screen is square, so it will be scaled to fit and may look stretched or letterboxed. ${DEVICE_SCREEN_PX}×${DEVICE_SCREEN_PX} works best.`,
+                        notice: `This image is ${w}×${h}. The device screen is square, so it will be scaled to fit and may look stretched or letterboxed. ${DEVICE_SCREEN_PX}×${DEVICE_SCREEN_PX} works best.`,
                     });
                 } else {
                     resolve({
-                        notice: `This GIF is ${w}×${h} and will be scaled to ${DEVICE_SCREEN_PX}×${DEVICE_SCREEN_PX}. Fine detail may be lost.`,
+                        notice: `This image is ${w}×${h} and will be scaled to ${DEVICE_SCREEN_PX}×${DEVICE_SCREEN_PX}. Fine detail may be lost.`,
                     });
                 }
             };
@@ -98,8 +98,16 @@
         errors[key] = '';
         notices[key] = '';
 
-        if (!file.type.includes('gif') && !file.name.toLowerCase().endsWith('.gif')) {
-            errors[key] = 'Only GIF files can be used as animations.';
+        // The daemon decides from the file's own bytes; this is only to give
+        // an instant answer rather than after a slow upload over device wifi.
+        const name = file.name.toLowerCase();
+        const looks_right =
+            file.type.includes('gif') ||
+            file.type.includes('png') ||
+            name.endsWith('.gif') ||
+            name.endsWith('.png');
+        if (!looks_right) {
+            errors[key] = 'Use a GIF for an animation, or a PNG for a still picture.';
             input.value = '';
             return;
         }
@@ -143,13 +151,16 @@
 </script>
 
 <div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3">
-    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Device Display GIFs</h3>
+    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
+        Device Display Images
+    </h3>
 
     <p class="text-xs text-gray-500 dark:text-gray-400">
-        Play your own animation on the device for each state. The screen is {DEVICE_SCREEN_PX}×{DEVICE_SCREEN_PX}
-        pixels, so square GIFs of that size look best — anything larger is scaled down on the device.
-        Any state without a GIF falls back to showing its colored status line instead, so the device is
-        never blank. Uploaded GIFs are stored right away, but only take effect once you save this form.
+        Show your own picture on the device for each state. A GIF plays as an animation and a PNG is
+        shown as a still image; pick whichever suits the state. The screen is {DEVICE_SCREEN_PX}×{DEVICE_SCREEN_PX}
+        pixels, so square images of that size look best, and anything larger is scaled down on the device.
+        Any state without an image falls back to its colored status line, so the device is never blank.
+        Uploads are stored right away but only take effect once you save this form.
     </p>
 
     <p class="text-xs text-gray-500 dark:text-gray-400">
@@ -191,10 +202,14 @@
                                 ? 'pointer-events-none text-gray-300 dark:text-gray-600'
                                 : ''}"
                         >
-                            {busy[row.key] ? 'Uploading…' : uploaded ? 'Replace GIF' : 'Choose GIF'}
+                            {busy[row.key]
+                                ? 'Uploading…'
+                                : uploaded
+                                  ? 'Replace image'
+                                  : 'Choose image'}
                             <input
                                 type="file"
-                                accept="image/gif,.gif"
+                                accept="image/gif,image/png,.gif,.png"
                                 class="hidden"
                                 disabled={busy[row.key]}
                                 onchange={(e) => upload(row.key, e)}

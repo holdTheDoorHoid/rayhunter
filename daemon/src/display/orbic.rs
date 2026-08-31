@@ -1,7 +1,7 @@
 use crate::config;
 use crate::config::KeepScreenOn;
-use crate::display::DisplayState;
 use crate::display::generic_framebuffer::{self, Dimensions, GenericFramebuffer};
+use crate::display::{DisplayState, SharedSuppression};
 use async_trait::async_trait;
 use log::{debug, info, warn};
 use std::time::Duration;
@@ -163,6 +163,7 @@ impl GenericFramebuffer for Framebuffer {
 pub fn update_ui(
     task_tracker: &TaskTracker,
     config: &config::Config,
+    suppression: SharedSuppression,
     shutdown_token: CancellationToken,
     ui_update_rx: Receiver<DisplayState>,
 ) {
@@ -174,6 +175,7 @@ pub fn update_ui(
         task_tracker,
         config,
         Framebuffer,
+        suppression,
         shutdown_token,
         ui_update_rx,
     )

@@ -2,7 +2,7 @@
 ///
 /// https://github.com/m0veax/tplink_m7350/tree/main/oled
 use crate::config::{self, UiLevel};
-use crate::display::DisplayState;
+use crate::display::{DisplayState, SharedSuppression};
 
 use log::{error, info};
 use tokio::sync::mpsc::Receiver;
@@ -111,6 +111,10 @@ const STATUS_WARNING: &[u8] = pixelart! {
 pub fn update_ui(
     task_tracker: &TaskTracker,
     config: &config::Config,
+    // This display never covers the device's own screens, so there is
+    // nothing for a button press to step aside for. Taken anyway to keep
+    // one signature across every device.
+    _suppression: SharedSuppression,
     shutdown_token: CancellationToken,
     mut ui_update_rx: Receiver<DisplayState>,
 ) {

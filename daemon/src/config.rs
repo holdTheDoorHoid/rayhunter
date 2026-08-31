@@ -180,6 +180,15 @@ pub struct Config {
     /// Device specific. Implemented for the Orbic; other devices ignore it
     /// rather than failing, so the setting is safe to carry in any config.
     pub keep_screen_on: KeepScreenOn,
+    /// Shrink to the thin status line for a moment after a button is pressed,
+    /// so the device's own screens can be read.
+    ///
+    /// Only affects the display levels that cover the screen. In those, the
+    /// manufacturer's interface is completely hidden, wifi password included,
+    /// and somebody who cannot read it has locked themselves out of their own
+    /// hotspot. A button press is how a person navigates that interface, so it
+    /// is a good signal that they want to see it.
+    pub pause_display_on_keypress: bool,
     /// ntfy.sh URL
     pub ntfy_url: Option<String>,
     /// Vector containing the types of enabled notifications
@@ -277,6 +286,9 @@ impl Default for Config {
             // Off by default. It holds a backlight on, which is a real cost
             // to a device that may be running on battery.
             keep_screen_on: KeepScreenOn::Never,
+            // On by default. It costs a thin status line for twenty seconds
+            // and it prevents somebody being locked out of their own hotspot.
+            pause_display_on_keypress: true,
             analyzers: AnalyzerConfig::default(),
             ntfy_url: None,
             enabled_notifications: vec![NotificationType::Warning, NotificationType::LowBattery],

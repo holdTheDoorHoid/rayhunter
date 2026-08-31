@@ -4,11 +4,15 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::config;
-use crate::display::DisplayState;
+use crate::display::{DisplayState, SharedSuppression};
 
 pub fn update_ui(
     task_tracker: &TaskTracker,
     _config: &config::Config,
+    // This display never covers the device's own screens, so there is
+    // nothing for a button press to step aside for. Taken anyway to keep
+    // one signature across every device.
+    _suppression: SharedSuppression,
     shutdown_token: CancellationToken,
     mut ui_update_rx: Receiver<DisplayState>,
 ) {

@@ -1,6 +1,6 @@
 use crate::config;
-use crate::display::DisplayState;
 use crate::display::generic_framebuffer::{self, Dimensions, GenericFramebuffer};
+use crate::display::{DisplayState, SharedSuppression};
 /// Display support for the Wingtech CT2MHS01 hotspot.
 ///
 /// Tested on (from `/etc/wt_version`):
@@ -43,6 +43,7 @@ impl GenericFramebuffer for Framebuffer {
 pub fn update_ui(
     task_tracker: &TaskTracker,
     config: &config::Config,
+    suppression: SharedSuppression,
     shutdown_token: CancellationToken,
     ui_update_rx: Receiver<DisplayState>,
 ) {
@@ -50,6 +51,7 @@ pub fn update_ui(
         task_tracker,
         config,
         Framebuffer,
+        suppression,
         shutdown_token,
         ui_update_rx,
     )

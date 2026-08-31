@@ -294,11 +294,7 @@ pub async fn set_config(
 /// memory at playback time.
 pub const MAX_GIF_BYTES: usize = 2 * 1024 * 1024;
 
-use crate::display::generic_framebuffer::{MAX_GIF_DIMENSION, gif_dimensions};
-
-fn is_gif(bytes: &[u8]) -> bool {
-    bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a")
-}
+use crate::display::generic_framebuffer::{MAX_GIF_DIMENSION, image_dimensions, image_kind};
 
 /// Store a GIF for one display state.
 ///
@@ -332,46 +328,53 @@ pub async fn set_display_gif(
         ));
     }
     if body.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "no GIF data received".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "no image data received".to_string(),
+        ));
     }
     if body.len() > MAX_GIF_BYTES {
         return Err((
             StatusCode::BAD_REQUEST,
             format!(
-                "GIF is {} bytes, which is over the {MAX_GIF_BYTES} byte limit",
+                "image is {} bytes, which is over the {MAX_GIF_BYTES} byte limit",
                 body.len()
             ),
         ));
     }
-    if !is_gif(&body) {
+    // Decided from the file's own first bytes, not its name or the content type
+    // the browser guessed, both of which the uploader controls.
+    if image_kind(&body).is_none() {
         return Err((
             StatusCode::BAD_REQUEST,
-            "file is not a GIF (expected a GIF87a or GIF89a header)".to_string(),
+            "file is neither a GIF nor a PNG. An animated GIF plays as an animation; a PNG is \
+             shown as a still picture."
+                .to_string(),
         ));
     }
 
     // Size on disk says nothing about size in memory, so check the declared
     // canvas before this ever reaches a decoder.
-    match gif_dimensions(&body) {
+    match image_dimensions(&body) {
         None => {
             return Err((
                 StatusCode::BAD_REQUEST,
-                "GIF is truncated: no image dimensions in the header".to_string(),
+                "image is truncated: no dimensions in the header".to_string(),
             ));
         }
         Some((width, height)) => {
             if width == 0 || height == 0 {
                 return Err((
                     StatusCode::BAD_REQUEST,
-                    format!("GIF declares an empty canvas ({width} by {height})"),
+                    format!("image declares an empty canvas ({width} by {height})"),
                 ));
             }
-            if width > MAX_GIF_DIMENSION || height > MAX_GIF_DIMENSION {
+            if width > MAX_GIF_DIMENSION as u32 || height > MAX_GIF_DIMENSION as u32 {
                 return Err((
                     StatusCode::BAD_REQUEST,
                     format!(
-                        "GIF is {width} by {height} pixels, over the {MAX_GIF_DIMENSION} pixel \
-                         limit. A large canvas expands enormously in memory when played, however \
+                        "image is {width} by {height} pixels, over the {MAX_GIF_DIMENSION} pixel \
+                         limit. A large canvas expands enormously in memory when drawn, however \
                          small the file is, and this device has very little to spare. The screen \
                          is 128 pixels square, so resize it before uploading."
                     ),
@@ -396,7 +399,7 @@ pub async fn set_display_gif(
         )
     })?;
 
-    Ok((StatusCode::OK, format!("stored GIF for {display_state}")))
+    Ok((StatusCode::OK, format!("stored image for {display_state}")))
 }
 
 /// Serve back the GIF stored for one display state, so the web UI can preview
@@ -432,7 +435,7 @@ pub async fn get_display_gif(
         if err.kind() == std::io::ErrorKind::NotFound {
             (
                 StatusCode::NOT_FOUND,
-                format!("no GIF stored for {display_state}"),
+                format!("no image stored for {display_state}"),
             )
         } else {
             (
@@ -442,11 +445,18 @@ pub async fn get_display_gif(
         }
     })?;
 
+    // Declared from the stored bytes rather than the file name, which still
+    // ends in .gif for every state whatever was uploaded.
+    let content_type = match image_kind(&bytes) {
+        Some(crate::display::generic_framebuffer::ImageKind::Still) => "image/png",
+        _ => "image/gif",
+    };
+
     Ok((
         [
-            (header::CONTENT_TYPE, HeaderValue::from_static("image/gif")),
+            (header::CONTENT_TYPE, HeaderValue::from_static(content_type)),
             // This serves bytes somebody uploaded, from the same origin as the
-            // web UI. A file can be a valid GIF and valid HTML at once, so
+            // web UI. A file can be a valid image and valid HTML at once, so
             // forbid content sniffing: without this a browser that second
             // guessed the declared type could run it as a page with full
             // access to the API.
