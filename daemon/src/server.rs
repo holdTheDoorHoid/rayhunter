@@ -46,6 +46,8 @@ pub struct ServerState {
     pub analysis_sender: Sender<AnalysisCtrlMessage>,
     pub daemon_restart_token: CancellationToken,
     pub ui_update_sender: Option<Sender<DisplayState>>,
+    /// Shared with the display, so a keypress can be simulated for testing.
+    pub suppression: Option<crate::display::SharedSuppression>,
     pub cell_tracker: Arc<RwLock<CellTracker>>,
     pub wifi_status: Arc<RwLock<wifi_station::WifiStatus>>,
     pub wifi_scan_lock: tokio::sync::Mutex<()>,
@@ -940,6 +942,7 @@ mod tests {
             analysis_sender: analysis_tx,
             daemon_restart_token: CancellationToken::new(),
             ui_update_sender: None,
+            suppression: None,
             cell_tracker: Arc::new(RwLock::new(CellTracker::new())),
             wifi_status: Arc::new(RwLock::new(wifi_station::WifiStatus::default())),
             wifi_scan_lock: tokio::sync::Mutex::new(()),
@@ -1111,4 +1114,40 @@ pub async fn annotate_recording(
         })?;
 
     Ok((StatusCode::ACCEPTED, "saved".to_string()))
+}
+
+/// Pretend a button was pressed, so the step aside behaviour can be tested.
+///
+/// The real trigger is a physical button, read from the input device. That
+/// makes the behaviour impossible to check from a script, which is how it
+/// shipped drawing the wrong line height: the logic was reviewed rather than
+/// measured. This makes the screen observable instead.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/debug/keypress",
+    tag = "Debug",
+    responses(
+        (status = StatusCode::OK, description = "Display asked to step aside"),
+        (status = StatusCode::SERVICE_UNAVAILABLE, description = "Display system not available"),
+    ),
+    summary = "Simulate a button press",
+    description = "Hold the full screen display back briefly, as a button press does."
+))]
+pub async fn debug_keypress(
+    State(state): State<Arc<ServerState>>,
+) -> Result<(StatusCode, String), (StatusCode, String)> {
+    let Some(suppression) = &state.suppression else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "display system not available".to_string(),
+        ));
+    };
+    suppression.suppress_for(crate::display::KEYPRESS_QUIET_PERIOD);
+    Ok((
+        StatusCode::OK,
+        format!(
+            "stepping aside for {} seconds",
+            crate::display::KEYPRESS_QUIET_PERIOD.as_secs()
+        ),
+    ))
 }

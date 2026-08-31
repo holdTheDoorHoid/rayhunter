@@ -33,10 +33,10 @@ use crate::packet_explorer::{get_packet, list_packets};
 use crate::pcap::get_pcap;
 use crate::qmdl_store::RecordingStore;
 use crate::server::{
-    MAX_GIF_BYTES, ServerState, annotate_recording, debug_set_display_state, delete_display_gif,
-    get_cell_info, get_config, get_display_gif, get_qmdl, get_time, get_wifi_status, get_zip,
-    scan_wifi, serve_static, set_config, set_display_gif, set_time_offset, test_notification,
-    trigger_demo_warning,
+    MAX_GIF_BYTES, ServerState, annotate_recording, debug_keypress, debug_set_display_state,
+    delete_display_gif, get_cell_info, get_config, get_display_gif, get_qmdl, get_time,
+    get_wifi_status, get_zip, scan_wifi, serve_static, set_config, set_display_gif,
+    set_time_offset, test_notification, trigger_demo_warning,
 };
 use crate::stats::{get_qmdl_manifest, get_system_stats, get_update_status};
 use crate::update::{UpdateStatus, run_update_check_worker};
@@ -104,6 +104,7 @@ fn get_router() -> AppRouter {
         .route("/api/time", get(get_time))
         .route("/api/time-offset", post(set_time_offset))
         .route("/api/debug/display-state", post(debug_set_display_state))
+        .route("/api/debug/keypress", post(debug_keypress))
         .route("/api/gps", get(get_gps))
         .route("/api/gps", post(post_gps))
         .route("/", get(|| async { Redirect::permanent("/index.html") }))
@@ -232,6 +233,12 @@ async fn run_with_config(
     let qmdl_store_lock = Arc::new(RwLock::new(store));
     let (diag_tx, diag_rx) = mpsc::channel::<DiagDeviceCtrlMessage>(1);
     let (ui_update_tx, ui_update_rx) = mpsc::channel::<display::DisplayState>(1);
+    // Shared between the display, the buttons and the server: a press asks the
+    // display to step aside for a moment so the device's own screens can be
+    // read. The server holds one so the behaviour can be triggered for testing,
+    // since a physical button cannot be pressed from a script.
+    let suppression: display::SharedSuppression =
+        std::sync::Arc::new(display::DisplaySuppression::new());
     let (analysis_tx, analysis_rx) = mpsc::channel::<AnalysisCtrlMessage>(5);
     let restart_token = CancellationToken::new();
     let shutdown_token = restart_token.child_token();
@@ -284,10 +291,6 @@ async fn run_with_config(
             Device::Pinephone => display::headless::update_ui,
             Device::Uz801 => display::uz801::update_ui,
         };
-        // Shared between the display and the buttons: a press asks the display
-        // to step aside for a moment so the device's own screens can be read.
-        let suppression: display::SharedSuppression =
-            std::sync::Arc::new(display::DisplaySuppression::new());
         update_ui(
             &task_tracker,
             &config,
@@ -301,7 +304,7 @@ async fn run_with_config(
             &task_tracker,
             &config,
             diag_tx.clone(),
-            suppression,
+            suppression.clone(),
             shutdown_token.clone(),
         );
 
@@ -392,6 +395,7 @@ async fn run_with_config(
         analysis_sender: analysis_tx,
         daemon_restart_token: restart_token.clone(),
         ui_update_sender: Some(ui_update_tx),
+        suppression: Some(suppression),
         cell_tracker: cell_tracker.clone(),
         wifi_status,
         wifi_scan_lock: tokio::sync::Mutex::new(()),
