@@ -40,25 +40,12 @@
 </script>
 
 <tr class="{status_row_color} drop-shadow-sm">
-    <td class="p-2 max-w-56">
+    <td class="p-2">
         {#if entry.display_name}
             <div>{entry.display_name}</div>
             <div class="text-xs text-gray-500 dark:text-gray-400">{entry.name}</div>
         {:else}
             {entry.name}
-        {/if}
-        <!-- A first line rather than a bare marker. Saying there is a note is
-             barely more use than saying nothing; showing the start of it is
-             often the whole answer, and invites opening the row for the rest. -->
-        {#if entry.notes}
-            <button
-                type="button"
-                onclick={toggle_analysis_visibility}
-                title={entry.notes}
-                class="mt-0.5 block max-w-full truncate text-left text-xs text-gray-500 italic underline decoration-dotted dark:text-gray-400"
-            >
-                {entry.notes.split('\n')[0]}
-            </button>
         {/if}
     </td>
     <td class="p-2">{date_formatter.format(entry.start_time)}</td>
