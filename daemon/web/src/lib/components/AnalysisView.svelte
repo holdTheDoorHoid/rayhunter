@@ -3,6 +3,7 @@
     import type { ManifestEntry } from '$lib/manifest.svelte';
     import { gps_mode_label } from '$lib/utils.svelte';
     import { AnalysisManager } from '$lib/analysisManager.svelte';
+    import { AnalysisRowType } from '$lib/analysis.svelte';
     import AnalysisTable from './AnalysisTable.svelte';
     import ReAnalyzeButton from './ReAnalyzeButton.svelte';
     import PacketExplorer from './PacketExplorer.svelte';
@@ -20,14 +21,47 @@
     // "view packet" and the browse button can share one instance.
     let explorerShown = $state(false);
     let focusPacket = $state<number | null>(null);
+    // Counts requests rather than packets, so clicking the same warning twice
+    // is two requests and the explorer honours both.
+    let focusNonce = $state(0);
+
+    /**
+     * Packets that produced a warning, and the worst severity each reached.
+     *
+     * Without this, browsing gives no clue where the interesting messages are,
+     * and finding the one that fired an alert means going back to the warnings
+     * list and clicking through.
+     */
+    let alertPackets = $derived.by(() => {
+        const map = new Map<number, string>();
+        const report = entry.analysis_report;
+        // The field also carries an error string when analysis failed, in
+        // which case there are no rows to read.
+        if (!report || typeof report === 'string') return map;
+        const rank = ['Informational', 'Low', 'Medium', 'High'];
+        for (const row of report.rows) {
+            if (row.type !== AnalysisRowType.Analysis) continue;
+            if (row.packet_num === undefined) continue;
+            for (const event of row.events) {
+                if (!event) continue;
+                const existing = map.get(row.packet_num);
+                if (!existing || rank.indexOf(event.event_type) > rank.indexOf(existing)) {
+                    map.set(row.packet_num, event.event_type);
+                }
+            }
+        }
+        return map;
+    });
 
     function browse() {
         focusPacket = null;
+        focusNonce += 1;
         explorerShown = true;
     }
 
     function view_packet(packetNum: number) {
         focusPacket = packetNum;
+        focusNonce += 1;
         explorerShown = true;
     }
 
@@ -114,4 +148,10 @@
 <!-- Not wrapped in {#if}: Modal handles its own visibility, and destroying it
      while it still thinks it is open skips the cleanup that unlocks page
      scrolling. -->
-<PacketExplorer bind:shown={explorerShown} recording={entry.name} {focusPacket} />
+<PacketExplorer
+    bind:shown={explorerShown}
+    recording={entry.name}
+    {focusPacket}
+    {focusNonce}
+    {alertPackets}
+/>

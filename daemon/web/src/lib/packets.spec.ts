@@ -3,6 +3,7 @@ import {
     apply_filters,
     direction_arrow,
     cells_present,
+    open_action,
     DEFAULT_FILTERS,
     type PacketSummary,
 } from './packets.svelte';
@@ -107,5 +108,55 @@ describe('search by cell', () => {
     it('finds packets by their cell identity', () => {
         const packets = [packet({ pci: 330 }), packet({ packet_num: 2, pci: 12 })];
         expect(apply_filters(packets, { ...DEFAULT_FILTERS, search: 'pci330' })).toHaveLength(1);
+    });
+});
+
+describe('open_action', () => {
+    const open = { shown: true, contextMode: false, hasList: true };
+
+    it('focuses the packet a warning asked for', () => {
+        expect(open_action({ packet: 42, nonce: 1 }, null, open)).toEqual({
+            kind: 'focus',
+            packet: 42,
+        });
+    });
+
+    // The regression this whole nonce exists for. The caller is an effect, and
+    // effects re-run for reasons unrelated to the person clicking anything. An
+    // earlier version acted on every run, refetching the same window forever.
+    it('does nothing on a repeat run of a request already handled', () => {
+        expect(open_action({ packet: 42, nonce: 1 }, 1, open)).toEqual({ kind: 'nothing' });
+        expect(open_action({ packet: 42, nonce: 1 }, 1, { ...open, contextMode: true })).toEqual({
+            kind: 'nothing',
+        });
+    });
+
+    it('honours the same packet asked for twice, as two requests', () => {
+        expect(open_action({ packet: 42, nonce: 2 }, 1, { ...open, contextMode: true })).toEqual({
+            kind: 'focus',
+            packet: 42,
+        });
+    });
+
+    it('stays quiet while the explorer is closed', () => {
+        expect(open_action({ packet: 42, nonce: 9 }, null, { ...open, shown: false })).toEqual({
+            kind: 'nothing',
+        });
+    });
+
+    it('loads a page when browsing with nothing to show', () => {
+        expect(open_action({ packet: null, nonce: 1 }, null, { ...open, hasList: false })).toEqual({
+            kind: 'page',
+        });
+    });
+
+    it('replaces a focused window when browsing, rather than keeping it', () => {
+        expect(open_action({ packet: null, nonce: 2 }, 1, { ...open, contextMode: true })).toEqual({
+            kind: 'page',
+        });
+    });
+
+    it('leaves an existing page alone when browsing back to it', () => {
+        expect(open_action({ packet: null, nonce: 2 }, 1, open)).toEqual({ kind: 'nothing' });
     });
 });

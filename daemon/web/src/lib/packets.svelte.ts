@@ -135,3 +135,34 @@ export function cells_present(packets: PacketSummary[]): { pci: number; count: n
         .map(([pci, count]) => ({ pci, count }))
         .sort((a, b) => b.count - a.count);
 }
+
+/** What opening the explorer should do, if anything. */
+export type OpenAction = { kind: 'nothing' } | { kind: 'focus'; packet: number } | { kind: 'page' };
+
+/**
+ * Decide how the explorer should respond to being opened.
+ *
+ * This is a pure function on purpose. The caller is a Svelte effect, and
+ * effects re-run whenever anything they touch is invalidated, which is not
+ * the same as the person having asked for something. An earlier version acted
+ * every time it ran and so refetched the same window forever, which pins a
+ * device that has one core and a recording to keep up with, and stole the list
+ * back from anyone who had paged elsewhere.
+ *
+ * Requests are therefore identified by a nonce the caller bumps once per
+ * click, not by the packet number, so asking for the same packet twice still
+ * counts as two requests.
+ */
+export function open_action(
+    request: { packet: number | null; nonce: number },
+    handledNonce: number | null,
+    view: { shown: boolean; contextMode: boolean; hasList: boolean }
+): OpenAction {
+    if (!view.shown) return { kind: 'nothing' };
+    if (request.nonce === handledNonce) return { kind: 'nothing' };
+    if (request.packet !== null) return { kind: 'focus', packet: request.packet };
+    // Browsing. Reload only when there is nothing to show, or when what is on
+    // screen is a focused window, which the browse view must not keep.
+    if (view.contextMode || !view.hasList) return { kind: 'page' };
+    return { kind: 'nothing' };
+}

@@ -7,6 +7,7 @@
         apply_filters,
         direction_arrow,
         cells_present,
+        open_action,
         DEFAULT_FILTERS,
         type PacketList,
         type PacketFilters,
@@ -17,10 +18,20 @@
         recording,
         /** Packet to open on, when arriving from a warning. */
         focusPacket = null,
+        /**
+         * Bumped by the parent once per request. Identifies the request rather
+         * than the packet, so asking for the same packet a second time still
+         * brings it back into view after paging away from it.
+         */
+        focusNonce = 0,
+        /** Packets that produced a warning, mapped to their worst severity. */
+        alertPackets = new Map<number, string>(),
     }: {
         shown: boolean;
         recording: string;
         focusPacket?: number | null;
+        focusNonce?: number;
+        alertPackets?: Map<number, string>;
     } = $props();
 
     const PAGE = 100;
@@ -37,6 +48,26 @@
 
     let visible = $derived(list ? apply_filters(list.packets, filters) : []);
     let cells = $derived(list ? cells_present(list.packets) : []);
+    let jumpTo = $state('');
+
+    const SEVERITY_CLASS: Record<string, string> = {
+        High: 'bg-red-600 text-white',
+        Medium: 'bg-orange-400 text-orange-950',
+        Low: 'bg-yellow-200 text-yellow-950',
+        Informational: 'bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-100',
+    };
+
+    /** Jump straight to a packet number, which beats paging to reach it. */
+    function jump() {
+        const wanted = parseInt(jumpTo, 10);
+        if (!Number.isFinite(wanted) || wanted < 1) return;
+        contextMode = false;
+        selected = wanted;
+        // Centre it rather than starting the page there, so its neighbours are
+        // visible, which is usually why somebody went looking for it.
+        offset = Math.max(1, wanted - Math.floor(PAGE / 2));
+        load({ offset });
+    }
     let hiddenCount = $derived(list ? list.packets.length - visible.length : 0);
 
     async function load(params: { offset?: number; around?: number }) {
@@ -56,19 +87,49 @@
         }
     }
 
+    // Which focus request has already been acted on. Deliberately a plain
+    // variable rather than $state: the effect below both reads and writes it,
+    // and a reactive one would feed straight back into that effect.
+    let handledNonce: number | null = null;
+
     // Opening from a warning lands on that packet with its neighbours around
     // it, because several detectors are stateful and the sequence is usually
     // more telling than the one message that tripped them.
+    //
+    // Only ever acts on a *change* of focus. Re-running the body unconditionally
+    // meant every run assigned a fresh `filters` object, which invalidated the
+    // derived views, which ran the effect again: an endless loop that refetched
+    // the same window forever and pinned a device that has one core and a
+    // recording to keep up with. It also stole the list back from anyone who
+    // paged or jumped away, roughly twice a second.
     $effect(() => {
-        if (!shown) return;
-        if (focusPacket !== null) {
+        if (!shown) {
+            // Reopening on the same warning should focus it again.
+            handledNonce = null;
+            return;
+        }
+        const action = open_action({ packet: focusPacket, nonce: focusNonce }, handledNonce, {
+            shown,
+            contextMode,
+            hasList: list !== null,
+        });
+        if (action.kind === 'nothing') return;
+        handledNonce = focusNonce;
+
+        if (action.kind === 'focus') {
             contextMode = true;
-            selected = focusPacket;
+            selected = action.packet;
             // Unfiltered, so the packet asked for is never filtered out from
             // under the person who clicked through to it.
             filters = { ...DEFAULT_FILTERS, decodedOnly: false };
-            load({ around: focusPacket });
-        } else if (!list) {
+            load({ around: action.packet });
+        } else {
+            // Arriving by the browse button. Leaving the previous focused
+            // window on screen, banner and all, would misdescribe what is
+            // being shown.
+            contextMode = false;
+            selected = null;
+            offset = 1;
             load({ offset: 1 });
         }
     });
@@ -107,6 +168,27 @@
                 placeholder="Search name or channel"
                 class="rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
             />
+            <form
+                class="flex items-center gap-1"
+                onsubmit={(e) => {
+                    e.preventDefault();
+                    jump();
+                }}
+            >
+                <input
+                    type="number"
+                    min="1"
+                    bind:value={jumpTo}
+                    placeholder="Go to #"
+                    class="w-24 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
+                />
+                <button
+                    type="submit"
+                    disabled={!jumpTo || loading}
+                    class="rounded-md border border-gray-300 px-2 py-1 text-sm disabled:opacity-40 dark:border-gray-600"
+                    >Go</button
+                >
+            </form>
             <select
                 bind:value={filters.protocol}
                 class="rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
@@ -170,6 +252,7 @@
                                 <th class="px-2 py-1 font-normal">Protocol</th>
                                 <th class="px-2 py-1 font-normal">Cell</th>
                                 <th class="px-2 py-1 font-normal">Message</th>
+                                <th class="px-2 py-1 font-normal">Alert</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -196,6 +279,15 @@
                                     <td class="px-2 py-1">
                                         {p.message_type ??
                                             (p.parse_status === 'decoded' ? '—' : p.parse_status)}
+                                    </td>
+                                    <td class="px-2 py-1">
+                                        {#if alertPackets.get(p.packet_num)}
+                                            <span
+                                                class="rounded-sm px-1.5 py-0.5 text-[10px] font-medium {SEVERITY_CLASS[
+                                                    alertPackets.get(p.packet_num)!
+                                                ]}">{alertPackets.get(p.packet_num)}</span
+                                            >
+                                        {/if}
                                     </td>
                                 </tr>
                             {/each}
