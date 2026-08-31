@@ -40,6 +40,17 @@ use crate::update::UpdateStatus;
 pub struct ServerState {
     pub config_path: String,
     pub config: Config,
+    /// The accounts as they stand now, rather than as they were at startup.
+    ///
+    /// `config` is a snapshot taken when the daemon started, so an account
+    /// added through the API is not in it. Reading accounts from that snapshot
+    /// meant a new one vanished from the settings page on the next reload, and
+    /// then — because saving settings rewrites the file from the snapshot —
+    /// was erased from the config file entirely by the next save.
+    ///
+    /// Holding them separately also means a new account takes effect at once,
+    /// instead of only after a restart.
+    pub web_users: Arc<RwLock<Vec<crate::web_auth::WebUser>>>,
     pub qmdl_store_lock: Arc<RwLock<RecordingStore>>,
     pub diag_device_ctrl_sender: Sender<DiagDeviceCtrlMessage>,
     pub analysis_status_lock: Arc<RwLock<AnalysisStatus>>,
@@ -246,6 +257,9 @@ pub async fn get_config(
 ) -> Result<Json<Config>, (StatusCode, String)> {
     let mut config = state.config.clone();
     config.wifi_password = None;
+    // From the live list, not the startup snapshot, so an account added a
+    // moment ago is still here on the next reload.
+    config.web_users = state.web_users.read().await.clone();
     // The account names are useful to show; the hashes are not, and serving
     // them would hand an attacker something to grind offline at their leisure.
     for user in config.web_users.iter_mut() {
@@ -281,8 +295,10 @@ pub async fn set_config(
     let mut config_to_write = config.clone();
     // Accounts are never taken from the request. The hashes are redacted on
     // the way out, so a client saving the settings page would otherwise post
-    // blanks back and lock everybody out of the device.
-    config_to_write.web_users = state.config.web_users.clone();
+    // blanks back and lock everybody out of the device. Taken from the live
+    // list rather than the startup snapshot, or saving any setting at all
+    // would wipe every account added since the daemon started.
+    config_to_write.web_users = state.web_users.read().await.clone();
     // Same for the terminal, which by design can only be switched on when
     // flashing and must never be turnable on from the interface itself.
     config_to_write.terminal_enabled = state.config.terminal_enabled;
@@ -960,6 +976,7 @@ mod tests {
         Arc::new(ServerState {
             config_path: "/tmp/test_config.toml".to_string(),
             config: Config::default(),
+            web_users: Arc::new(RwLock::new(Vec::new())),
             qmdl_store_lock: store_lock,
             diag_device_ctrl_sender: tx,
             analysis_status_lock: Arc::new(RwLock::new(analysis_status)),
@@ -1217,7 +1234,7 @@ pub async fn set_web_user(
         ));
     }
 
-    let mut users = state.config.web_users.clone();
+    let mut users = state.web_users.read().await.clone();
     let hash = crate::web_auth::hash_password(&body.password);
     match users.iter_mut().find(|u| u.username == username) {
         Some(existing) => existing.password_hash = hash,
@@ -1228,10 +1245,7 @@ pub async fn set_web_user(
     }
 
     write_web_users(&state, users).await?;
-    Ok((
-        StatusCode::ACCEPTED,
-        format!("saved {username}; restart Rayhunter to apply"),
-    ))
+    Ok((StatusCode::ACCEPTED, format!("saved {username}")))
 }
 
 /// Remove a web interface account.
@@ -1249,17 +1263,14 @@ pub async fn delete_web_user(
     State(state): State<Arc<ServerState>>,
     Path(username): Path<String>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
-    let mut users = state.config.web_users.clone();
+    let mut users = state.web_users.read().await.clone();
     let before = users.len();
     users.retain(|u| u.username != username);
     if users.len() == before {
         return Err((StatusCode::NOT_FOUND, format!("no account {username}")));
     }
     write_web_users(&state, users).await?;
-    Ok((
-        StatusCode::ACCEPTED,
-        format!("removed {username}; restart Rayhunter to apply"),
-    ))
+    Ok((StatusCode::ACCEPTED, format!("removed {username}")))
 }
 
 /// Write the account list back to the config file, leaving everything else as
@@ -1269,7 +1280,7 @@ async fn write_web_users(
     users: Vec<crate::web_auth::WebUser>,
 ) -> Result<(), (StatusCode, String)> {
     let mut config = state.config.clone();
-    config.web_users = users;
+    config.web_users = users.clone();
     config.wifi_ssid = None;
     config.wifi_password = None;
     config.wifi_security = None;
@@ -1286,6 +1297,9 @@ async fn write_web_users(
             format!("failed to write config: {err}"),
         )
     })?;
+    // Only after the write succeeded, so a failed write does not start
+    // demanding a password that was never saved.
+    *state.web_users.write().await = users;
     Ok(())
 }
 

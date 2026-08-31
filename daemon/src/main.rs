@@ -401,6 +401,7 @@ async fn run_with_config(
 
     let state = Arc::new(ServerState {
         config_path: args.config_path.clone(),
+        web_users: Arc::new(tokio::sync::RwLock::new(config.web_users.clone())),
         config,
         qmdl_store_lock: qmdl_store_lock.clone(),
         diag_device_ctrl_sender: diag_tx,

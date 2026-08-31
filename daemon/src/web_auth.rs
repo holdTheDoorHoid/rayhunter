@@ -168,7 +168,9 @@ pub async fn require_auth(
     use axum::http::{StatusCode, header};
     use axum::response::IntoResponse;
 
-    let users = &state.config.web_users;
+    // The live list, so an account set a moment ago is already in force and one
+    // just deleted has already stopped working.
+    let users = state.web_users.read().await.clone();
     // No accounts configured means Rayhunter's long standing behaviour: open.
     // An update must not lock somebody out of their own device.
     if users.is_empty() {
@@ -182,7 +184,7 @@ pub async fn require_auth(
         .and_then(parse_basic_auth);
 
     if let Some((username, password)) = supplied
-        && credentials_are_valid(users, &username, &password)
+        && credentials_are_valid(&users, &username, &password)
     {
         return next.run(request).await;
     }
