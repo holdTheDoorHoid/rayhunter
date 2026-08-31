@@ -135,12 +135,13 @@ export const HEURISTICS: HeuristicInfo[] = [
     },
     {
         key: 'diagnostic_analyzer',
-        title: 'Connection diary',
+        title: 'Identity exposure diary',
         summary:
-            'Records when your phone joins and leaves each tower. This produces notes rather than alarms.',
-        detects: 'Ordinary connection events, written into the recording as informational entries.',
+            'Keeps notes on the moments your permanent identity could have been asked for or exposed. Notes, not alarms.',
+        detects:
+            'The messages that can lead to your permanent identity being sent: a tower asking your device to identify itself, a tower refusing service for reasons that make a device reintroduce itself from scratch, and a tower ordering a disconnect. Each is written into the recording as an informational note saying which message it was and why the tower said it happened.',
         matters:
-            'Useful when looking back over a recording to understand what your phone was doing around the time something else fired. Its own entries are not warnings and can be ignored until a low, medium or high warning appears alongside them.',
+            'Every one of these messages also occurs on real networks for ordinary reasons, so a note here proves nothing on its own. Their value is context: when another detector raises a warning, the notes show what the tower was doing and claiming at that moment, which is often the difference between an explainable event and a worrying one. These notes are only saved when they land on the same message as an actual warning, so this diary never fills a recording by itself.',
         tag: 'informational',
     },
     {
