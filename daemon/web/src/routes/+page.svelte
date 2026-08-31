@@ -75,7 +75,15 @@
                 const config = await get_config();
                 gps_mode = config.gps_mode;
                 demo_mode = config.demo_mode ?? false;
-                gps_data = await get_gps();
+                // Allowed to fail. The endpoint returns 404 when GPS is
+                // disabled, and letting that throw here meant one optional
+                // reading being absent left the whole page saying "Loading"
+                // for ever, with every other panel ready to render.
+                try {
+                    gps_data = await get_gps();
+                } catch {
+                    gps_data = null;
+                }
                 update_error = undefined;
                 loaded = true;
             } catch (error) {
