@@ -73,6 +73,16 @@ This analyzer tests whether the SIB1 message contains a complete SIB chain (SIB3
 
 On its own this might just be a misconfigured base station (though we have only seen it in the wild under suspicious circumstances) but combined with other heuristics such as **IMSI Requested** detection it should be considered as a strong indicator of malicious activity.
 
+### LPP Location Request
+
+This analyzer watches for LPP (*LTE Positioning Protocol*, 3GPP TS 36.355) messages, the mechanism a network uses to ask a device to measure and report its own position: GNSS/GPS readings, timing measurements of nearby cells (ECID/OTDOA), or a computed location estimate. LPP messages travel inside NAS Generic NAS Transport messages (3GPP TS 24.301, container type 1), which is where this analyzer reads them.
+
+LPP exists for emergency services and lawful location services, but the same machinery allows whoever controls the network connection — a cooperating carrier, or an IMSI catcher acting as the network — to ask a device for its precise position at any time, continuously, with nothing visible on the device. Its use in real tracking operations is what motivated this heuristic (see EFForg/rayhunter#1072).
+
+A *request for location information* arriving from the network, and the device's *report of location information* back, each raise a **low** severity warning, once per LPP transaction: periodic reporting sessions can send a report every few seconds for hours, and repeating the warning for every report would bury the rest of the history. Repeats within the same transaction, capability exchanges, assistance data (routine GPS ephemeris help), aborts, and errors are recorded as informational events.
+
+False positives: an emergency call will legitimately trigger LPP, and some carriers use network-initiated location for lawful services (fraud checks, "find my device" offerings, regulatory obligations). A warning during a normal day with no emergency call, especially on a stationary hotspot, is worth reading alongside the other heuristics.
+
 ### Diagnostic Information 
 This analyzer displays some diagnostic information about when your device connects and disconnects from certain towers. It is helpful for analysis of suspicious PCAPs. The informational warnings in here can safely be ignored until there is a low, medium, or high severity warning. 
 

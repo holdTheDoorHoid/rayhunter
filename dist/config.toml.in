@@ -90,5 +90,6 @@ lte_sib6_and_7_downgrade = true
 null_cipher = true
 nas_null_cipher = true
 incomplete_sib = true
+lpp_location_request = true
 test_analyzer = false
 diagnostic_analyzer = true

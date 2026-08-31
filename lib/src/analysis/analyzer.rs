@@ -13,9 +13,9 @@ use crate::util::RuntimeMetadata;
 use super::{
     connection_redirect_downgrade::ConnectionRedirect2GDowngradeAnalyzer,
     imsi_requested::ImsiRequestedAnalyzer, incomplete_sib::IncompleteSibAnalyzer,
-    information_element::InformationElement, nas_null_cipher::NasNullCipherAnalyzer,
-    null_cipher::NullCipherAnalyzer, priority_2g_downgrade::LteSib6And7DowngradeAnalyzer,
-    test_analyzer::TestAnalyzer,
+    information_element::InformationElement, lpp::LppLocationRequestAnalyzer,
+    nas_null_cipher::NasNullCipherAnalyzer, null_cipher::NullCipherAnalyzer,
+    priority_2g_downgrade::LteSib6And7DowngradeAnalyzer, test_analyzer::TestAnalyzer,
 };
 
 /// A list of booleans which stores information about which analyzers are enabled
@@ -31,6 +31,7 @@ pub struct AnalyzerConfig {
     pub incomplete_sib: bool,
     pub test_analyzer: bool,
     pub imsi_requested: bool,
+    pub lpp_location_request: bool,
 }
 
 impl Default for AnalyzerConfig {
@@ -44,6 +45,7 @@ impl Default for AnalyzerConfig {
             nas_null_cipher: true,
             incomplete_sib: true,
             test_analyzer: false,
+            lpp_location_request: true,
         }
     }
 }
@@ -392,6 +394,10 @@ impl Harness {
 
         if analyzer_config.incomplete_sib {
             harness.add_analyzer(Box::new(IncompleteSibAnalyzer {}))
+        }
+
+        if analyzer_config.lpp_location_request {
+            harness.add_analyzer(Box::new(LppLocationRequestAnalyzer::new()))
         }
 
         if analyzer_config.test_analyzer {

@@ -101,6 +101,17 @@ export const HEURISTICS: HeuristicInfo[] = [
             'Fake towers commonly send only the first block or two. The rest takes effort and brings whoever is operating it no benefit, since they only need your phone to connect briefly. On its own this can simply be a badly configured tower. Alongside an identity request it becomes a strong signal that the tower is not what it claims to be.',
     },
     {
+        key: 'lpp_location_request',
+        title: 'Location asked for by the network',
+        summary:
+            'Watches for the network asking your device to measure and report exactly where it is.',
+        detects:
+            'Mobile networks have a dedicated protocol, LPP, for asking a phone to report its own position: satellite readings, measurements of nearby towers, or a computed location. This test watches for those requests arriving, and for your device answering them. The first request in an exchange raises a low warning; the routine technical chatter around it, such as the network asking what your device can measure, is recorded quietly as informational notes.',
+        matters:
+            'This is a more precise capability than anything else a tower can do: it does not estimate where you are, it asks your device to say. It exists for emergencies, so that a 911 call can be found, but the same machinery has been used by surveillance equipment and by carriers to track people continuously without anything visible happening on the device. A warning here means your position was asked for by name, and is worth reading together with whatever else was happening at the time.',
+        noise: 'Fires legitimately during emergency calls, and on some carriers that use network location for lawful services. A hotspot sitting on a desk should see this rarely, so an unexplained warning is worth attention.',
+    },
+    {
         key: 'diagnostic_analyzer',
         title: 'Connection diary',
         summary:

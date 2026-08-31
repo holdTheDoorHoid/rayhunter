@@ -9,6 +9,7 @@ export interface AnalyzerConfig {
     null_cipher: boolean;
     nas_null_cipher: boolean;
     incomplete_sib: boolean;
+    lpp_location_request: boolean;
     test_analyzer: boolean;
     diagnostic_analyzer: boolean;
 }

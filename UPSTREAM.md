@@ -139,6 +139,37 @@ GSMTAP for RACH responses. Steps two and three, writing MAC DL and UL to the
 PCAP and parsing them for analyzers, are not done. Timing advance is the prize
 there: it gives distance to the tower.
 
+### lpp-heuristic (#1072)
+An analyzer for LPP, the LTE Positioning Protocol: the network asking the
+device to measure and report its own position. A location request and the
+device's report each raise a low warning once per LPP transaction; capability
+exchanges and GPS assistance data are informational.
+**Upstream:** [#1072](https://github.com/EFForg/rayhunter/issues/1072), opened
+by a maintainer, also touching
+[#534](https://github.com/EFForg/rayhunter/issues/534).
+**Claimed:** `philgebhardt` said on the issue they would like to build the
+larger version: full LPP ASN.1 definitions in `telcom-parser`, pairing request
+to response by transaction ID. A maintainer replied with a question and no code
+has appeared yet. This fork's version reads only the fixed UPER prefix of the
+message (presence bits, transaction ID, message kind), which needs no new
+ASN.1 and still pairs request with response — but it is a different approach
+from the one claimed. **Coordinate on the issue before proposing this**, so it
+lands as a complement or a starting point rather than a duplication.
+**Files:** `lib/src/analysis/lpp.rs`, `lib/src/analysis/mod.rs`,
+`lib/src/analysis/analyzer.rs` (config field and harness wiring),
+`dist/config.toml.in`, `daemon/web/src/lib/utils.svelte.ts`,
+`daemon/web/src/lib/heuristics.ts`, `doc/heuristics.md`, `daemon/src/demo.rs`
+(the LPP scenario and the relaxed per-scenario severity test).
+**Depends on:** nothing.
+**Note:** the issue asks for an *informational* heuristic, but rows carrying
+only informational events are never written (see `AnalysisRow::is_empty`), so
+a purely informational analyzer would be invisible. The two location-moving
+messages therefore warn at Low, once per transaction; everything else stays
+informational. Say so when proposing, since upstream may prefer to change the
+row-writing rule instead. The test vectors in `lpp.rs` were generated with
+pycrate's reference 36.355 encoder and caught a real one-bit layout mistake;
+keep them.
+
 ### web-authentication
 Optional accounts for the web interface, off by default so an update cannot
 lock anyone out.

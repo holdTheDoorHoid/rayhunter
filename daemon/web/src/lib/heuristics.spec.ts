@@ -13,6 +13,7 @@ const EXPECTED_ANALYZERS: AnalyzerKey[] = [
     'null_cipher',
     'nas_null_cipher',
     'incomplete_sib',
+    'lpp_location_request',
     'diagnostic_analyzer',
     'test_analyzer',
 ];
