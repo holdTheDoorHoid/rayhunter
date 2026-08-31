@@ -84,6 +84,22 @@ export interface DetectionHealth {
     last_message: string | null;
 }
 
+/**
+ * Identities this device has sent about itself.
+ *
+ * Absent unless switched on in the configuration. The web interface has no
+ * authentication, so on a hotspot anything it serves is readable by anyone on
+ * the WiFi, and an IMSI is the identifier an IMSI catcher exists to collect.
+ */
+export interface SubscriberIdentities {
+    imsi?: string;
+    imei?: string;
+    imeisv?: string;
+    tmsi?: string;
+    imsi_sends: number;
+    tmsi_changes: number;
+}
+
 export interface CellInfo {
     encryption?: EncryptionStatus;
     health: DetectionHealth;
@@ -92,6 +108,8 @@ export interface CellInfo {
     history: CellObservation[];
     /** False before any measurement has arrived, which is normal when stopped. */
     has_data: boolean;
+    /** Present only when the device is configured to disclose them. */
+    identities?: SubscriberIdentities;
 }
 
 export async function get_cell_info(): Promise<CellInfo> {

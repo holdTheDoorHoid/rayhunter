@@ -202,10 +202,40 @@ pub struct CellInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encryption: Option<EncryptionStatus>,
     pub health: DetectionHealth,
+    /// Identities this device has sent about itself. Omitted entirely unless
+    /// the operator switched the display on, so that a page anyone on the
+    /// hotspot's WiFi can load does not hand out an IMSI by default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identities: Option<SubscriberIdentities>,
     /// False when no measurement has arrived yet, which is the normal state
     /// while recording is stopped. Lets the UI explain the emptiness rather
     /// than looking broken.
     pub has_data: bool,
+}
+
+/// The identities this device has been seen sending about itself.
+///
+/// Each is kept with a count, because how often a permanent identity is sent
+/// is more telling than whether it ever was. A network that keeps asking for
+/// the IMSI rather than accepting a temporary identity is behaving the way an
+/// IMSI catcher does, and the count is what makes that visible.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct SubscriberIdentities {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub imsi: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub imei: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub imeisv: Option<String>,
+    /// The most recent temporary identity, as hex.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tmsi: Option<String>,
+    /// How many times the permanent subscriber identity was sent.
+    pub imsi_sends: u32,
+    /// How many distinct temporary identities have been seen. A network
+    /// rotating these is doing what it should; one that never does is not.
+    pub tmsi_changes: u32,
 }
 
 /// Accumulates measurements as diag messages are parsed.
@@ -216,6 +246,7 @@ pub struct CellTracker {
     history: VecDeque<CellObservation>,
     encryption: Option<EncryptionStatus>,
     health: DetectionHealth,
+    identities: SubscriberIdentities,
 }
 
 /// Map an EARFCN to its LTE band, for the FDD downlink ranges.
@@ -417,6 +448,40 @@ impl CellTracker {
         });
     }
 
+    /// Record an identity the device sent about itself.
+    ///
+    /// Counting repeats matters more than the value: a network that keeps
+    /// asking for the permanent identity rather than accepting a temporary one
+    /// is behaving the way an IMSI catcher does.
+    pub fn update_identity_sent(&mut self, identity: crate::subscriber_id::Identity) {
+        use crate::subscriber_id::Identity;
+        match identity {
+            Identity::Imsi(value) => {
+                self.identities.imsi_sends = self.identities.imsi_sends.saturating_add(1);
+                self.identities.imsi = Some(value);
+            }
+            Identity::Imei(value) => self.identities.imei = Some(value),
+            Identity::Imeisv(value) => self.identities.imeisv = Some(value),
+            Identity::Tmsi(value) => {
+                // Only a change counts. The same temporary identity repeated is
+                // the network not rotating it, which is the opposite signal.
+                if self.identities.tmsi.as_deref() != Some(value.as_str()) {
+                    self.identities.tmsi_changes = self.identities.tmsi_changes.saturating_add(1);
+                    self.identities.tmsi = Some(value);
+                }
+            }
+        }
+    }
+
+    /// The identities seen so far, or `None` if nothing has been seen.
+    pub fn identities(&self) -> Option<SubscriberIdentities> {
+        if self.identities == SubscriberIdentities::default() {
+            None
+        } else {
+            Some(self.identities.clone())
+        }
+    }
+
     pub fn snapshot(&self) -> CellInfo {
         let mut history: Vec<_> = self.history.iter().cloned().collect();
         // Most recently seen first, which is the order people look for.
@@ -435,6 +500,9 @@ impl CellTracker {
             encryption: self.encryption.clone(),
             health: self.health.clone(),
             has_data: self.serving.is_some() || !history.is_empty(),
+            // Filled in by the server only when the operator has switched the
+            // display on, so the tracker itself stays free of that policy.
+            identities: None,
             serving: self.serving.clone(),
             neighbors,
             history,

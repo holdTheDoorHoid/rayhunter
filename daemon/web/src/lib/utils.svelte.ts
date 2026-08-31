@@ -126,6 +126,8 @@ export interface Config {
     key_input_mode: number;
     /** 0 never, 1 always, 2 only while plugged in. */
     keep_screen_on: number;
+    /** Disclose this device IMSI, IMEI and temporary identity over the API. */
+    show_subscriber_identity: boolean;
     /** Shrink to the thin status line briefly after a button press. */
     pause_display_on_keypress: boolean;
     ntfy_url: string | null;

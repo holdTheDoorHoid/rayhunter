@@ -17,6 +17,7 @@ mod pcap;
 mod qmdl_store;
 mod server;
 mod stats;
+mod subscriber_id;
 mod update;
 mod webdav;
 

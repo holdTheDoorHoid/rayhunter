@@ -439,6 +439,50 @@
                                  a thin line was never hiding anything, so there would
                                  be nothing to step aside from and this would be a
                                  control that visibly does nothing. -->
+                            <div class="mt-3 flex items-center">
+                                <input
+                                    id="show_subscriber_identity"
+                                    type="checkbox"
+                                    bind:checked={config.show_subscriber_identity}
+                                    class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
+                                />
+                                <label
+                                    for="show_subscriber_identity"
+                                    class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                                >
+                                    Show this device's own IMSI, IMEI and temporary identity
+                                </label>
+                            </div>
+                            {#if config.show_subscriber_identity}
+                                <p class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                                    The web interface has no password. While this is on, anyone who
+                                    can reach this page can read your IMSI, and on a hotspot that
+                                    means anyone on its WiFi.
+                                </p>
+                            {/if}
+                            <Explainer
+                                summary="Why this is off by default, and what the numbers are worth watching for."
+                            >
+                                <p>
+                                    Your IMSI identifies you as a subscriber and never changes. It
+                                    is the identifier an IMSI catcher exists to collect, which is
+                                    why a detector that published it unasked would be working
+                                    against its own purpose.
+                                </p>
+                                <p>
+                                    What is worth watching is not the number but how often it was
+                                    sent. A network normally issues a temporary identity and uses
+                                    that, rotating it so sessions cannot be linked. Being asked for
+                                    the permanent one repeatedly is what a device collecting IMSIs
+                                    makes happen.
+                                </p>
+                                <p>
+                                    Turn it on when you want to see that count, and off again
+                                    afterwards. Nothing is recorded differently either way; this
+                                    only decides whether the web interface will say it.
+                                </p>
+                            </Explainer>
+
                             {#if [2, 3, 4, 5].includes(config.ui_level)}
                                 <div class="mt-3 flex items-center">
                                     <input

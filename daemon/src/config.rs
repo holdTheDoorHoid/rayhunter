@@ -175,6 +175,15 @@ pub struct Config {
     pub demo_mode: bool,
     /// Key input mode
     pub key_input_mode: KeyInputMode,
+    /// Whether to disclose this device's own IMSI, IMEI and temporary identity
+    /// over the web API.
+    ///
+    /// Off by default, and deliberately so. The web interface has no
+    /// authentication: anyone who can reach it, which on these devices means
+    /// anyone on the hotspot's WiFi, can read anything it serves. An IMSI is
+    /// the identifier an IMSI catcher exists to collect, so a detector that
+    /// hands it out unasked would be working against its own purpose.
+    pub show_subscriber_identity: bool,
     /// Whether to stop the screen blanking on the device's own timer.
     ///
     /// Device specific. Implemented for the Orbic; other devices ignore it
@@ -290,6 +299,7 @@ impl Default for Config {
             display_gifs: DisplayGifs::default(),
             gif_store_path: "/data/rayhunter/gifs".to_string(),
             key_input_mode: KeyInputMode::Disabled,
+            show_subscriber_identity: false,
             // Off by default. It holds a backlight on, which is a real cost
             // to a device that may be running on battery.
             keep_screen_on: KeepScreenOn::Never,

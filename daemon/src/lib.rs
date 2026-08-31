@@ -17,6 +17,7 @@ pub mod pcap;
 pub mod qmdl_store;
 pub mod server;
 pub mod stats;
+pub mod subscriber_id;
 pub mod update;
 pub mod webdav;
 

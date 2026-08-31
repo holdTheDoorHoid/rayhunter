@@ -819,6 +819,15 @@ async fn update_cell_info(cell_tracker: &Arc<RwLock<CellTracker>>, container: &M
         if let Some((cipher, integrity)) = nas_security_from_information_element(&element) {
             tracker.update_nas_security(cipher, integrity);
         }
+        // Identities the device sends about itself. Read from the raw payload
+        // rather than the parsed message, because the NAS parser generates the
+        // identity field as an empty struct and discards its bytes.
+        if gsmtap.header.gsmtap_type
+            == rayhunter::gsmtap::GsmtapType::LteNas(rayhunter::gsmtap::LteNasSubtype::Plain)
+            && let Some(identity) = crate::subscriber_id::identity_from_nas(&gsmtap.payload)
+        {
+            tracker.update_identity_sent(identity);
+        }
     }
 }
 

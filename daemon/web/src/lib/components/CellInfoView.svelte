@@ -216,6 +216,78 @@
             </p>
         {/if}
 
+        {#if info.identities}
+            {@const ids = info.identities}
+            <div
+                class="mt-3 rounded-md border border-amber-500 bg-amber-50 p-2 dark:border-amber-800 dark:bg-amber-950"
+            >
+                <div class="text-xs text-gray-600 dark:text-gray-300">
+                    This device's own identities
+                </div>
+                <div class="mt-1 grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
+                    {#if ids.imsi}
+                        <div>
+                            <span class="text-gray-500 dark:text-gray-400">IMSI</span>
+                            <span class="ml-1 font-mono">{ids.imsi}</span>
+                            {#if ids.imsi_sends > 1}
+                                <span class="ml-1 text-xs text-red-700 dark:text-red-300"
+                                    >sent {ids.imsi_sends} times</span
+                                >
+                            {/if}
+                        </div>
+                    {/if}
+                    {#if ids.imei}
+                        <div>
+                            <span class="text-gray-500 dark:text-gray-400">IMEI</span>
+                            <span class="ml-1 font-mono">{ids.imei}</span>
+                        </div>
+                    {/if}
+                    {#if ids.imeisv}
+                        <div>
+                            <span class="text-gray-500 dark:text-gray-400">IMEISV</span>
+                            <span class="ml-1 font-mono">{ids.imeisv}</span>
+                        </div>
+                    {/if}
+                    {#if ids.tmsi}
+                        <div>
+                            <span class="text-gray-500 dark:text-gray-400">Temporary (TMSI)</span>
+                            <span class="ml-1 font-mono">{ids.tmsi}</span>
+                            <span class="ml-1 text-xs text-gray-500 dark:text-gray-400"
+                                >changed {ids.tmsi_changes}
+                                {ids.tmsi_changes === 1 ? 'time' : 'times'}</span
+                            >
+                        </div>
+                    {/if}
+                </div>
+                <Explainer
+                    summary="What these are, and why how often they are sent matters more than the numbers."
+                >
+                    <p>
+                        The <strong>IMSI</strong> identifies you as a subscriber and never changes.
+                        The
+                        <strong>IMEI</strong> identifies the hardware. Both are permanent, which is what
+                        makes them worth collecting.
+                    </p>
+                    <p>
+                        Normally a network hands out a <strong>temporary identity</strong> and uses that
+                        instead, rotating it so that sessions cannot be linked together. That rotation
+                        is the protection. A count that never rises means it is not happening.
+                    </p>
+                    <p>
+                        So the number to watch is how often the permanent identity was sent. Once,
+                        on first attaching to a network, is ordinary. Repeatedly is what a device
+                        collecting IMSIs makes happen, by refusing the temporary identity until the
+                        phone gives up the permanent one.
+                    </p>
+                    <p>
+                        This panel is off unless you switch it on, because the web interface has no
+                        password. Anything on this page is readable by anyone who can reach it,
+                        which on a hotspot means anyone on its WiFi.
+                    </p>
+                </Explainer>
+            </div>
+        {/if}
+
         {#if encryption}
             <div
                 class="mt-3 rounded-md border p-2 {unencrypted
