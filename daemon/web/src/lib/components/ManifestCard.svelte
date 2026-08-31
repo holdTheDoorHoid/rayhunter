@@ -4,6 +4,7 @@
     import DownloadLink from '$lib/components/DownloadLink.svelte';
     import DeleteButton from '$lib/components/DeleteButton.svelte';
     import AnalysisStatus from './AnalysisStatus.svelte';
+    import RecordingNotes from './RecordingNotes.svelte';
     import AnalysisView from './AnalysisView.svelte';
     import RecordingControls from './RecordingControls.svelte';
     let {
@@ -62,7 +63,16 @@
     {/if}
     <div class="flex flex-col">
         <div class="flex flex-row justify-between">
-            <span class="font-bold">ID: {entry.name}</span>
+            <span class="font-bold">
+                {#if entry.display_name}
+                    {entry.display_name}
+                    <span class="ml-1 text-xs font-normal text-gray-500 dark:text-gray-400"
+                        >ID: {entry.name}</span
+                    >
+                {:else}
+                    ID: {entry.name}
+                {/if}
+            </span>
             {#if !current}
                 <span class=""
                     ><AnalysisStatus
@@ -83,6 +93,7 @@
                 'N/A'}</span
         >
     </div>
+    <RecordingNotes {entry} />
     {#if entry.stop_reason}
         <div
             class="bg-yellow-50 dark:bg-yellow-950 border border-yellow-300 dark:border-yellow-800 rounded-sm p-2 text-yellow-800 dark:text-yellow-200 text-sm"

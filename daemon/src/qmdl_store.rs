@@ -125,6 +125,50 @@ pub struct ManifestEntry {
     pub gps_mode: Option<GpsMode>,
     #[serde(default)]
     pub compressed: bool,
+    /// A name chosen by the person recording, shown instead of the timestamp.
+    ///
+    /// Recordings are named by the second they started, which says nothing
+    /// about why anyone made them. Kept in the manifest rather than inside the
+    /// capture so that renaming never rewrites a recording, which is evidence.
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// Free text about the circumstances of the recording.
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+/// Longest display name accepted, matching the length in EFForg/rayhunter#501.
+pub const MAX_DISPLAY_NAME: usize = 29;
+
+/// Longest note accepted. Room for the circumstances of a recording without
+/// letting the manifest, which is read whole on every poll, grow without limit.
+pub const MAX_NOTES: usize = 2000;
+
+/// Reduce a display name to something safe to put in a filename.
+///
+/// The name reaches the outside world as the name of a downloaded zip, so it
+/// has to survive being written to any filesystem and must not be able to
+/// steer a path. Everything outside letters, digits, dash and underscore is
+/// replaced, which follows the `\w` the issue asked for while also ruling out
+/// separators, leading dots and the device's own reserved names.
+pub fn sanitize_display_name(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(MAX_DISPLAY_NAME)
+        .collect();
+    let trimmed = cleaned.trim_matches('_');
+    if trimmed.is_empty() {
+        String::new()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 impl ManifestEntry {
@@ -143,6 +187,8 @@ impl ManifestEntry {
             upload_time: None,
             gps_mode: Some(gps_mode),
             compressed: true,
+            display_name: None,
+            notes: None,
         }
     }
 
@@ -272,6 +318,9 @@ impl RecordingStore {
                 stop_reason: None,
                 upload_time: None,
                 gps_mode: None,
+                // A recovered entry has no manifest to take these from.
+                display_name: None,
+                notes: None,
             });
         }
 
@@ -464,6 +513,29 @@ impl RecordingStore {
             self.manifest.entries[idx].stop_reason = Some(reason);
             self.write_manifest().await?;
         }
+        Ok(())
+    }
+
+    /// Set or clear the display name and notes for one recording.
+    ///
+    /// Both are optional and independent; `None` clears. Applies to any entry
+    /// by name, including the one being recorded, so a recording can be
+    /// labelled while it is still running.
+    pub async fn set_entry_annotations(
+        &mut self,
+        name: &str,
+        display_name: Option<String>,
+        notes: Option<String>,
+    ) -> Result<(), RecordingStoreError> {
+        let idx = self
+            .manifest
+            .entries
+            .iter()
+            .position(|entry| entry.name == name)
+            .ok_or(RecordingStoreError::NoSuchEntryError)?;
+        self.manifest.entries[idx].display_name = display_name;
+        self.manifest.entries[idx].notes = notes;
+        self.write_manifest().await?;
         Ok(())
     }
 
@@ -724,5 +796,67 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(store.get_next_unuploaded_entry(TimeDelta::seconds(3)), None);
+    }
+}
+
+#[cfg(test)]
+mod annotation_tests {
+    use super::{MAX_DISPLAY_NAME, sanitize_display_name};
+
+    #[test]
+    fn ordinary_names_survive_intact() {
+        assert_eq!(sanitize_display_name("cafe-visit"), "cafe-visit");
+        assert_eq!(sanitize_display_name("Protest_2026"), "Protest_2026");
+        assert_eq!(sanitize_display_name("walk3"), "walk3");
+    }
+
+    /// The name becomes the name of a downloaded file, so it must not be able
+    /// to steer a path or escape the directory it lands in.
+    #[test]
+    fn path_separators_and_traversal_cannot_survive() {
+        assert!(!sanitize_display_name("../../etc/passwd").contains('/'));
+        assert!(!sanitize_display_name("..\\..\\windows").contains('\\'));
+        assert!(!sanitize_display_name("../../etc/passwd").contains(".."));
+        assert_eq!(sanitize_display_name("/"), "");
+        assert_eq!(sanitize_display_name("."), "");
+        assert_eq!(sanitize_display_name(".."), "");
+    }
+
+    /// It also lands in a quoted HTTP header, so a quote getting through would
+    /// let a name break out of the filename and add header content of its own.
+    #[test]
+    fn quotes_and_control_characters_cannot_survive() {
+        let hostile = "a\"; filename=\"evil.sh";
+        let cleaned = sanitize_display_name(hostile);
+        assert!(!cleaned.contains('"'));
+        assert!(!cleaned.contains(';'));
+        assert!(!sanitize_display_name("a\r\nSet-Cookie: x=y").contains('\n'));
+        assert!(!sanitize_display_name("a\r\nSet-Cookie: x=y").contains('\r'));
+        assert!(!sanitize_display_name("null\0byte").contains('\0'));
+    }
+
+    #[test]
+    fn a_name_is_capped_at_the_documented_length() {
+        let long = "x".repeat(200);
+        assert_eq!(
+            sanitize_display_name(&long).chars().count(),
+            MAX_DISPLAY_NAME
+        );
+    }
+
+    /// A name that reduces to nothing must come back empty rather than as a
+    /// row of underscores, so the caller can reject it and say why.
+    #[test]
+    fn a_name_of_only_punctuation_reduces_to_nothing() {
+        assert_eq!(sanitize_display_name("!!!"), "");
+        assert_eq!(sanitize_display_name("   "), "");
+        assert_eq!(sanitize_display_name(""), "");
+        assert_eq!(sanitize_display_name("日本語"), "");
+    }
+
+    #[test]
+    fn inner_punctuation_becomes_underscores_rather_than_vanishing() {
+        assert_eq!(sanitize_display_name("cafe visit"), "cafe_visit");
+        assert_eq!(sanitize_display_name("a.b.c"), "a_b_c");
     }
 }

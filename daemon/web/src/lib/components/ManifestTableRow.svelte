@@ -39,7 +39,14 @@
 </script>
 
 <tr class="{status_row_color} drop-shadow-sm">
-    <td class="p-2">{entry.name}</td>
+    <td class="p-2">
+        {#if entry.display_name}
+            <div>{entry.display_name}</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400">{entry.name}</div>
+        {:else}
+            {entry.name}
+        {/if}
+    </td>
     <td class="p-2">{date_formatter.format(entry.start_time)}</td>
     <td class="p-2"
         >{(entry.last_message_time && date_formatter.format(entry.last_message_time)) || 'N/A'}</td

@@ -15,6 +15,8 @@ interface JsonManifestEntry {
     stop_reason: string | null;
     upload_time: string | null;
     gps_mode: GpsMode | null;
+    display_name: string | null;
+    notes: string | null;
 }
 
 export class Manifest {
@@ -64,6 +66,10 @@ export class ManifestEntry {
     public stop_reason: string | undefined = $state(undefined);
     public upload_time: Date | undefined = $state(undefined);
     public gps_mode: GpsMode | undefined = $state(undefined);
+    /** A name chosen by the person recording, shown instead of the timestamp. */
+    public display_name: string | null = $state(null);
+    /** Free text about the circumstances of the recording. */
+    public notes: string | null = $state(null);
 
     constructor(json: JsonManifestEntry) {
         this.name = json.name;
@@ -81,6 +87,14 @@ export class ManifestEntry {
         if (json.gps_mode !== null) {
             this.gps_mode = json.gps_mode;
         }
+        // A daemon older than this UI sends neither.
+        this.display_name = json.display_name ?? null;
+        this.notes = json.notes ?? null;
+    }
+
+    /** What to call this recording on screen. */
+    get_label(): string {
+        return this.display_name ?? this.name;
     }
 
     get_readable_qmdl_size(): string {

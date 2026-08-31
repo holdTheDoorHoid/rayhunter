@@ -567,6 +567,54 @@
                     </div>
 
                     <div class="border-t border-gray-200 dark:border-gray-700 pt-3 mt-4">
+                        <div class="flex items-center">
+                            <input
+                                id="auto_delete_clean_recordings"
+                                type="checkbox"
+                                bind:checked={config.auto_delete_clean_recordings}
+                                class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
+                            />
+                            <label
+                                for="auto_delete_clean_recordings"
+                                class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                            >
+                                Delete recordings that found nothing when space runs low
+                            </label>
+                        </div>
+                        <Explainer
+                            summary="Keeps the device recording instead of stopping when the disk fills, without ever removing a recording that found something."
+                        >
+                            <p>
+                                A device left running fills its storage and then stops recording,
+                                which is the moment it stops being a detector. Most recordings find
+                                nothing, and those are the ones safe to lose.
+                            </p>
+                            <p>
+                                Only recordings that have been analysed and raised no warning at all
+                                are removed, oldest first, and only as many as it takes to make
+                                room. A recording that raised anything is never touched. Neither is
+                                one still being written, one that has not been analysed yet, or one
+                                still waiting to be uploaded to a WebDAV server. Not knowing what is
+                                in a recording is not a reason to delete it.
+                            </p>
+                            <p>
+                                Giving a recording a name or notes also protects it. Stopping to
+                                label one says it matters to you, which is a better signal than
+                                anything the device can work out for itself.
+                            </p>
+                            <p>
+                                Informational notes do not count as findings. They are diagnostics
+                                rather than detections, so a recording carrying only those is still
+                                one that found nothing.
+                            </p>
+                            <p>
+                                Off unless you turn it on. Every deletion is written to the log with
+                                the name of what was removed.
+                            </p>
+                        </Explainer>
+                    </div>
+
+                    <div class="border-t border-gray-200 dark:border-gray-700 pt-3 mt-4">
                         <h4 class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
                             Start a new recording automatically
                         </h4>

@@ -134,6 +134,8 @@ export interface Config {
     analyzers: AnalyzerConfig;
     min_space_to_start_recording_mb: number;
     min_space_to_continue_recording_mb: number;
+    /** Remove recordings that found nothing when space runs low. */
+    auto_delete_clean_recordings: boolean;
     /** Start a new recording at this size. Null or 0 keeps one running. */
     max_recording_size_mb: number | null;
     /** Start a new recording after this long. Null or 0 keeps one running. */
@@ -297,4 +299,25 @@ export async function get_gps(): Promise<GpsData | null> {
         return response.json();
     }
     throw new Error(await response.text());
+}
+
+/**
+ * Name a recording and write notes about it.
+ *
+ * Empty strings clear the value, which is how a name is removed without
+ * needing a second endpoint. Addresses EFForg/rayhunter#501.
+ */
+export async function annotate_recording(
+    name: string,
+    display_name: string,
+    notes: string
+): Promise<void> {
+    const response = await fetch(`/api/annotate-recording/${name}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ display_name, notes }),
+    });
+    if (!response.ok) {
+        throw new Error(await response.text());
+    }
 }

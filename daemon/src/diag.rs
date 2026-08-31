@@ -71,6 +71,11 @@ pub struct DiagTask {
     notification_channel: tokio::sync::mpsc::Sender<Notification>,
     min_space_to_start_mb: u64,
     min_space_to_continue_mb: u64,
+    /// Whether to remove recordings that found nothing when space runs low.
+    auto_delete_clean: bool,
+    /// Whether uploads are configured, so a recording that has not been
+    /// uploaded yet is never removed to make room.
+    uploads_configured: bool,
     /// Rotate to a new recording at this size. `None` never rotates on size.
     max_recording_bytes: Option<u64>,
     /// Rotate to a new recording after this long. `None` never rotates on time.
@@ -153,6 +158,8 @@ impl DiagTask {
         min_space_to_continue_mb: u64,
         max_recording_size_mb: Option<u64>,
         max_recording_minutes: Option<u64>,
+        auto_delete_clean: bool,
+        uploads_configured: bool,
         gps_mode: GpsMode,
         gps_fixed_coords: Option<(f64, f64)>,
         cell_tracker: Arc<RwLock<CellTracker>>,
@@ -164,6 +171,8 @@ impl DiagTask {
             notification_channel,
             min_space_to_start_mb,
             min_space_to_continue_mb,
+            auto_delete_clean,
+            uploads_configured,
             max_recording_bytes: rotation_bytes(max_recording_size_mb),
             max_recording_duration: rotation_duration(max_recording_minutes),
             recording_started_at: None,
@@ -183,6 +192,33 @@ impl DiagTask {
         self.max_type_seen = EventType::Informational;
         self.bytes_since_space_check = 0;
         self.low_space_warned = false;
+
+        // Making room has to happen here as well as in the write loop, and this
+        // is the more important of the two. A device that filled up has already
+        // stopped recording, so the check further down never runs again and it
+        // could never recover on its own: exactly the situation the setting is
+        // meant to prevent. Found by filling a device rather than by reading
+        // the code.
+        if self.auto_delete_clean
+            && matches!(
+                check_disk_space(
+                    &qmdl_store.path,
+                    self.min_space_to_start_mb,
+                    self.min_space_to_continue_mb,
+                ),
+                DiskSpaceCheck::Critical(_) | DiskSpaceCheck::Warning(_)
+            )
+        {
+            let freed = crate::cleanup::prune_clean_recordings(
+                qmdl_store,
+                self.min_space_to_start_mb,
+                self.uploads_configured,
+            )
+            .await;
+            if freed > 0 {
+                info!("removed {freed} recording(s) that found nothing, to start recording");
+            }
+        }
 
         match check_disk_space(
             &qmdl_store.path,
@@ -493,17 +529,41 @@ impl DiagTask {
                         self.stop(qmdl_store, Some(reason)).await;
                         return;
                     }
-                    DiskSpaceCheck::Warning(mb) if !self.low_space_warned => {
-                        self.low_space_warned = true;
-                        warn!("Disk space low: {}MB remaining", mb);
-                        self.notification_channel
-                            .send(Notification::new(
-                                NotificationType::Warning,
-                                format!("Disk space low: {}MB free", mb),
-                                Some(Duration::from_secs(30)),
-                            ))
+                    DiskSpaceCheck::Warning(mb) => {
+                        // Try to make room before telling anyone it is a
+                        // problem, since if this works it is not one. Only
+                        // touches recordings that were analysed and found
+                        // nothing; see `cleanup`.
+                        let freed = if self.auto_delete_clean {
+                            crate::cleanup::prune_clean_recordings(
+                                qmdl_store,
+                                self.min_space_to_start_mb,
+                                self.uploads_configured,
+                            )
                             .await
-                            .ok();
+                        } else {
+                            0
+                        };
+
+                        if freed > 0 {
+                            info!(
+                                "removed {freed} recording(s) that found nothing, to keep recording"
+                            );
+                            // Space was reclaimed, so the next low reading is
+                            // worth reporting afresh.
+                            self.low_space_warned = false;
+                        } else if !self.low_space_warned {
+                            self.low_space_warned = true;
+                            warn!("Disk space low: {}MB remaining", mb);
+                            self.notification_channel
+                                .send(Notification::new(
+                                    NotificationType::Warning,
+                                    format!("Disk space low: {}MB free", mb),
+                                    Some(Duration::from_secs(30)),
+                                ))
+                                .await
+                                .ok();
+                        }
                     }
                     _ => {}
                 }
@@ -777,6 +837,8 @@ pub fn run_diag_read_thread(
     min_space_to_continue_mb: u64,
     max_recording_size_mb: Option<u64>,
     max_recording_minutes: Option<u64>,
+    auto_delete_clean: bool,
+    uploads_configured: bool,
     gps_mode: GpsMode,
     gps_fixed_coords: Option<(f64, f64)>,
     cell_tracker: Arc<RwLock<CellTracker>>,
@@ -798,6 +860,8 @@ pub fn run_diag_read_thread(
             min_space_to_continue_mb,
             max_recording_size_mb,
             max_recording_minutes,
+            auto_delete_clean,
+            uploads_configured,
             gps_mode,
             gps_fixed_coords,
             cell_tracker,

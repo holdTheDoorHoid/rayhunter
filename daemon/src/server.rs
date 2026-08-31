@@ -6,7 +6,7 @@ use axum::Json;
 use axum::body::Body;
 use axum::extract::Path;
 use axum::extract::State;
-use axum::http::header::{self, CONTENT_TYPE};
+use axum::http::header::{self, CONTENT_DISPOSITION, CONTENT_TYPE};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Local};
@@ -650,7 +650,7 @@ pub async fn get_zip(
     Path(entry_name): Path<String>,
 ) -> Result<Response, (StatusCode, String)> {
     let qmdl_idx = entry_name.trim_end_matches(".zip").to_owned();
-    let entry_index = {
+    let (entry_index, download_name) = {
         let qmdl_store = state.qmdl_store_lock.read().await;
         let (entry_index, entry) = qmdl_store.entry_for_name(&qmdl_idx).ok_or((
             StatusCode::NOT_FOUND,
@@ -664,11 +664,14 @@ pub async fn get_zip(
             ));
         }
 
-        entry_index
+        (entry_index, entry.display_name.clone())
     };
 
     let qmdl_store_lock = state.qmdl_store_lock.clone();
     let gps_records = load_gps_records_for_entry(&state, entry_index).await;
+    // Kept for the download filename, since the zip writing task below takes
+    // ownership of `qmdl_idx`.
+    let entry_id = qmdl_idx.clone();
 
     let (reader, writer) = duplex(8192);
 
@@ -754,7 +757,23 @@ pub async fn get_zip(
         }
     });
 
-    let headers = [(CONTENT_TYPE, "application/zip")];
+    // Name the download after whatever the person called this recording, which
+    // is the point of EFForg/rayhunter#501: a folder of timestamps tells you
+    // nothing about which recording was which. The timestamp stays on the end
+    // so two recordings with the same name never collide, and the name has
+    // already been reduced to letters, digits, dash and underscore on the way
+    // in, so it cannot smuggle a quote or a path separator into this header.
+    let filename = match &download_name {
+        Some(name) => format!("{name}-{entry_id}.zip"),
+        None => format!("{entry_id}.zip"),
+    };
+    let headers = [
+        (CONTENT_TYPE, "application/zip".to_string()),
+        (
+            CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{filename}\""),
+        ),
+    ];
     let body = Body::from_stream(ReaderStream::new(reader));
     Ok((headers, body).into_response())
 }
@@ -996,4 +1015,100 @@ mod tests {
             Some(Ok(expected_message)),
         );
     }
+}
+
+/// A display name and notes for one recording, as sent by the web UI.
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct AnnotationRequest {
+    /// A short label shown instead of the timestamp. Empty clears it.
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// Free text about the circumstances. Empty clears it.
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+/// Name a recording and write notes about it.
+///
+/// Addresses EFForg/rayhunter#501: recordings are named by the second they
+/// started, which says nothing about why anyone made them.
+///
+/// Stored in the manifest rather than inside the capture. A recording is
+/// evidence, and renaming it should never rewrite it.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/annotate-recording/{name}",
+    tag = "Recordings",
+    responses(
+        (status = StatusCode::ACCEPTED, description = "Saved"),
+        (status = StatusCode::BAD_REQUEST, description = "Name or notes too long"),
+        (status = StatusCode::NOT_FOUND, description = "No such recording"),
+    ),
+    summary = "Name a recording",
+    description = "Set or clear the display name and notes for one recording."
+))]
+pub async fn annotate_recording(
+    State(state): State<Arc<ServerState>>,
+    Path(name): Path<String>,
+    Json(body): Json<AnnotationRequest>,
+) -> Result<(StatusCode, String), (StatusCode, String)> {
+    use crate::qmdl_store::{MAX_DISPLAY_NAME, MAX_NOTES, sanitize_display_name};
+
+    // An empty field means "clear this", which is how the UI removes a name
+    // without needing a second endpoint.
+    let display_name = match body.display_name.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(raw) => {
+            if raw.chars().count() > MAX_DISPLAY_NAME {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    format!(
+                        "name is {} characters, over the {MAX_DISPLAY_NAME} character limit",
+                        raw.chars().count()
+                    ),
+                ));
+            }
+            let cleaned = sanitize_display_name(raw);
+            if cleaned.is_empty() {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "name has no letters, digits, dashes or underscores in it".to_string(),
+                ));
+            }
+            Some(cleaned)
+        }
+    };
+
+    let notes = match body.notes.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(raw) => {
+            if raw.chars().count() > MAX_NOTES {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    format!(
+                        "notes are {} characters, over the {MAX_NOTES} character limit",
+                        raw.chars().count()
+                    ),
+                ));
+            }
+            Some(raw.to_string())
+        }
+    };
+
+    let mut store = state.qmdl_store_lock.write().await;
+    store
+        .set_entry_annotations(&name, display_name, notes)
+        .await
+        .map_err(|e| match e {
+            crate::qmdl_store::RecordingStoreError::NoSuchEntryError => {
+                (StatusCode::NOT_FOUND, format!("no recording called {name}"))
+            }
+            other => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("couldn't save: {other}"),
+            ),
+        })?;
+
+    Ok((StatusCode::ACCEPTED, "saved".to_string()))
 }

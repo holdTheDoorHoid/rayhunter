@@ -201,6 +201,13 @@ pub struct Config {
     pub min_space_to_start_recording_mb: u64,
     /// Minimum disk space required to continue a recording
     pub min_space_to_continue_recording_mb: u64,
+    /// Delete recordings that found nothing, oldest first, when space runs low.
+    ///
+    /// Only ever removes recordings that have been analysed and raised no
+    /// warning, are not the one being written, and are not still waiting to be
+    /// uploaded. Anything not understood is kept, since not knowing what is in
+    /// a recording is not a reason to delete it.
+    pub auto_delete_clean_recordings: bool,
     /// Close the current recording and open a new one once it reaches this
     /// many megabytes. `None` leaves a recording running until it is stopped.
     ///
@@ -295,6 +302,9 @@ impl Default for Config {
             auto_check_updates: true,
             min_space_to_start_recording_mb: 1,
             min_space_to_continue_recording_mb: 1,
+            // Off by default. Deleting somebody's captures without being asked
+            // is not something to do quietly, however good the reason.
+            auto_delete_clean_recordings: false,
             // Off by default: rotation changes how recordings are grouped, and
             // a device that silently split its capture into pieces nobody asked
             // for would be surprising.

@@ -1,6 +1,7 @@
 mod analysis;
 mod battery;
 mod cell_info;
+mod cleanup;
 mod config;
 mod crypto_provider;
 mod demo;
@@ -32,9 +33,9 @@ use crate::packet_explorer::{get_packet, list_packets};
 use crate::pcap::get_pcap;
 use crate::qmdl_store::RecordingStore;
 use crate::server::{
-    MAX_GIF_BYTES, ServerState, debug_set_display_state, delete_display_gif, get_cell_info,
-    get_config, get_display_gif, get_qmdl, get_time, get_wifi_status, get_zip, scan_wifi,
-    serve_static, set_config, set_display_gif, set_time_offset, test_notification,
+    MAX_GIF_BYTES, ServerState, annotate_recording, debug_set_display_state, delete_display_gif,
+    get_cell_info, get_config, get_display_gif, get_qmdl, get_time, get_wifi_status, get_zip,
+    scan_wifi, serve_static, set_config, set_display_gif, set_time_offset, test_notification,
     trigger_demo_warning,
 };
 use crate::stats::{get_qmdl_manifest, get_system_stats, get_update_status};
@@ -79,6 +80,7 @@ fn get_router() -> AppRouter {
         .route("/api/start-recording", post(start_recording))
         .route("/api/stop-recording", post(stop_recording))
         .route("/api/delete-recording/{name}", post(delete_recording))
+        .route("/api/annotate-recording/{name}", post(annotate_recording))
         .route("/api/delete-all-recordings", post(delete_all_recordings))
         .route("/api/analysis-report/{name}", get(get_analysis_report))
         .route("/api/analysis", get(get_analysis_status))
@@ -266,6 +268,8 @@ async fn run_with_config(
             config.min_space_to_continue_recording_mb,
             config.max_recording_size_mb,
             config.max_recording_minutes,
+            config.auto_delete_clean_recordings,
+            !config.webdav.url.is_empty(),
             config.gps_mode,
             gps_fixed_coords,
             cell_tracker.clone(),
