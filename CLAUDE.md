@@ -234,3 +234,51 @@ adb -s <serial> shell '/bin/rootshell -c "/etc/init.d/rayhunter_daemon stop"'
 the file is owned by uid 2000. That is harmless: `cat >` truncates in place and
 keeps the existing 0777 mode. Check the mode and `sync` separately rather than
 chaining, then verify md5 before rebooting.
+
+## The framebuffer is shared, so anything drawn once gets half erased
+
+Rayhunter does not own `/dev/fb0`. The device's own interface keeps redrawing
+its parts of the screen, so **a picture painted a single time is partially
+overwritten within seconds** and stays that way. This looked exactly like a
+broken decoder: stable, partial, reproducible. Measured coverage was 1054 of
+4096 sampled pixels, unchanged across samples.
+
+Anything meant to stay on screen has to be repainted every pass, which is why
+the status line always was. Decode once, cache the converted pixel buffer, and
+write it each time round the loop.
+
+## Image formats: convert, never assert
+
+`DynamicImage::as_rgba8()` returns the buffer only when the image is *already*
+in that layout, and `.unwrap()` on it panicked the display thread. A PNG saved
+without transparency decodes as RGB, greyscale PNGs as Luma. GIFs always decode
+to RGBA, which is why this held for as long as GIFs were the only input.
+
+Use `.to_rgb8()`, which converts from anything. The panel has no alpha channel
+anyway, so the fourth byte was being discarded a line later.
+
+## Orbic display and power sysfs
+
+```
+/sys/devices/78b6000.spi/spi_master/spi1/spi1.0/sleep_mode   0 = blanked, 1 = awake
+/sys/devices/78b6000.spi/spi_master/spi1/spi1.0/bl_gpio      backlight
+/sys/power/autosleep                                         "mem" suspends, "off" does not
+```
+
+Writing the framebuffer does **not** count as activity to the blanking timer,
+which is why the screen goes dark with Rayhunter plainly running. Write the
+backlight before `sleep_mode` or a lit blank screen shows for an instant.
+
+**For "is it plugged in", use `/sys/class/power_supply/usb/online`, not
+`/sys/kernel/chg_info/chg_en`.** `chg_en` means "currently charging", so it
+reads 0 on a device sitting on USB with a full battery, which is the desk setup
+these features are for. Measured: chg_en 0, usb/online 1, on the same cable.
+Note that `battery/orbic.rs` reads `chg_en` for `is_plugged_in`, so the battery
+status shown in the web UI has this same quirk.
+
+## Custom display images are stored per state as `<state>.gif`
+
+The extension is historical; the file may hold a PNG. What it is gets decided
+from its magic bytes at every use. Uploading a file only writes it to disk;
+**the config's `display_gifs` entry for that state must also be set**, or the
+display loop never loads it. That is why an upload can appear to do nothing.
