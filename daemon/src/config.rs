@@ -461,6 +461,29 @@ pub fn parse_args() -> Args {
 mod tests {
     use super::parse_hex_color;
 
+    /// A config written before a detector existed must come up with that
+    /// detector on, not silently off. This is the upgrade path for every
+    /// device in the field: their `config.toml` lists only the analyzers of
+    /// the version that wrote it.
+    #[test]
+    fn analyzers_missing_from_an_old_config_default_on() {
+        let old_config = r#"
+            ui_level = 1
+
+            [analyzers]
+            imsi_requested = true
+            null_cipher = false
+        "#;
+        let config: super::Config = toml::from_str(old_config).unwrap();
+        // The setting the old file does carry is respected...
+        assert!(!config.analyzers.null_cipher);
+        // ...and ones it predates come up enabled, matching the defaults.
+        assert!(config.analyzers.lpp_location_request);
+        assert!(config.analyzers.incomplete_sib);
+        // The testing analyzer stays off by default even when unlisted.
+        assert!(!config.analyzers.test_analyzer);
+    }
+
     #[test]
     fn parses_hex_colors_with_and_without_leading_hash() {
         assert_eq!(parse_hex_color("#ff0000"), Some((0xff, 0, 0)));

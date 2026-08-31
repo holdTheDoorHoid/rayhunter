@@ -162,10 +162,16 @@ pub fn scenarios() -> Vec<Scenario> {
                 // 68 = Downlink Generic NAS Transport, container type 01 (LPP),
                 // then a two byte length and the LPP message itself: a
                 // requestLocationInformation for transaction 5, asking for a
-                // location estimate. The LPP bytes are the reference vector
-                // from lib/src/analysis/lpp.rs, so the demo and the tests
-                // demonstrably show the same message.
-                0x07, 0x68, 0x01, 0x00, 0x06, 0x90, 0x0a, 0x20, 0x40, 0x00, 0x00,
+                // location estimate. These are the bytes of the reference
+                // vector in lib/src/analysis/lpp.rs with one change: the
+                // endTransaction bit is set (0x0a -> 0x0b in the second LPP
+                // byte, same bit the provide-and-end vector carries). The
+                // detector warns once per transaction, and the analysis
+                // harness lives as long as the recording, so a request that
+                // left its transaction open would demo exactly once per
+                // recording and then appear broken on every later press.
+                // Ending the transaction makes each press self-contained.
+                0x07, 0x68, 0x01, 0x00, 0x06, 0x90, 0x0b, 0x20, 0x40, 0x00, 0x00,
             ])],
         },
         Scenario {
@@ -386,6 +392,46 @@ mod tests {
                 "scenario {name:?} produced {highest:?}; a scenario that cannot raise at least \
                  a low warning shows an audience an unchanged screen"
             );
+        }
+    }
+
+    /// Every scenario must still warn when drawn a second time by the same
+    /// harness.
+    ///
+    /// The per-scenario test above uses a fresh harness, but the daemon's
+    /// harness lives as long as the recording, and a detector may
+    /// deliberately not repeat itself: the LPP detector warns once per
+    /// transaction. A scenario that only fires on a fresh harness demos
+    /// exactly once per recording and then looks broken on every later
+    /// press. Caught on real hardware, not by the fresh-harness test.
+    #[test]
+    fn every_scenario_warns_again_on_a_repeat_press() {
+        for scenario in scenarios() {
+            let name = scenario.name;
+            let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
+            let mut highest_per_press = Vec::new();
+            for press in [&scenario, &scenario] {
+                let container = demo_container_from(vec![Scenario {
+                    name: press.name,
+                    messages: press.messages.clone(),
+                }])
+                .expect("container should build");
+                let highest = harness
+                    .analyze_qmdl_messages(container)
+                    .iter()
+                    .flat_map(|row| row.events.iter().flatten())
+                    .map(|e| e.event_type)
+                    .max();
+                highest_per_press.push(highest);
+            }
+            for (press, highest) in highest_per_press.iter().enumerate() {
+                assert!(
+                    highest.is_some_and(|h| h >= EventType::Low),
+                    "scenario {name:?} produced {highest:?} on press {}; a scenario must \
+                     warn every time it is drawn, or repeat presses appear broken",
+                    press + 1
+                );
+            }
         }
     }
 
