@@ -117,6 +117,16 @@ repainted every pass.
 **Files:** `display/generic_framebuffer.rs`.
 **Depends on:** `custom-display-images`.
 
+### not-this-device-error
+A response that is a web page rather than data is reported as what it is,
+instead of as a JSON parser error. Happens whenever the request never reaches
+the daemon: a phone on mobile data rather than the device's WiFi, a VPN, a
+captive portal, or a different device at that address.
+**Upstream:** none. Affects upstream identically.
+**Commits:** `d3fc0d3`.
+**Files:** `utils.svelte.ts` (`looks_like_a_web_page`, `NOT_THE_DEVICE_MESSAGE`,
+`req_json`, `get_logs`), `analysisManager.svelte.ts`, `notThisDevice.spec.ts`.
+
 ### gps-page-load
 `/api/gps` returns 404 when GPS is off, which is the normal configuration, and
 that 404 was thrown before `loaded` was set, leaving the whole page on
