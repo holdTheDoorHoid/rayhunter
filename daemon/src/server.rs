@@ -223,7 +223,10 @@ pub async fn get_cell_info(State(state): State<Arc<ServerState>>) -> Json<CellIn
     // IMSI is precisely what an IMSI catcher is trying to collect. Off by
     // default means the default build cannot be turned into one.
     if state.config.show_subscriber_identity {
-        info.identities = tracker.identities();
+        // Sent even when empty, so the interface can say that nothing has been
+        // seen yet and why. Omitting it left a setting that appeared to do
+        // nothing at all, which is worse than not offering it.
+        info.identities = Some(tracker.identities().unwrap_or_default());
     }
     Json(info)
 }

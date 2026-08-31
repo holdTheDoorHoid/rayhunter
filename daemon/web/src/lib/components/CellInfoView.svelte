@@ -224,6 +224,18 @@
                 <div class="text-xs text-gray-600 dark:text-gray-300">
                     This device's own identities
                 </div>
+                {#if !ids.imsi && !ids.imei && !ids.imeisv && !ids.tmsi}
+                    <p class="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                        Nothing seen yet. These are only sent in the clear while your device is
+                        first attaching to a network, which usually happens at power on, before
+                        recording starts. Everything after that is encrypted.
+                    </p>
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        To capture them, start a recording and then make the device reattach, by
+                        toggling airplane mode or restarting it. A network asking again later,
+                        while a recording is running, is the case worth noticing.
+                    </p>
+                {/if}
                 <div class="mt-1 grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
                     {#if ids.imsi}
                         <div>
