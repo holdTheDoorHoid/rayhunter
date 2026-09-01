@@ -193,13 +193,58 @@ impl HealthStats {
     }
 }
 
-/// Warmest processor sensor and warmest power amplifier sensor.
+/// Which reading a thermal zone contributes to, if any.
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum Sensor {
+    Processor,
+    Radio,
+}
+
+/// The value a Qualcomm tsens channel reports when nothing is wired to it.
 ///
-/// Sensor naming varies by platform, so this groups by name rather than
-/// assuming an index: `pa_therm` is a power amplifier, and anything else that
-/// reports a plausible temperature is treated as a processor sensor. Values are
-/// millidegrees on some platforms and degrees on others, so anything above 200
-/// is scaled down.
+/// A TP-Link M7350 v8.0 has two power amplifier channels, and only one is
+/// populated: `pa_therm0` reads 29 while `pa_therm1` reads exactly 125 whatever
+/// the device is doing. Taking the warmest of the two therefore reported a
+/// permanent 125 C radio, which the interface printed as "125°C Radio".
+///
+/// Dropping this reading costs a genuine 125 C measurement. That is a trade
+/// worth making: a power amplifier that really reached 125 C would have
+/// triggered the firmware's own thermal shutdown long before, whereas the false
+/// reading is displayed on every single device that has an unpopulated channel.
+const TSENS_UNPOPULATED_C: f32 = 125.0;
+
+/// Which reading a zone belongs to, given its `type` and raw `temp`.
+///
+/// Sensor naming varies by platform, so this classifies by name rather than by
+/// index. Anything not recognised is **ignored** rather than counted as a
+/// processor: an mdm9607 exposes a `battery` zone whose value is in tenths of a
+/// degree, and the previous "everything that is not a power amplifier is a
+/// processor" rule filed it as one, scaled 2800 to 2.8 C and only failed to
+/// show it because the real cores happened to be warmer.
+fn classify_thermal_zone(name: &str, raw: f32) -> Option<(Sensor, f32)> {
+    // Millidegrees on some platforms, whole degrees on others.
+    let celsius = if raw.abs() > 200.0 { raw / 1000.0 } else { raw };
+
+    // Discard obvious nonsense rather than reporting it.
+    if !(-40.0..=150.0).contains(&celsius) {
+        return None;
+    }
+
+    if name.contains("pa_therm") {
+        if celsius == TSENS_UNPOPULATED_C {
+            return None;
+        }
+        return Some((Sensor::Radio, celsius));
+    }
+
+    if name.contains("tsens") || name.contains("cpu") || name.contains("soc") {
+        return Some((Sensor::Processor, celsius));
+    }
+
+    None
+}
+
+/// Warmest processor sensor and warmest power amplifier sensor.
 fn read_temperatures() -> (Option<f32>, Option<f32>) {
     let Ok(entries) = std::fs::read_dir("/sys/class/thermal") else {
         return (None, None);
@@ -215,20 +260,13 @@ fn read_temperatures() -> (Option<f32>, Option<f32>) {
         let Ok(value) = raw.trim().parse::<f32>() else {
             continue;
         };
-        let celsius = if value.abs() > 200.0 {
-            value / 1000.0
-        } else {
-            value
-        };
-        // Discard obvious nonsense rather than reporting it.
-        if !(-40.0..=150.0).contains(&celsius) {
-            continue;
-        }
         let name = std::fs::read_to_string(path.join("type")).unwrap_or_default();
-        let slot = if name.contains("pa_therm") {
-            &mut radio
-        } else {
-            &mut cpu
+        let Some((sensor, celsius)) = classify_thermal_zone(name.trim(), value) else {
+            continue;
+        };
+        let slot = match sensor {
+            Sensor::Radio => &mut radio,
+            Sensor::Processor => &mut cpu,
         };
         *slot = Some(slot.map_or(celsius, |c: f32| c.max(celsius)));
     }
@@ -468,5 +506,88 @@ mod tests {
         cmd.args(["-c", "exit 3"]);
         let err = get_cmd_output(cmd).await.expect_err("exit 3 is a failure");
         assert!(err.contains("exit code 3"), "unexpected message: {err}");
+    }
+
+    /// The zones of a TP-Link M7350 v8.0 (mdm9607), read off the device.
+    const M7350_ZONES: [(&str, f32); 8] = [
+        ("battery", 2800.0),
+        ("tsens_tz_sensor0", 35.0),
+        ("tsens_tz_sensor1", 35.0),
+        ("tsens_tz_sensor2", 36.0),
+        ("tsens_tz_sensor3", 35.0),
+        ("tsens_tz_sensor4", 36.0),
+        ("pa_therm0", 29.0),
+        ("pa_therm1", 125.0),
+    ];
+
+    fn warmest(zones: &[(&str, f32)]) -> (Option<f32>, Option<f32>) {
+        let mut cpu: Option<f32> = None;
+        let mut radio: Option<f32> = None;
+        for (name, raw) in zones {
+            let Some((sensor, celsius)) = classify_thermal_zone(name, *raw) else {
+                continue;
+            };
+            let slot = match sensor {
+                Sensor::Radio => &mut radio,
+                Sensor::Processor => &mut cpu,
+            };
+            *slot = Some(slot.map_or(celsius, |c: f32| c.max(celsius)));
+        }
+        (cpu, radio)
+    }
+
+    /// The bug this replaced: `pa_therm1` is not wired up on this board and
+    /// reads a flat 125, so taking the warmest power amplifier reported a radio
+    /// permanently on fire.
+    #[test]
+    fn an_unpopulated_power_amplifier_channel_does_not_become_the_radio_reading() {
+        let (_, radio) = warmest(&M7350_ZONES);
+        assert_eq!(
+            radio,
+            Some(29.0),
+            "should report pa_therm0, not the 125 sentinel"
+        );
+    }
+
+    /// The battery zone reports tenths of a degree and is not a processor.
+    /// Counting it as one filed 28.0 C as 2.8 C worth of "processor".
+    #[test]
+    fn the_battery_zone_is_not_counted_as_a_processor() {
+        assert_eq!(classify_thermal_zone("battery", 2800.0), None);
+        let (cpu, _) = warmest(&M7350_ZONES);
+        assert_eq!(cpu, Some(36.0), "should be the warmest tsens core");
+    }
+
+    /// A board where every power amplifier channel is unpopulated has no radio
+    /// reading at all, which is honest. Reporting 125 was not.
+    #[test]
+    fn no_usable_power_amplifier_means_no_radio_reading() {
+        let zones = [
+            ("pa_therm0", 125.0),
+            ("pa_therm1", 125.0),
+            ("tsens_tz_sensor0", 40.0),
+        ];
+        let (cpu, radio) = warmest(&zones);
+        assert_eq!(radio, None);
+        assert_eq!(cpu, Some(40.0));
+    }
+
+    #[test]
+    fn millidegrees_are_scaled_and_nonsense_is_dropped() {
+        assert_eq!(
+            classify_thermal_zone("tsens_tz_sensor0", 42000.0),
+            Some((Sensor::Processor, 42.0))
+        );
+        // Below absolute plausibility for a device somebody is carrying.
+        assert_eq!(classify_thermal_zone("tsens_tz_sensor0", -50.0), None);
+        // Above it.
+        assert_eq!(classify_thermal_zone("tsens_tz_sensor0", 200.0), None);
+    }
+
+    /// An unrecognised zone is ignored rather than guessed at. The Orbic and
+    /// the TP-Link between them expose zones for things that are neither.
+    #[test]
+    fn an_unknown_zone_is_ignored() {
+        assert_eq!(classify_thermal_zone("some-future-sensor", 45.0), None);
     }
 }
