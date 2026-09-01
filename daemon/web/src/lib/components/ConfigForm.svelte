@@ -185,6 +185,26 @@
         }
     }
 
+    /**
+     * Set the handful of settings that actually affect how long a battery
+     * lasts, so nobody has to know which ones those are.
+     *
+     * Deliberately does not touch the detectors. Turning detection off would
+     * save a little and defeat the point of the device.
+     *
+     * Applied to the form, not saved: the person still sees what changed and
+     * presses save, so this can never quietly reconfigure a device.
+     */
+    let lowPowerApplied = $state(false);
+    function apply_low_power() {
+        if (!config) return;
+        config.ui_level = 0;
+        config.keep_screen_on = 0;
+        config.auto_check_updates = false;
+        config.wifi_ap_button_toggle = true;
+        lowPowerApplied = true;
+    }
+
     async function save_config() {
         if (!config) return;
 
@@ -393,6 +413,44 @@
                 }}
             >
                 {#if active === 'display'}
+                    <div class="mb-4 rounded-md border border-gray-200 p-3 dark:border-gray-700">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <button
+                                type="button"
+                                onclick={apply_low_power}
+                                class="rounded-md border border-gray-300 px-3 py-1 text-sm dark:border-gray-600"
+                            >
+                                Set up for longest battery life
+                            </button>
+                            {#if lowPowerApplied}
+                                <span class="text-xs text-green-700 dark:text-green-300">
+                                    Applied below. Review and save.
+                                </span>
+                            {/if}
+                        </div>
+                        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                            Turns the device display off, stops Rayhunter holding the screen awake,
+                            stops the periodic update check, and allows switching WiFi off from the
+                            buttons. It changes the settings below rather than saving them, so you
+                            can see what it did.
+                        </p>
+                        <Explainer summary="What actually uses the battery, measured.">
+                            <p>
+                                Rayhunter itself is not the expensive part. Measured while
+                                recording, the daemon used about <strong>1% of one core</strong> on
+                                an Orbic RC400L and about <strong>6.5%</strong> on a TP-Link M7350. The
+                                display mode made no measurable difference to that on either.
+                            </p>
+                            <p>
+                                What costs real power on a hotspot is the radio and the screen. So
+                                the settings worth changing are the ones that stop the screen being
+                                held on and let you switch the WiFi access point off when you are
+                                not using it, which is what this does. Detection is left alone: it
+                                is cheap, and switching it off would defeat the point of carrying
+                                the device.
+                            </p>
+                        </Explainer>
+                    </div>
                     <div
                         id="panel-display"
                         role="tabpanel"

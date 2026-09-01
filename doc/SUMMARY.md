@@ -50,6 +50,7 @@
 - [The Device Screen](./device-display.md)
 - [Configuration](./configuration.md)
 - [Recordings: Naming, Notes, and Rotation](./recordings.md)
+- [Power and Battery Life](./power.md)
 - [Re-analyzing Recordings](./reanalyzing.md)
 - [Analyzing a Capture Yourself](./analyzing-a-capture.md)
 - [The Packet Explorer](./packet-explorer.md)
