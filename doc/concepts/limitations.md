@@ -115,12 +115,13 @@ For readers going into the code or the [detector reference](../detectors/index.m
   [How Cell Networks Work](./cell-networks.md). It transmits nothing and
   injects nothing.
 - **Generation coverage** reflects the analyzers that exist:
-  `lib/src/analysis/` holds detectors written against LTE RRC and NAS, plus
-  the fork's RRLP detector for 2G positioning. 2G, 3G and LTE-MAC traffic is
-  deliberately collected and written to the recording for reading in tools
-  like Wireshark, but is not passed to attack detectors — a point the code
-  makes explicitly where it decides not to report such messages as parse
-  failures.
+  `lib/src/analysis/` holds detectors written mainly against LTE RRC and NAS,
+  plus the fork's RRLP detector for 2G positioning and its timing-advance
+  detector, which reads one specific LTE MAC message (the random access
+  response). Most 2G and 3G traffic is still deliberately collected and written
+  to the recording for reading in tools like Wireshark without being passed to
+  attack detectors — a point the code makes explicitly where it decides not to
+  report such messages as parse failures.
 - **What "passive" cuts both ways.** Rayhunter's own passivity is a safety and
   stealth feature (it cannot be easily detected, and running it transmits
   nothing). The same passivity is why it cannot see an attacker who is equally

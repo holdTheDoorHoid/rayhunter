@@ -53,6 +53,7 @@ it.
 | [Location Requested (LPP)](./lpp.md) | `lpp_location_request` | Low, Informational | On | **Fork.** Reference-encoder vectors. Never confirmed against real traffic. |
 | [Continuous Location Tracking (LPP)](./lpp.md) | `lpp_location_tracking` | Medium, Low, Informational | On | **Fork.** Reference-encoder vectors. Never confirmed against real traffic. |
 | [Location Requested on 2G (RRLP)](./rrlp.md) | `rrlp_location_request` | Low, Informational | On | **Fork.** Reference-encoder vectors. Never seen against real 2G traffic. |
+| [A Tower That Seems to Have Moved](./timing-advance.md) | `timing_advance` | Low | On | **Fork.** Unit-tested; silent on the Orbic and any modem that reports no timing advance. Never seen against a real cell-site simulator. |
 | [Identity Exposure Diary](./imsi-requested.md) | `diagnostic_analyzer` | Informational only | On | Inherited. Informational-only, so invisible in a report on its own. |
 | Alert on Every Tower (testing) | `test_analyzer` | Low | Off | A self-test, not a detector. Fires on every tower beacon; leave it off while hunting. |
 
@@ -72,11 +73,13 @@ Notes on reading the table:
 
 ## The fork's additions
 
-Three of the detectors above — the two LPP location detectors and the RRLP one
-— are additions in this fork of Rayhunter and are not present upstream. They
-are also the three carrying the "never confirmed against real traffic" caveat,
-which is not a coincidence: they are new, and newly written code watching for a
-request the project's own test devices cannot produce. [What It
+Four of the detectors above — the two LPP location detectors, the RRLP one, and
+the timing-advance check — are additions in this fork of Rayhunter and are not
+present upstream. They are also the ones carrying the "never confirmed against
+real traffic" caveat, which is not a coincidence: they are new, and newly
+written code watching for something the project's own test devices cannot
+readily produce (a live location request, or — for timing advance — a real
+distance jump the Orbic cannot even measure). [What It
 Adds](../fork/features.md) lists the fork's changes as a whole, and each
 detector's page states its fork status and validation directly.
 

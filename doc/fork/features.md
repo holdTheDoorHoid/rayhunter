@@ -16,6 +16,10 @@ Notice](./differences.md).
 - **2G location detector (RRLP).** The same for the older 2G network your phone
   can fall back to, and the first thing in Rayhunter to read 2G signalling at
   all. See [Location Requested on 2G (RRLP)](../detectors/rrlp.md).
+- **Timing-advance impersonation check.** Notices when one cell identity answers
+  from a markedly different distance, which a real (stationary) tower does not do
+  — silent on modems that do not report the measurement, the Orbic included. See
+  [A Tower That Seems to Have Moved](../detectors/timing-advance.md).
 - **2G and 3G traffic recorded, not dropped.** Legacy signalling is written into
   the capture for inspection instead of discarded, and no longer counted as a
   parse failure. See [Analyzing a Capture Yourself](../analyzing-a-capture.md).

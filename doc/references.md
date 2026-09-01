@@ -146,6 +146,7 @@ when a detector's behavior is questioned. Cite the clause, not just the document
 | TS 36.355 | LTE Positioning Protocol (LPP) | The LPP detectors — request/response structure, positioning methods, periodic reporting |
 | TS 44.031 | Radio Resource LCS Protocol (RRLP) | The 2G location detector |
 | TS 44.018 | GSM/EDGE RRC protocol | The transport framing RRLP arrives in |
+| TS 36.321 | E-UTRA Medium Access Control (MAC) | The random access response and its timing advance command, read by the timing-advance detector |
 
 ---
 
