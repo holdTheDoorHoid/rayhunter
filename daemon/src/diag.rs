@@ -25,6 +25,7 @@ use tokio::sync::{RwLock, oneshot};
 use tokio_stream::wrappers::LinesStream;
 use tokio_util::task::TaskTracker;
 
+use rayhunter::DeviceMetadata;
 #[cfg(feature = "apidocs")]
 use rayhunter::analysis::analyzer::ReportMetadata;
 use rayhunter::analysis::analyzer::{AnalysisLineNormalizer, AnalyzerConfig, EventType};
@@ -68,6 +69,7 @@ pub struct DiagTask {
     ui_update_sender: Sender<display::DisplayState>,
     analysis_sender: Sender<AnalysisCtrlMessage>,
     analyzer_config: AnalyzerConfig,
+    device: Device,
     notification_channel: tokio::sync::mpsc::Sender<Notification>,
     min_space_to_start_mb: u64,
     min_space_to_continue_mb: u64,
@@ -153,6 +155,7 @@ impl DiagTask {
         ui_update_sender: Sender<display::DisplayState>,
         analysis_sender: Sender<AnalysisCtrlMessage>,
         analyzer_config: AnalyzerConfig,
+        device: Device,
         notification_channel: tokio::sync::mpsc::Sender<Notification>,
         min_space_to_start_mb: u64,
         min_space_to_continue_mb: u64,
@@ -168,6 +171,7 @@ impl DiagTask {
             ui_update_sender,
             analysis_sender,
             analyzer_config,
+            device,
             notification_channel,
             min_space_to_start_mb,
             min_space_to_continue_mb,
@@ -276,9 +280,13 @@ impl DiagTask {
                 .map_err(RecordingStoreError::WriteFileError)?;
         }
         let qmdl_writer = Box::new(QmdlWriter::new(qmdl_gz_file));
-        let analysis_writer = AnalysisWriter::new(analysis_file, &self.analyzer_config)
-            .await
-            .map_err(RecordingStoreError::WriteFileError)?;
+        let device_metadata = DeviceMetadata {
+            home_plmn: rayhunter::sim::home_plmn(&self.device).await,
+        };
+        let analysis_writer =
+            AnalysisWriter::new(analysis_file, &self.analyzer_config, &device_metadata)
+                .await
+                .map_err(RecordingStoreError::WriteFileError)?;
         self.state = DiagState::Recording {
             qmdl_writer,
             analysis_writer: Box::new(analysis_writer),
@@ -897,6 +905,7 @@ pub fn run_diag_read_thread(
             ui_update_sender,
             analysis_sender,
             analyzer_config,
+            device.clone(),
             notification_channel,
             min_space_to_start_mb,
             min_space_to_continue_mb,

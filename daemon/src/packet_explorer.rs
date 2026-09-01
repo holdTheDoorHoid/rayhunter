@@ -660,7 +660,10 @@ mod tests {
         };
 
         // What the analysers number these as.
-        let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
+        let mut harness = Harness::new_with_config(
+            &AnalyzerConfig::default(),
+            &rayhunter::DeviceMetadata::default(),
+        );
         let from_harness: Vec<usize> = harness
             .analyze_qmdl_messages(container.clone())
             .iter()
@@ -705,7 +708,10 @@ mod tests {
                 },
             ],
         };
-        let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
+        let mut harness = Harness::new_with_config(
+            &AnalyzerConfig::default(),
+            &rayhunter::DeviceMetadata::default(),
+        );
         let numbers: Vec<usize> = harness
             .analyze_qmdl_messages(container)
             .iter()

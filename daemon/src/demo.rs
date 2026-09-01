@@ -525,7 +525,10 @@ mod tests {
     fn every_scenario_raises_a_warning_by_itself() {
         for scenario in scenarios() {
             let name = scenario.name;
-            let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
+            let mut harness = Harness::new_with_config(
+                &AnalyzerConfig::default(),
+                &rayhunter::DeviceMetadata::default(),
+            );
             let container = demo_container_from(vec![scenario]).expect("container should build");
             let rows = harness.analyze_qmdl_messages(container);
             let highest = rows
@@ -555,7 +558,10 @@ mod tests {
     fn every_scenario_warns_again_on_a_repeat_press() {
         for scenario in scenarios() {
             let name = scenario.name;
-            let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
+            let mut harness = Harness::new_with_config(
+                &AnalyzerConfig::default(),
+                &rayhunter::DeviceMetadata::default(),
+            );
             let mut highest_per_press = Vec::new();
             for press in [&scenario, &scenario] {
                 let container = demo_container_from(vec![Scenario {
@@ -631,7 +637,10 @@ mod tests {
     /// The point of the whole feature: a run must actually trip real detectors.
     #[test]
     fn a_demo_run_triggers_real_heuristics() {
-        let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
+        let mut harness = Harness::new_with_config(
+            &AnalyzerConfig::default(),
+            &rayhunter::DeviceMetadata::default(),
+        );
         let container = demo_container().expect("demo container should build");
 
         let rows = harness.analyze_qmdl_messages(container);
@@ -668,7 +677,10 @@ mod tests {
     fn the_high_severity_flags_are_true() {
         let mut mismatches: Vec<String> = Vec::new();
         for scenario in scenarios() {
-            let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
+            let mut harness = Harness::new_with_config(
+                &AnalyzerConfig::default(),
+                &rayhunter::DeviceMetadata::default(),
+            );
             let container = demo_container_from(vec![Scenario {
                 name: scenario.name,
                 messages: scenario.messages.clone(),
@@ -715,16 +727,22 @@ mod coverage {
     /// not yet demonstrable. A new detector arriving with neither fails here.
     #[test]
     fn demo_coverage_is_accounted_for() {
-        let names: Vec<String> = Harness::new_with_config(&AnalyzerConfig::default())
-            .get_metadata()
-            .analyzers
-            .iter()
-            .map(|a| a.name.clone())
-            .collect();
+        let names: Vec<String> = Harness::new_with_config(
+            &AnalyzerConfig::default(),
+            &rayhunter::DeviceMetadata::default(),
+        )
+        .get_metadata()
+        .analyzers
+        .iter()
+        .map(|a| a.name.clone())
+        .collect();
 
         let mut fired: std::collections::HashSet<String> = Default::default();
         for scenario in scenarios() {
-            let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
+            let mut harness = Harness::new_with_config(
+                &AnalyzerConfig::default(),
+                &rayhunter::DeviceMetadata::default(),
+            );
             let container = demo_container_from(vec![scenario]).unwrap();
             for row in harness.analyze_qmdl_messages(container) {
                 for (i, ev) in row.events.iter().enumerate() {
@@ -757,16 +775,22 @@ mod coverage {
     #[test]
     #[ignore]
     fn report_which_analyzers_the_demo_can_trigger() {
-        let names: Vec<String> = Harness::new_with_config(&AnalyzerConfig::default())
-            .get_metadata()
-            .analyzers
-            .iter()
-            .map(|a| a.name.clone())
-            .collect();
+        let names: Vec<String> = Harness::new_with_config(
+            &AnalyzerConfig::default(),
+            &rayhunter::DeviceMetadata::default(),
+        )
+        .get_metadata()
+        .analyzers
+        .iter()
+        .map(|a| a.name.clone())
+        .collect();
 
         let mut fired: std::collections::HashSet<String> = Default::default();
         for scenario in scenarios() {
-            let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
+            let mut harness = Harness::new_with_config(
+                &AnalyzerConfig::default(),
+                &rayhunter::DeviceMetadata::default(),
+            );
             let container = demo_container_from(vec![scenario]).unwrap();
             for row in harness.analyze_qmdl_messages(container) {
                 for (i, ev) in row.events.iter().enumerate() {
@@ -797,7 +821,10 @@ mod derived_payloads {
 
     fn fires(payload: &[u8], pdu_num: u8) -> Option<Vec<String>> {
         let container = super::rrc_container(payload, pdu_num)?;
-        let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
+        let mut harness = Harness::new_with_config(
+            &AnalyzerConfig::default(),
+            &rayhunter::DeviceMetadata::default(),
+        );
         let names: Vec<String> = harness
             .get_metadata()
             .analyzers
@@ -823,7 +850,10 @@ mod derived_payloads {
         for pdu in [2u8, 5, 6] {
             let c = super::rrc_container(&payload, pdu).unwrap();
             let parsed = c.messages();
-            let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
+            let mut harness = Harness::new_with_config(
+                &AnalyzerConfig::default(),
+                &rayhunter::DeviceMetadata::default(),
+            );
             let rows = harness.analyze_qmdl_messages(super::rrc_container(&payload, pdu).unwrap());
             println!(
                 "pdu {pdu}: parsed_ok={} skipped={:?}",
@@ -846,7 +876,10 @@ mod derived_payloads {
             0x40u8, 0x40, 0x04, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00,
         ];
-        let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
+        let mut harness = Harness::new_with_config(
+            &AnalyzerConfig::default(),
+            &rayhunter::DeviceMetadata::default(),
+        );
         let names: Vec<String> = harness
             .get_metadata()
             .analyzers
