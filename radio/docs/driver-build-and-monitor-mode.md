@@ -190,11 +190,84 @@ RHMON: VDEV_RX_FILTER=0 MGMT_TX_WMI=0 MGMT_TX_HTT=0 PACKET_FILTER=0 BPF=0
 **Treat that reading as unverified.** The bitmap is implausibly sparse for a
 firmware that demonstrably supports AP mode, offloaded scanning and beacon
 reception, so the decode is more likely wrong than the firmware is that
-limited. Before concluding anything from it, the read should be sanity-checked
-against a service the firmware is known to support. Even if the service bit
-really is absent, `WMI_PDEV_PARAM_RX_FILTER` and
-`WMI_PDEV_PARAM_SET_PROMISC_MODE_CMDID` are worth issuing directly — service
-bits are advisory and firmware often implements more than it advertises.
+limited. Even if the service bit really is absent, the parameters are worth
+issuing directly — service bits are advisory and firmware often implements
+more than it advertises.
+
+## Both remaining avenues were tested, and both failed
+
+### Swapping the firmware blob
+
+The device carries **two different ROME firmware builds**:
+
+| | size | date | md5 |
+|---|---|---|---|
+| `/lib/firmware/qwlan30.bin` (in use) | 619364 | Aug 2020 | `8c03e4ba…` |
+| `/firmware/image/qwlan30.bin` (unused) | 613948 | Apr 2020 | `e7040b3f…` |
+
+The `otp30.bin` and `bdwlan30.bin` alongside them differ too. Swapping in the
+alternative build is fully reversible — these are ordinary files, not a boot
+partition.
+
+The alternative firmware **works**: it boots, reports `Target Ready`, the same
+`HTT version 3.28`, the same `Host SW:4.0.11.205G, FW:0.0.0.9,
+HW:QCA93x7_REV1_1`, and scanned 21 networks. So it is a valid, functioning
+image, not a dud.
+
+And it refuses monitor mode **identically**: `VDEV_START_RESP` count 0,
+`rx_packets` 0 -> 0. Both firmware builds on this device reject a monitor
+vdev the same way.
+
+### RX filter and promiscuous mode
+
+A writable module parameter was added so arbitrary WMI parameters could be
+issued live without rebuilding per experiment. Three were tried against a
+running AP, each with a 45-second observation window:
+
+| parameter | value | probe requests seen |
+|---|---|---|
+| `WMI_PDEV_PARAM_SET_PROMISC_MODE_CMDID` (96) | 1 | 0 |
+| `WMI_PDEV_PARAM_RX_FILTER` (85) | `0xFFFFFFFF` | 0 |
+| `WMI_PDEV_PARAM_RX_FILTER` (85) | `0xA0` | 0 |
+
+All three were accepted by the host path (`ret=0`), which only means the WMI
+command was queued. The firmware ignored all of them: not one probe request
+was delivered in any stage.
+
+### A method that did not work, recorded so it is not repeated
+
+The firmware blobs were searched for `monitor`, `promisc` and `sniff` symbol
+strings, all of which returned zero, and that was briefly taken as
+confirmation. It is not evidence: the same search returns zero for `beacon`,
+which the firmware certainly implements. These images carry only a small
+fragment of a symbol table, so absence proves nothing. The empirical
+`VDEV_START_RESP` test is the only sound evidence here.
+
+## Where this leaves monitor mode
+
+Every avenue reachable without replacing the wireless stack has now been
+tried and failed:
+
+- monitor vdev — firmware refuses
+- both on-device firmware builds — refuse identically
+- RX filter and promiscuous parameters — firmware ignores
+- mainline `ath10k`, which does support monitor mode and explicitly claims
+  this chip's SDIO id (`0271:0701`) — blocked because this kernel has
+  `CONFIG_MAC80211` unset entirely and `CONFIG_CFG80211=y` built in, so
+  neither a module build nor the `backports` project can substitute a newer
+  stack
+
+What remains is a kernel replacement: build a kernel with `CFG80211=m` and
+`MAC80211=m`, backport `ath10k_sdio`, flash it, and use the ath10k QCA9377
+SDIO firmware. That means writing a boot partition — the one class of change
+that cannot be undone over USB — and the payoff is not assured, since ROME
+firmware's monitor support under ath10k is itself unproven.
+
+The pragmatic alternative is the one every reference project in this space
+already took: flock-you, Sky-Spy and OUI-SPY all run on an ESP32, because
+ESP32 promiscuous mode is trivial and reliable. The observation API in
+`rayhunter-radio` was built for exactly that — an external source feeds the
+same analysis engine, and nothing downstream changes.
 
 ## Reproducing
 

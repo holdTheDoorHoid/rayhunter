@@ -131,6 +131,56 @@ index bbf82b0a4..f86fcb354 100644
  	if (eHAL_STATUS_SUCCESS != hal_status) {
  		hddLog(LOGE,
  		       FL("sme_create_mon_session() failed to register. Status= %d [0x%08X]"),
+diff --git a/CORE/HDD/src/wlan_hdd_wext.c b/CORE/HDD/src/wlan_hdd_wext.c
+index 094c2619b..b2ccfbb3e 100644
+--- a/CORE/HDD/src/wlan_hdd_wext.c
++++ b/CORE/HDD/src/wlan_hdd_wext.c
+@@ -5275,6 +5275,45 @@ static int iw_set_mlme(struct net_device *dev, struct iw_request_info *info,
+ 	return ret;
+ }
+ 
++/*
++ * RHMON: a live knob for trying arbitrary WMI parameters.
++ *
++ * Monitor mode is refused by the firmware, but the firmware already forwards
++ * foreign beacons to the host, so it clearly can receive frames not addressed
++ * to us. WMI_PDEV_PARAM_RX_FILTER and WMI_PDEV_PARAM_SET_PROMISC_MODE_CMDID
++ * exist in the WMI enum but this driver never sends them, so whether the
++ * firmware implements them can only be found out by trying.
++ *
++ * Writing "apply" sends the currently-set id/value, which avoids rebuilding
++ * the module for every experiment:
++ *   echo <param_id> > /sys/module/wlan/parameters/rhmon_param_id
++ *   echo <value>    > /sys/module/wlan/parameters/rhmon_param_val
++ *   echo 1          > /sys/module/wlan/parameters/rhmon_apply
++ */
++static int rhmon_param_id;
++static int rhmon_param_val;
++static int rhmon_scope;   /* 0 = PDEV_CMD, 1 = VDEV_CMD, 2 = GEN_CMD */
++module_param(rhmon_param_id, int, S_IRUSR | S_IWUSR);
++module_param(rhmon_param_val, int, S_IRUSR | S_IWUSR);
++module_param(rhmon_scope, int, S_IRUSR | S_IWUSR);
++
++static int rhmon_apply_set(const char *buf, const struct kernel_param *kp)
++{
++	int scope = (rhmon_scope == 1) ? VDEV_CMD :
++		    (rhmon_scope == 2) ? GEN_CMD : PDEV_CMD;
++	int ret = process_wma_set_command(0, rhmon_param_id,
++					  rhmon_param_val, scope);
++	pr_err("RHMON: sent param id=0x%x (%d) val=0x%x (%d) scope=%d -> ret=%d\n",
++	       rhmon_param_id, rhmon_param_id, rhmon_param_val,
++	       rhmon_param_val, scope, ret);
++	return 0;
++}
++
++static struct kernel_param_ops rhmon_apply_ops = {
++	.set = rhmon_apply_set,
++};
++module_param_cb(rhmon_apply, &rhmon_apply_ops, NULL, S_IWUSR);
++
+ int process_wma_set_command(int sessid, int paramid,
+                             int sval, int vpdev)
+ {
 diff --git a/CORE/SERVICES/WMA/wma.c b/CORE/SERVICES/WMA/wma.c
 index aaa20d729..e58cc044a 100644
 --- a/CORE/SERVICES/WMA/wma.c
