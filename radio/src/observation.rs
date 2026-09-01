@@ -143,6 +143,64 @@ impl InformationElement {
     }
 }
 
+/// What a network uses to protect itself, as far as a scan can tell.
+///
+/// Kept as independent flags rather than one enum because real networks
+/// advertise combinations: a WPA2/WPA3 transition network offers both, and an
+/// enterprise network is WPA2 *and* 802.1X. Collapsing that to a single value
+/// would lose the distinction that matters.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Security {
+    /// The Privacy capability bit is clear: traffic is unencrypted.
+    pub open: bool,
+    /// Privacy is set but neither WPA nor RSN is advertised, which in practice
+    /// means WEP.
+    pub wep: bool,
+    pub wpa: bool,
+    pub wpa2: bool,
+    /// RSN advertising SAE (`00-0f-ac:8`).
+    pub wpa3: bool,
+    /// 802.1X rather than a pre-shared key.
+    pub enterprise: bool,
+}
+
+impl Security {
+    /// A short label for display, e.g. "WPA2/WPA3" or "Open".
+    pub fn label(&self) -> String {
+        if self.open {
+            return "Open".to_string();
+        }
+        let mut parts: Vec<&str> = Vec::new();
+        if self.wep {
+            parts.push("WEP");
+        }
+        if self.wpa {
+            parts.push("WPA");
+        }
+        if self.wpa2 {
+            parts.push("WPA2");
+        }
+        if self.wpa3 {
+            parts.push("WPA3");
+        }
+        if parts.is_empty() {
+            return "Unknown".to_string();
+        }
+        let mut label = parts.join("/");
+        if self.enterprise {
+            label.push_str(" Enterprise");
+        }
+        label
+    }
+
+    /// True for a network anyone can join and read traffic on. Worth
+    /// surfacing: an open network, especially a hidden one, is the shape a
+    /// device used for collection often takes.
+    pub const fn is_unprotected(&self) -> bool {
+        self.open || self.wep
+    }
+}
+
 /// One Wi-Fi device or network as observed.
 ///
 /// Every address field is optional because different capture methods populate
@@ -164,6 +222,12 @@ pub struct WifiObservation {
     pub rssi_dbm: Option<i16>,
     pub frame: Option<FrameKind>,
     pub information_elements: Vec<InformationElement>,
+    /// How the network protects itself, where the capture method reports it.
+    pub security: Option<Security>,
+    /// Milliseconds since this network was last heard, as the scan reported.
+    pub last_seen_ms: Option<u32>,
+    /// WPS advertised. Worth showing because it is a known weak point.
+    pub wps: bool,
 }
 
 impl WifiObservation {
@@ -179,6 +243,9 @@ impl WifiObservation {
             rssi_dbm: None,
             frame: None,
             information_elements: Vec::new(),
+            security: None,
+            last_seen_ms: None,
+            wps: false,
         }
     }
 

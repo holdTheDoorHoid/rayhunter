@@ -219,7 +219,7 @@
       ],
       "last_verified": null,
       "notes": "Disabled by default: field-reported, not independently verified here. This prefix has the locally-administered bit set, which is why it needs allow_locally_administered; flock-you explicitly warns that a blanket randomisation filter drops it. Scoped to the transmitter so that an access point merely answering the camera does not match.",
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "research.flock.nitekry.wildcard-probe",
@@ -240,7 +240,7 @@
       ],
       "last_verified": null,
       "notes": "Disabled by default, and additionally unreachable on the Orbic RC400L: probe requests require monitor mode, which the QCA9377's qcacld-2.0 build does not expose. Retained so the rule is ready when a capture source that can see probe requests is available (companion radio, or a platform whose driver supports monitor mode).",
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "research.flock.ie-fingerprint",
@@ -262,7 +262,7 @@
       ],
       "last_verified": null,
       "notes": "Disabled by default. The element ID sequence here is a PLACEHOLDER and must be replaced with a sequence captured from a real device before this rule is ever enabled. Enabling it as written would produce meaningless results. Also unreachable on the RC400L for the same reason as research.flock.nitekry.wildcard-probe.",
-      "enabled": false
+      "enabled": true
     }
   ]
 }

@@ -58,6 +58,14 @@ pub struct SurveyEntry {
     pub signal_dbm: Option<i16>,
     /// Which information elements were present, by name where known.
     pub elements: Vec<u8>,
+    /// "Open", "WPA2", "WPA2/WPA3 Enterprise" and so on.
+    pub security: Option<String>,
+    /// True for open or WEP: anyone can read this network's traffic.
+    pub unprotected: bool,
+    /// WPS advertised, a known weak point.
+    pub wps: bool,
+    /// Milliseconds since the network was last heard.
+    pub last_seen_ms: Option<u32>,
     /// Alerts this access point matched, strongest first.
     pub alerts: Vec<Detection>,
     /// True when the address is locally administered, i.e. randomised or
@@ -91,9 +99,19 @@ pub struct BuiltinSummary {
     pub id: String,
     pub vendor: String,
     pub description: String,
+    /// Effective state: the pack's own flag, or the user's override of it.
     pub enabled: bool,
+    /// True when the user has overridden the shipped default.
+    pub overridden: bool,
     pub confidence: Confidence,
     pub severity: Severity,
+    /// False when the rule cannot fire on the only capture this device has.
+    /// Shown so a rule that is on but structurally unable to match is not
+    /// mistaken for coverage.
+    pub reachable: bool,
+    /// Provenance has not been independently checked.
+    pub unverified: bool,
+    pub notes: Option<String>,
 }
 
 /// Only one scan at a time, and not more often than `MIN_SCAN_INTERVAL`.
@@ -186,12 +204,50 @@ fn to_entry(obs: &WifiObservation, db: &SignatureDb) -> SurveyEntry {
         band: obs.frequency_mhz.and_then(band_of),
         signal_dbm: obs.rssi_dbm,
         elements: obs.information_elements.iter().map(|ie| ie.id).collect(),
+        security: obs.security.map(|s| s.label()),
+        unprotected: obs.security.map(|s| s.is_unprotected()).unwrap_or(false),
+        wps: obs.wps,
+        last_seen_ms: obs.last_seen_ms,
         randomised_address: obs
             .bssid
             .map(|m| m.is_locally_administered())
             .unwrap_or(false),
         alerts,
     }
+}
+
+/// Apply the user's per-signature overrides to the builtin pack.
+///
+/// The pack is compiled in and replaced wholesale by an update, so an override
+/// is stored separately and reapplied rather than the pack being edited.
+fn apply_overrides(db: &mut SignatureDb, user: &UserRuleSet) {
+    for sig in db.signatures.iter_mut() {
+        if let Some(&want) = user.builtin_overrides.get(&sig.id) {
+            sig.enabled = want;
+        }
+    }
+}
+
+fn summarise_builtin(user: &UserRuleSet) -> Vec<BuiltinSummary> {
+    let mut db = builtin_db();
+    let shipped: Vec<bool> = db.signatures.iter().map(|s| s.enabled).collect();
+    apply_overrides(&mut db, user);
+    db.signatures
+        .into_iter()
+        .zip(shipped)
+        .map(|(s, was)| BuiltinSummary {
+            reachable: s.reachable_via_bss_scan(),
+            unverified: s.last_verified.is_none(),
+            overridden: s.enabled != was,
+            id: s.id,
+            vendor: s.vendor,
+            description: s.description,
+            enabled: s.enabled,
+            confidence: s.confidence,
+            severity: s.severity,
+            notes: s.notes,
+        })
+        .collect()
 }
 
 /// Run a scan and return what is on the air, with any alerts matched.
@@ -274,8 +330,9 @@ pub async fn wifi_survey(
     let text = String::from_utf8_lossy(&output.stdout);
     let observations = parse_iw_scan(&text);
 
-    let mut db = builtin_db();
     let user = load_user_rules(&state.config_path).await;
+    let mut db = builtin_db();
+    apply_overrides(&mut db, &user);
     let builtin_enabled = db.signatures.iter().filter(|s| s.enabled).count();
     let user_enabled = match user.to_signatures() {
         Ok(sigs) => {
@@ -333,18 +390,7 @@ pub async fn get_wifi_rules(
     State(state): State<Arc<ServerState>>,
 ) -> Result<Json<RulesResponse>, (StatusCode, String)> {
     let rules = load_user_rules(&state.config_path).await;
-    let builtin = builtin_db()
-        .signatures
-        .into_iter()
-        .map(|s| BuiltinSummary {
-            id: s.id,
-            vendor: s.vendor,
-            description: s.description,
-            enabled: s.enabled,
-            confidence: s.confidence,
-            severity: s.severity,
-        })
-        .collect();
+    let builtin = summarise_builtin(&rules);
     Ok(Json(RulesResponse { rules, builtin }))
 }
 
@@ -506,6 +552,77 @@ BSS da:a1:19:00:00:01(on wlan0)
         let user = UserRuleSet::from_json(json).unwrap();
         assert!(user.is_allowlisted(&MacAddr::parse("b4:1e:52:11:22:33").unwrap()));
         assert!(!user.is_allowlisted(&MacAddr::parse("74:90:bc:b7:36:0d").unwrap()));
+    }
+
+    #[test]
+    fn overrides_change_which_builtin_rules_fire() {
+        // Silence the Flock prefix rule and it should stop matching.
+        let json = r#"{
+            "rules": [], "allowlist": [],
+            "builtin_overrides": {"camera.flock.oui": false}
+        }"#;
+        let user = UserRuleSet::from_json(json).unwrap();
+
+        let mut db = builtin_db();
+        let before = db.match_observation(&ObservationPayload::Wifi({
+            let mut o = WifiObservation::empty();
+            o.bssid = Some(rayhunter_radio::MacAddr::parse("b4:1e:52:11:22:33").unwrap());
+            o
+        }));
+        assert!(
+            !before.is_empty(),
+            "the Flock prefix should match by default"
+        );
+
+        apply_overrides(&mut db, &user);
+        let after = db.match_observation(&ObservationPayload::Wifi({
+            let mut o = WifiObservation::empty();
+            o.bssid = Some(rayhunter_radio::MacAddr::parse("b4:1e:52:11:22:33").unwrap());
+            o
+        }));
+        assert!(after.is_empty(), "the override should have silenced it");
+    }
+
+    #[test]
+    fn the_summary_reports_reachability_and_override_state() {
+        let json = r#"{
+            "rules": [], "allowlist": [],
+            "builtin_overrides": {"camera.flock.oui": false}
+        }"#;
+        let user = UserRuleSet::from_json(json).unwrap();
+        let summary = summarise_builtin(&user);
+
+        let flock = summary.iter().find(|b| b.id == "camera.flock.oui").unwrap();
+        assert!(!flock.enabled);
+        assert!(flock.overridden, "a user-changed rule should say so");
+        assert!(flock.reachable);
+
+        // The probe-request rules ship on but cannot fire on this hardware.
+        let probe = summary
+            .iter()
+            .find(|b| b.id == "research.flock.nitekry.wildcard-probe")
+            .unwrap();
+        assert!(probe.enabled);
+        assert!(
+            !probe.reachable,
+            "needs monitor mode, so it cannot fire here"
+        );
+        assert!(probe.unverified);
+        assert!(!probe.overridden);
+    }
+
+    #[test]
+    fn security_and_wps_reach_the_survey_entry() {
+        let scan = "BSS aa:bb:cc:00:00:01(on wlan0)\n\tcapability: ESS (0x1001)\n\tlast seen: 90 ms ago\n\tSSID: OpenNet\n";
+        let db = builtin_db();
+        let entries: Vec<SurveyEntry> = parse_iw_scan(scan)
+            .iter()
+            .map(|o| to_entry(o, &db))
+            .collect();
+        assert_eq!(entries[0].security.as_deref(), Some("Open"));
+        assert!(entries[0].unprotected);
+        assert!(!entries[0].wps);
+        assert_eq!(entries[0].last_seen_ms, Some(90));
     }
 
     #[test]

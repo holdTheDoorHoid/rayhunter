@@ -91,6 +91,14 @@ pub struct UserRuleSet {
     /// camera, anything already explained.
     #[serde(default)]
     pub allowlist: Vec<AllowlistEntry>,
+    /// Per-signature overrides of the builtin pack's own `enabled` flag, keyed
+    /// by signature id.
+    ///
+    /// Stored here rather than by rewriting the pack, because the pack is
+    /// compiled into the binary and is replaced wholesale by an update. An
+    /// override survives that; an edited copy of the pack would not.
+    #[serde(default)]
+    pub builtin_overrides: std::collections::BTreeMap<String, bool>,
 }
 
 /// One entry on the ignore list, with the user's own note about why.
@@ -132,6 +140,15 @@ impl UserRuleSet {
                 });
             }
             seen.push(&rule.id);
+        }
+        if self.builtin_overrides.len() > limits::MAX_RULES {
+            return Err(RuleError::TooManyRules {
+                count: self.builtin_overrides.len(),
+                max: limits::MAX_RULES,
+            });
+        }
+        for id in self.builtin_overrides.keys() {
+            check_len("signature id", id, limits::MAX_NAME)?;
         }
         for entry in &self.allowlist {
             MacPrefix::parse(&entry.prefix).map_err(|e| RuleError::BadPrefix {
@@ -418,6 +435,7 @@ mod tests {
                 mac: "aa:bb:cc:dd:ee:ff".into(),
             }])],
             allowlist: vec![],
+            builtin_overrides: Default::default(),
         };
         let db = db_from(&set);
         let hits = db.match_observation(&seen("aa:bb:cc:dd:ee:ff", None));
@@ -432,6 +450,7 @@ mod tests {
                 prefix: "aa:bb:cc".into(),
             }])],
             allowlist: vec![],
+            builtin_overrides: Default::default(),
         };
         let sigs = set.to_signatures().unwrap();
         assert_eq!(sigs[0].id, "user.r1");
@@ -447,6 +466,7 @@ mod tests {
                 prefix: "aa:bb:cc".into(),
             }])],
             allowlist: vec![],
+            builtin_overrides: Default::default(),
         };
         let db = db_from(&set);
         assert!(
@@ -467,6 +487,7 @@ mod tests {
                 substring: "FlockSafety".into(),
             }])],
             allowlist: vec![],
+            builtin_overrides: Default::default(),
         };
         let db = db_from(&set);
         assert_eq!(
@@ -490,6 +511,7 @@ mod tests {
                 pattern: "Flock?afety*".into(),
             }])],
             allowlist: vec![],
+            builtin_overrides: Default::default(),
         };
         let db = db_from(&set);
 
@@ -514,6 +536,7 @@ mod tests {
                 pattern: "cam-*".into(),
             }])],
             allowlist: vec![],
+            builtin_overrides: Default::default(),
         };
         let db = db_from(&set);
         assert_eq!(
@@ -536,6 +559,7 @@ mod tests {
                 prefix: "58:32:77".into(),
                 label: "my own hotspot".into(),
             }],
+            builtin_overrides: Default::default(),
         };
         assert!(set.is_allowlisted(&MacAddr::parse("58:32:77:28:7b:a6").unwrap()));
         assert!(!set.is_allowlisted(&MacAddr::parse("70:b3:d5:7c:b4:01").unwrap()));
@@ -546,6 +570,7 @@ mod tests {
         let set = UserRuleSet {
             rules: vec![rule(vec![])],
             allowlist: vec![],
+            builtin_overrides: Default::default(),
         };
         assert!(matches!(set.validate(), Err(RuleError::NoCriteria { .. })));
     }
@@ -557,6 +582,7 @@ mod tests {
                 mac: "not-a-mac".into(),
             }])],
             allowlist: vec![],
+            builtin_overrides: Default::default(),
         };
         let err = set.validate().unwrap_err();
         assert!(matches!(err, RuleError::BadMac { .. }));
@@ -572,6 +598,7 @@ mod tests {
         let set = UserRuleSet {
             rules: vec![r],
             allowlist: vec![],
+            builtin_overrides: Default::default(),
         };
         assert!(matches!(set.validate(), Err(RuleError::TooLong { .. })));
     }
@@ -585,6 +612,7 @@ mod tests {
         let set = UserRuleSet {
             rules: vec![a, b],
             allowlist: vec![],
+            builtin_overrides: Default::default(),
         };
         assert!(matches!(set.validate(), Err(RuleError::DuplicateId { .. })));
     }
@@ -602,6 +630,7 @@ mod tests {
         let set = UserRuleSet {
             rules,
             allowlist: vec![],
+            builtin_overrides: Default::default(),
         };
         assert!(matches!(
             set.validate(),
@@ -616,6 +645,7 @@ mod tests {
                 pattern: "***".into(),
             }])],
             allowlist: vec![],
+            builtin_overrides: Default::default(),
         };
         assert!(matches!(set.validate(), Err(RuleError::MatchesEverything)));
     }
@@ -627,6 +657,7 @@ mod tests {
                 pattern: "a*b*c*d*e*f".into(),
             }])],
             allowlist: vec![],
+            builtin_overrides: Default::default(),
         };
         assert!(matches!(
             set.validate(),
@@ -643,6 +674,7 @@ mod tests {
         let set = UserRuleSet {
             rules: vec![r],
             allowlist: vec![],
+            builtin_overrides: Default::default(),
         };
         assert!(set.to_signatures().unwrap().is_empty());
     }
@@ -662,6 +694,7 @@ mod tests {
                 prefix: "58:32:77".into(),
                 label: "mine".into(),
             }],
+            builtin_overrides: Default::default(),
         };
         let json = serde_json::to_string(&set).unwrap();
         assert_eq!(UserRuleSet::from_json(&json).unwrap(), set);
@@ -690,6 +723,7 @@ mod tests {
         let set = UserRuleSet {
             rules: vec![r],
             allowlist: vec![],
+            builtin_overrides: Default::default(),
         };
         // Validation is about bounds, not about mangling the user's text.
         // Escaping belongs to the presentation layer, which must do it.
@@ -710,6 +744,7 @@ mod tests {
         let set = UserRuleSet {
             rules: vec![r],
             allowlist: vec![],
+            builtin_overrides: Default::default(),
         };
         assert!(matches!(
             set.validate(),

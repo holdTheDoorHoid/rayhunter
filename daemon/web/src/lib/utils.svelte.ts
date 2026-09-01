@@ -457,6 +457,10 @@ export interface SurveyEntry {
     band: string | null;
     signal_dbm: number | null;
     elements: number[];
+    security: string | null;
+    unprotected: boolean;
+    wps: boolean;
+    last_seen_ms: number | null;
     alerts: Detection[];
     randomised_address: boolean;
 }
@@ -498,6 +502,8 @@ export interface AllowlistEntry {
 export interface UserRuleSet {
     rules: UserRule[];
     allowlist: AllowlistEntry[];
+    /** Per-signature overrides of the built-in pack's own enabled flag. */
+    builtin_overrides: Record<string, boolean>;
 }
 
 export interface BuiltinSummary {
@@ -505,8 +511,13 @@ export interface BuiltinSummary {
     vendor: string;
     description: string;
     enabled: boolean;
+    overridden: boolean;
     confidence: string;
     severity: string;
+    /** False when the rule cannot fire on the only capture this device has. */
+    reachable: boolean;
+    unverified: boolean;
+    notes: string | null;
 }
 
 export interface WifiRules {

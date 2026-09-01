@@ -14,7 +14,7 @@
 //! invisible to this backend no matter how good the signature is.
 
 use crate::mac::MacAddr;
-use crate::observation::{FrameKind, InformationElement, Ssid, WifiObservation};
+use crate::observation::{FrameKind, InformationElement, Security, Ssid, WifiObservation};
 
 /// A source of Wi-Fi observations.
 ///
@@ -84,6 +84,23 @@ fn unescape_iw(text: &str) -> Vec<u8> {
     out
 }
 
+/// Settle the security flags once a record is complete.
+///
+/// The capability line appears before the RSN/WPA blocks, so "Privacy is set"
+/// is known first and "which scheme" only later. A network with Privacy set
+/// and neither block advertised is WEP, which can only be concluded once the
+/// whole record has been read.
+fn finish_security(obs: &mut WifiObservation) {
+    if let Some(sec) = obs.security.as_mut()
+        && !sec.open
+        && !sec.wpa
+        && !sec.wpa2
+        && !sec.wpa3
+    {
+        sec.wep = true;
+    }
+}
+
 /// Parse the output of `iw dev <iface> scan`.
 ///
 /// Written as a pure function over text so it can be tested against captured
@@ -98,7 +115,8 @@ pub fn parse_iw_scan(output: &str) -> Vec<WifiObservation> {
         let trimmed = line.trim();
 
         if let Some(rest) = trimmed.strip_prefix("BSS ") {
-            if let Some(done) = current.take() {
+            if let Some(mut done) = current.take() {
+                finish_security(&mut done);
                 out.push(done);
             }
             let mut obs = WifiObservation::empty();
@@ -136,6 +154,40 @@ pub fn parse_iw_scan(output: &str) -> Vec<WifiObservation> {
             {
                 obs.rssi_dbm = Some(dbm.round() as i16);
             }
+        } else if let Some(v) = trimmed.strip_prefix("capability:") {
+            // The Privacy bit is the only reliable "is it encrypted at all"
+            // signal. Which scheme is used comes from the RSN/WPA blocks below,
+            // which appear later in the same record.
+            let sec = obs.security.get_or_insert_with(Security::default);
+            if !v.contains("Privacy") {
+                sec.open = true;
+            }
+        } else if trimmed.starts_with("RSN:") {
+            let sec = obs.security.get_or_insert_with(Security::default);
+            sec.wpa2 = true;
+            sec.open = false;
+        } else if trimmed.starts_with("WPA:") {
+            let sec = obs.security.get_or_insert_with(Security::default);
+            sec.wpa = true;
+            sec.open = false;
+        } else if trimmed.starts_with("WPS:") {
+            obs.wps = true;
+        } else if let Some(v) = trimmed.strip_prefix("* Authentication suites:") {
+            let sec = obs.security.get_or_insert_with(Security::default);
+            // 00-0f-ac:8 is SAE, i.e. WPA3. iw prints the suite OUI rather
+            // than a name for anything it does not recognise.
+            if v.contains("00-0f-ac:8") || v.contains("SAE") {
+                sec.wpa3 = true;
+            }
+            if v.contains("802.1X") {
+                sec.enterprise = true;
+            }
+        } else if let Some(v) = trimmed.strip_prefix("last seen:") {
+            if let Some(num) = v.split_whitespace().next()
+                && let Ok(ms) = num.parse::<u32>()
+            {
+                obs.last_seen_ms = Some(ms);
+            }
         } else if let Some(v) = trimmed.strip_prefix("SSID:") {
             // A zero-length SSID in a beacon is a hidden network. It is stored
             // as the same wildcard variant a probe request would use; the
@@ -153,7 +205,8 @@ pub fn parse_iw_scan(output: &str) -> Vec<WifiObservation> {
         }
     }
 
-    if let Some(done) = current.take() {
+    if let Some(mut done) = current.take() {
+        finish_security(&mut done);
         out.push(done);
     }
     out
@@ -270,6 +323,76 @@ BSS 70:b3:d5:7c:b4:01(on scan0)
         let scan = "BSS aa:bb:cc:dd:ee:02(on wlan0)\n\tSSID: bad\\xZZ\n";
         let networks = parse_iw_scan(scan);
         assert_eq!(networks[0].ssid.as_ref().unwrap().display(), "bad\\xZZ");
+    }
+
+    /// Shapes taken from a real scan on the device: an open network, WPA2
+    /// with a pre-shared key, a WPA2/WPA3 transition network (SAE shows up as
+    /// the suite OUI 00-0f-ac:8), enterprise, and WEP.
+    const SECURITY_SCAN: &str = r#"BSS aa:bb:cc:00:00:01(on wlan0)
+	capability: ESS (0x1001)
+	signal: -50.00 dBm
+	last seen: 120 ms ago
+	SSID: OpenNet
+BSS aa:bb:cc:00:00:02(on wlan0)
+	capability: ESS Privacy ShortSlotTime (0x1411)
+	SSID: HomeWPA2
+	RSN:	 * Version: 1
+		 * Authentication suites: PSK
+BSS aa:bb:cc:00:00:03(on wlan0)
+	capability: ESS Privacy (0x1011)
+	SSID: Transition
+	RSN:	 * Version: 1
+		 * Authentication suites: PSK 00-0f-ac:8
+BSS aa:bb:cc:00:00:04(on wlan0)
+	capability: ESS Privacy (0x1011)
+	SSID: CorpNet
+	RSN:	 * Version: 1
+		 * Authentication suites: IEEE 802.1X
+BSS aa:bb:cc:00:00:05(on wlan0)
+	capability: ESS Privacy (0x1011)
+	SSID: OldWep
+BSS aa:bb:cc:00:00:06(on wlan0)
+	capability: ESS Privacy (0x1011)
+	SSID: HasWps
+	WPS:	 * Version: 1.0
+	RSN:	 * Version: 1
+		 * Authentication suites: PSK
+"#;
+
+    #[test]
+    fn security_is_derived_from_capability_and_rsn() {
+        let nets = parse_iw_scan(SECURITY_SCAN);
+        assert_eq!(nets.len(), 6);
+        let sec = |i: usize| nets[i].security.expect("security parsed");
+
+        assert!(sec(0).open);
+        assert_eq!(sec(0).label(), "Open");
+        assert!(sec(0).is_unprotected());
+
+        assert!(sec(1).wpa2 && !sec(1).wpa3);
+        assert_eq!(sec(1).label(), "WPA2");
+        assert!(!sec(1).is_unprotected());
+
+        // Transition mode advertises both PSK and SAE.
+        assert!(sec(2).wpa2 && sec(2).wpa3);
+        assert_eq!(sec(2).label(), "WPA2/WPA3");
+
+        assert!(sec(3).enterprise);
+        assert_eq!(sec(3).label(), "WPA2 Enterprise");
+
+        // Privacy set but no RSN or WPA block advertised: WEP.
+        assert!(sec(4).wep);
+        assert_eq!(sec(4).label(), "WEP");
+        assert!(sec(4).is_unprotected());
+    }
+
+    #[test]
+    fn wps_and_last_seen_are_captured() {
+        let nets = parse_iw_scan(SECURITY_SCAN);
+        assert!(!nets[0].wps);
+        assert!(nets[5].wps);
+        assert_eq!(nets[0].last_seen_ms, Some(120));
+        assert_eq!(nets[1].last_seen_ms, None);
     }
 
     #[test]

@@ -46,20 +46,57 @@ fn every_signature_records_where_it_came_from() {
     }
 }
 
-/// The rule the user chose: broad coverage is fine, but anything whose
-/// provenance has not been checked must be off until someone turns it on.
+/// Everything now ships enabled, at the user's request, so the safeguard moves
+/// from "off by default" to "honestly labelled": anything whose provenance has
+/// not been checked must still say so, and must carry a note explaining why.
 #[test]
-fn unverified_signatures_ship_disabled() {
+fn unverified_signatures_are_labelled_even_though_they_ship_enabled() {
     for sig in &pack().signatures {
-        if sig.last_verified.is_none() && sig.enabled {
-            // The one deliberate exception is documented in its own notes.
-            assert_eq!(
-                sig.id, "imsi.keyw.mas",
-                "signature {} is enabled but has never been verified",
+        if sig.last_verified.is_none() {
+            assert!(
+                sig.notes.is_some(),
+                "signature {} has never been verified and carries no note saying so",
                 sig.id
             );
         }
     }
+}
+
+/// A rule that cannot fire on the only capture method this hardware has is
+/// worse than one that is off: it looks like coverage. The pack may contain
+/// them - they are ready for a platform that can capture probe requests - but
+/// the UI is told which they are, so this asserts the derivation works rather
+/// than that no such rules exist.
+#[test]
+fn rules_needing_monitor_mode_are_identifiable() {
+    let pack = pack();
+    let unreachable: Vec<&str> = pack
+        .signatures
+        .iter()
+        .filter(|s| !s.reachable_via_bss_scan())
+        .map(|s| s.id.as_str())
+        .collect();
+
+    // The two probe-request Flock rules cannot fire without monitor mode.
+    assert!(
+        unreachable.contains(&"research.flock.nitekry.wildcard-probe"),
+        "got {unreachable:?}"
+    );
+    assert!(
+        unreachable.contains(&"research.flock.ie-fingerprint"),
+        "got {unreachable:?}"
+    );
+
+    // The plain vendor-prefix rules must remain reachable, or the whole panel
+    // would show nothing.
+    let reachable: Vec<&str> = pack
+        .signatures
+        .iter()
+        .filter(|s| s.reachable_via_bss_scan())
+        .map(|s| s.id.as_str())
+        .collect();
+    assert!(reachable.contains(&"camera.flock.oui"), "got {reachable:?}");
+    assert!(reachable.contains(&"imsi.keyw.mas"), "got {reachable:?}");
 }
 
 /// A prefix rule on its own can never be more than corroborating evidence,
@@ -162,18 +199,20 @@ fn drone_vendors_are_labelled_as_drones_not_surveillance() {
     }
 }
 
+/// The research prefixes now ship enabled, so they should match. This is the
+/// user's deliberate choice of broad coverage; the safeguard is that they are
+/// labelled unverified and capped at informational confidence.
 #[test]
-fn disabled_research_signatures_do_not_fire() {
+fn enabled_research_prefixes_now_match_but_stay_weak() {
     let db = pack();
-    // 82:6b:f2 is present in the pack but shipped disabled.
-    assert!(
-        db.match_observation(&seen_from("82:6b:f2:11:22:33"))
-            .is_empty()
+    let hits = db.match_observation(&seen_from("82:6b:f2:11:22:33"));
+    assert_eq!(
+        hits.len(),
+        1,
+        "the locally-administered Flock prefix should match"
     );
-    assert!(
-        db.match_observation(&seen_from("70:c9:4e:11:22:33"))
-            .is_empty()
-    );
+    assert_eq!(hits[0].confidence, Confidence::Info);
+    assert_eq!(hits[0].severity, Severity::Informational);
 }
 
 #[test]

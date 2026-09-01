@@ -107,6 +107,7 @@
         const next: UserRuleSet = {
             rules: [...rules.rules.rules, rule],
             allowlist: rules.rules.allowlist,
+            builtin_overrides: rules.rules.builtin_overrides,
         };
         try {
             rules = await save_wifi_rules(next);
@@ -129,6 +130,7 @@
             rules = await save_wifi_rules({
                 rules: rules.rules.rules.filter((r) => r.id !== id),
                 allowlist: rules.rules.allowlist,
+                builtin_overrides: rules.rules.builtin_overrides,
             });
             await scan();
         } catch (e) {
@@ -149,6 +151,33 @@
                     ...rules.rules.allowlist,
                     { prefix: bssid, label: 'silenced from the survey' },
                 ],
+                builtin_overrides: rules.rules.builtin_overrides,
+            });
+            await scan();
+        } catch (e) {
+            rules_error = `${e}`;
+        } finally {
+            rules_saving = false;
+        }
+    }
+
+    /**
+     * Turn a built-in signature on or off.
+     *
+     * Stored as an override rather than by editing the shipped pack, which is
+     * compiled into the daemon and replaced wholesale by an update. An
+     * override survives that.
+     */
+    async function toggle_builtin(id: string, enabled: boolean) {
+        if (!rules) return;
+        rules_saving = true;
+        rules_error = null;
+        const overrides = { ...rules.rules.builtin_overrides, [id]: enabled };
+        try {
+            rules = await save_wifi_rules({
+                rules: rules.rules.rules,
+                allowlist: rules.rules.allowlist,
+                builtin_overrides: overrides,
             });
             await scan();
         } catch (e) {
@@ -253,79 +282,133 @@
                         No access points found. That means nothing nearby is broadcasting — not that
                         nothing is nearby.
                     </p>
+                {:else}
+                    <table class="w-full border-collapse text-sm">
+                        <thead
+                            class="sticky top-0 bg-gray-200 text-left text-xs uppercase tracking-wide text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+                        >
+                            <tr>
+                                <th class="px-2 py-1 font-medium">Network</th>
+                                <th class="px-2 py-1 font-medium">Address</th>
+                                <th class="px-2 py-1 font-medium">Security</th>
+                                <th class="px-2 py-1 text-right font-medium">Signal</th>
+                                <th class="px-2 py-1 text-right font-medium">Ch</th>
+                                <th class="px-2 py-1 font-medium">Band</th>
+                                <th class="px-2 py-1 text-right font-medium">Last seen</th>
+                                <th class="px-2 py-1"><span class="sr-only">Actions</span></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {#each sorted as net (net.bssid ?? net.ssid ?? Math.random())}
+                                <tr
+                                    class="border-t border-gray-200 dark:border-gray-700 {net.alerts
+                                        .length > 0
+                                        ? 'bg-amber-50 dark:bg-amber-950'
+                                        : ''}"
+                                >
+                                    <td class="px-2 py-1">
+                                        {#if net.hidden}
+                                            <span class="italic text-gray-500 dark:text-gray-400"
+                                                >(hidden)</span
+                                            >
+                                        {:else}
+                                            <span class="font-semibold"
+                                                >{net.ssid ?? '(no name)'}</span
+                                            >
+                                        {/if}
+                                        {#if net.wps}
+                                            <span
+                                                class="ml-1 rounded-full bg-gray-200 px-1.5 py-0.5 text-[10px] text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+                                                title="WPS is advertised, which is a known weak point."
+                                                >WPS</span
+                                            >
+                                        {/if}
+                                    </td>
+                                    <td class="px-2 py-1 font-mono text-xs whitespace-nowrap">
+                                        {net.bssid ?? '—'}
+                                        {#if net.randomised_address}
+                                            <span
+                                                class="ml-1 rounded-full bg-gray-200 px-1.5 py-0.5 font-sans text-[10px] text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+                                                title="Locally administered, so set by software rather than a manufacturer. Vendor matching does not apply."
+                                                >random</span
+                                            >
+                                        {/if}
+                                    </td>
+                                    <td class="px-2 py-1 whitespace-nowrap">
+                                        <span
+                                            class={net.unprotected
+                                                ? 'font-semibold text-amber-700 dark:text-amber-300'
+                                                : ''}>{net.security ?? '—'}</span
+                                        >
+                                    </td>
+                                    <td class="px-2 py-1 text-right whitespace-nowrap">
+                                        <span class="font-mono" title="{net.signal_dbm ?? '?'} dBm"
+                                            >{bars(net.signal_dbm)}</span
+                                        >
+                                        <span
+                                            class="ml-1 tabular-nums text-gray-600 dark:text-gray-400"
+                                            >{net.signal_dbm ?? '?'}</span
+                                        >
+                                    </td>
+                                    <td class="px-2 py-1 text-right tabular-nums"
+                                        >{net.channel ?? '—'}</td
+                                    >
+                                    <td
+                                        class="px-2 py-1 whitespace-nowrap text-gray-600 dark:text-gray-400"
+                                        >{net.band ?? '—'}</td
+                                    >
+                                    <td
+                                        class="px-2 py-1 text-right tabular-nums whitespace-nowrap text-gray-600 dark:text-gray-400"
+                                        >{net.last_seen_ms === null
+                                            ? '—'
+                                            : `${(net.last_seen_ms / 1000).toFixed(1)}s`}</td
+                                    >
+                                    <td class="px-2 py-1 text-right">
+                                        <button
+                                            onclick={() => net.bssid && silence(net.bssid)}
+                                            disabled={!net.bssid || rules_saving}
+                                            title="Never show this device again"
+                                            class="text-xs text-gray-500 hover:text-gray-800 disabled:opacity-30 dark:text-gray-400 dark:hover:text-gray-100"
+                                            >silence</button
+                                        >
+                                    </td>
+                                </tr>
+                                {#each net.alerts as alert (alert.signature_id)}
+                                    <tr class="bg-amber-50 dark:bg-amber-950">
+                                        <td colspan="8" class="px-2 pb-2">
+                                            <div
+                                                class="rounded-md bg-white p-2 text-xs dark:bg-gray-900"
+                                            >
+                                                <div class="flex flex-wrap items-center gap-2">
+                                                    <span
+                                                        class="rounded-full px-2 py-0.5 font-semibold uppercase {confidence_class(
+                                                            alert.confidence
+                                                        )}">{alert.confidence}</span
+                                                    >
+                                                    <span class="font-semibold"
+                                                        >{alert.vendor}{#if alert.product}
+                                                            — {alert.product}{/if}</span
+                                                    >
+                                                    <span
+                                                        class="font-mono text-gray-500 dark:text-gray-400"
+                                                        >{alert.signature_id}</span
+                                                    >
+                                                </div>
+                                                <ul
+                                                    class="mt-1 list-inside list-disc text-gray-700 dark:text-gray-300"
+                                                >
+                                                    {#each alert.matched_fields as why (why)}
+                                                        <li>{why}</li>
+                                                    {/each}
+                                                </ul>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                {/each}
+                            {/each}
+                        </tbody>
+                    </table>
                 {/if}
-                {#each sorted as net (net.bssid ?? net.ssid ?? Math.random())}
-                    <div
-                        class="border-b border-gray-200 p-2 last:border-0 dark:border-gray-700 {net
-                            .alerts.length > 0
-                            ? 'bg-amber-50 dark:bg-amber-950'
-                            : ''}"
-                    >
-                        <div class="flex flex-wrap items-baseline gap-2">
-                            <span class="font-semibold">
-                                {#if net.hidden}
-                                    <span class="italic text-gray-500 dark:text-gray-400"
-                                        >(hidden network)</span
-                                    >
-                                {:else}
-                                    {net.ssid ?? '(no name)'}
-                                {/if}
-                            </span>
-                            <span class="font-mono text-xs text-gray-600 dark:text-gray-400"
-                                >{net.bssid ?? '—'}</span
-                            >
-                            {#if net.randomised_address}
-                                <span
-                                    class="rounded-full bg-gray-200 px-2 py-0.5 text-xs text-gray-700 dark:bg-gray-700 dark:text-gray-200"
-                                    title="The address is locally administered, so it is set by software rather than a manufacturer. Vendor matching does not apply to it."
-                                    >randomised</span
-                                >
-                            {/if}
-                            <span class="ml-auto flex items-center gap-2 text-xs">
-                                <span class="font-mono" title="{net.signal_dbm ?? '?'} dBm"
-                                    >{bars(net.signal_dbm)}</span
-                                >
-                                <span class="text-gray-600 dark:text-gray-400">
-                                    {net.signal_dbm ?? '?'} dBm
-                                    {#if net.channel}· ch {net.channel}{/if}
-                                    {#if net.band}· {net.band}{/if}
-                                </span>
-                                <button
-                                    onclick={() => net.bssid && silence(net.bssid)}
-                                    disabled={!net.bssid || rules_saving}
-                                    title="Never show this device again"
-                                    class="text-gray-500 hover:text-gray-800 disabled:opacity-30 dark:text-gray-400 dark:hover:text-gray-100"
-                                    >silence</button
-                                >
-                            </span>
-                        </div>
-                        {#each net.alerts as alert (alert.signature_id)}
-                            <div class="mt-1 rounded-md bg-white p-2 text-xs dark:bg-gray-900">
-                                <div class="flex flex-wrap items-center gap-2">
-                                    <span
-                                        class="rounded-full px-2 py-0.5 font-semibold uppercase {confidence_class(
-                                            alert.confidence
-                                        )}">{alert.confidence}</span
-                                    >
-                                    <span class="font-semibold"
-                                        >{alert.vendor}{#if alert.product}
-                                            — {alert.product}{/if}</span
-                                    >
-                                    <span class="font-mono text-gray-500 dark:text-gray-400"
-                                        >{alert.signature_id}</span
-                                    >
-                                </div>
-                                <ul
-                                    class="mt-1 list-inside list-disc text-gray-700 dark:text-gray-300"
-                                >
-                                    {#each alert.matched_fields as why (why)}
-                                        <li>{why}</li>
-                                    {/each}
-                                </ul>
-                            </div>
-                        {/each}
-                    </div>
-                {/each}
             </div>
         {:else}
             <div class="mt-2 min-h-40 flex-1 overflow-auto">
@@ -433,21 +516,47 @@
 
                 <h3 class="mt-3 text-sm font-semibold">Built in</h3>
                 <p class="text-xs text-gray-600 dark:text-gray-400">
-                    Shipped with Rayhunter and not editable here. Ones marked off were reported by
-                    others but not independently checked, so they stay quiet until someone turns
-                    them on deliberately.
+                    Shipped with Rayhunter. Turn any of them off here; the change is stored
+                    separately, so it survives an update replacing the list. Ones marked
+                    <em>unverified</em> were reported by others and not independently checked. Ones
+                    marked <em>cannot match on this device</em> need frames only monitor mode can capture,
+                    which this device's Wi-Fi firmware refuses — they are kept for hardware that can,
+                    and will never fire here however they are set.
                 </p>
                 {#if rules}
                     {#each rules.builtin as b (b.id)}
-                        <div class="mt-1 flex items-baseline gap-2 text-xs">
-                            <span
-                                class="rounded-full px-2 py-0.5 {b.enabled
-                                    ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                                    : 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}"
-                                >{b.enabled ? 'on' : 'off'}</span
-                            >
+                        <div class="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                            <label class="flex items-center gap-1">
+                                <input
+                                    type="checkbox"
+                                    checked={b.enabled}
+                                    disabled={rules_saving}
+                                    onchange={(e) => toggle_builtin(b.id, e.currentTarget.checked)}
+                                />
+                                <span class="sr-only">Enable {b.vendor} signature {b.id}</span>
+                            </label>
                             <span class="font-semibold">{b.vendor}</span>
                             <span class="font-mono text-gray-500 dark:text-gray-400">{b.id}</span>
+                            {#if !b.reachable}
+                                <span
+                                    class="rounded-full bg-gray-200 px-2 py-0.5 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+                                    title="This rule needs frames only monitor mode can capture, and this device's Wi-Fi firmware refuses monitor mode. It will never match here."
+                                    >cannot match on this device</span
+                                >
+                            {/if}
+                            {#if b.unverified}
+                                <span
+                                    class="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800 dark:bg-amber-900 dark:text-amber-200"
+                                    title={b.notes ??
+                                        'Reported by others, not independently checked.'}
+                                    >unverified</span
+                                >
+                            {/if}
+                            {#if b.overridden}
+                                <span class="text-gray-500 dark:text-gray-400"
+                                    >(changed by you)</span
+                                >
+                            {/if}
                         </div>
                     {/each}
                 {/if}

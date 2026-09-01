@@ -175,6 +175,39 @@ const fn default_true() -> bool {
     true
 }
 
+impl Signature {
+    /// Whether this signature can ever fire on data from a BSS scan.
+    ///
+    /// A scan returns beacons and probe responses from access points, with
+    /// element *presence* but not element *payloads*. A rule that needs a
+    /// probe request, or an exact element fingerprint, therefore cannot match
+    /// however good it is — it needs monitor mode, which no Orbic variant
+    /// tested will provide.
+    ///
+    /// Derived from the conditions rather than declared by hand, so it stays
+    /// true as rules are edited. The UI shows it, because a rule that is "on"
+    /// but structurally unable to fire is worse than one that is off: it looks
+    /// like coverage.
+    pub fn reachable_via_bss_scan(&self) -> bool {
+        !self.conditions.iter().any(|c| match c {
+            MatchCondition::FrameType { frame } => !matches!(
+                frame,
+                FrameKind::Beacon | FrameKind::ProbeResponse | FrameKind::BeaconOrProbeResponse
+            ),
+            // Element ordering and payloads are not recoverable from iw's
+            // decoded output.
+            MatchCondition::IeIdSequence { .. } => true,
+            MatchCondition::InformationElement { prefix, .. } => prefix.is_some(),
+            MatchCondition::VendorOui { .. } => true,
+            // BLE rules can never match Wi-Fi scan data.
+            MatchCondition::BleCompanyId { .. }
+            | MatchCondition::BleServiceUuid { .. }
+            | MatchCondition::BleNameContains { .. } => true,
+            _ => false,
+        })
+    }
+}
+
 /// A versioned collection of signatures.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SignatureDb {
