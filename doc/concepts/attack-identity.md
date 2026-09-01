@@ -2,7 +2,7 @@
 
 You are at a demonstration. So are three thousand other people, each with a
 phone in their pocket. Somewhere in the crowd, or in a van parked nearby, is a
-device the size of a briefcase pretending to be a cell tower. It does not need
+device the size of a briefcase pretending to be a tower. It does not need
 to listen to anyone's calls. It only needs to ask each phone one question —
 "what is your permanent number?" — and write down the answers. An hour later
 its operator has a list: the unique, unchanging identifier of every phone that

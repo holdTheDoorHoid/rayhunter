@@ -9,7 +9,7 @@ Nobody notices. And at the end of the day the stall owner has a list of
 everyone who was in the square.
 
 A cell-site simulator is that stall, for phones. It is a device that pretends
-to be a cell tower so that phones nearby will connect to it and reveal who
+to be a tower so that phones nearby will connect to it and reveal who
 they are. This page is about what that device is, who has them, and why a
 phone falls for it. It assumes you have read
 [How Cell Networks Work](./cell-networks.md), because the trick depends
