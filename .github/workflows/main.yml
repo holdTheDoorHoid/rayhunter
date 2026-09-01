@@ -659,7 +659,12 @@ jobs:
 
   github_pages_publish:
     name: Upload new documentation to Github Pages
-    if: ${{ github.ref == 'refs/heads/main' }}
+    # Disabled on this fork. The documentation site is published from the
+    # device-display-colors branch by .github/workflows/docs.yml. If this stayed
+    # enabled, a push to main would deploy main's book and overwrite the fork's
+    # docs site. The build/test jobs above still run as CI checks; only the
+    # deploy is turned off. To re-enable, restore the branch condition below.
+    if: false
     permissions:
       pages: write
       contents: write
