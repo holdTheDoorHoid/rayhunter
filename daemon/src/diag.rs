@@ -191,7 +191,6 @@ impl DiagTask {
         }
     }
 
-    /// Start recording, returning an error if disk space is too low.
     /// Start recording, and make sure the display agrees with the outcome.
     ///
     /// The display task starts life holding `DisplayState::Recording` and only
@@ -218,6 +217,7 @@ impl DiagTask {
         result
     }
 
+    /// Start recording, returning an error if disk space is too low.
     async fn start_inner(
         &mut self,
         qmdl_store: &mut RecordingStore,
