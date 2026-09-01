@@ -64,6 +64,19 @@ scripts reset the USB composition every time. To make it stick:
 ./installer util moxee-persist-adb --admin-password 'PASSWORD'
 ```
 
+A Moxee and a home router very often both live at `192.168.1.1`, on different
+interfaces, and which one your machine picks can change between runs. Sending a
+device's admin password to the wrong one is worth avoiding, so there is a
+wrapper that fingerprints the target first and refuses if it is not a Moxee
+running Rayhunter:
+
+```bash
+./scripts/moxee-persist-adb.sh
+```
+
+It prompts for the password rather than taking it on the command line, so it
+does not reach the process list or your shell history.
+
 This writes `9` to `/usrdata/mode.cfg`, which is the persistent partition the
 boot script reads to choose the USB composition. `9` gives RNDIS, DIAG, serial
 and ADB; the factory default of `3` is RNDIS only. The value is read back after
