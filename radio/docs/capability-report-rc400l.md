@@ -236,27 +236,42 @@ minutes scanning continuously on a dedicated interface, seven minutes idle
 again. Cellular health is proxied by the growth rate of the active QMDL file —
 a drop while scanning would mean diag messages were being missed.
 
-| | Baseline | Scanning | Change |
+| | Idle (before) | Scanning | Idle (after) |
 |---|---|---|---|
-| QMDL growth | 67.1 B/s | 66.8 B/s | **−0.4%** |
-| `rayhunter-daemon` CPU | 7.88% | 7.86% | none |
-| `MemAvailable` | 95604 kB | 95576 kB | ~0.5 MB held while the interface existed |
-| `hostapd` | running | running | never dropped |
+| QMDL growth | 67.1 B/s | 66.8 B/s | 88.8 B/s |
+| `rayhunter-daemon` CPU | 7.88% | 7.86% | 9.19% |
+| `MemAvailable` | 95604 kB | 95576 kB | 95500 kB |
+| `hostapd` | running | running | running |
 
 45 scans completed, 0 failed, one every ~9.5 s (a ~4.5 s scan plus a 5 s
-pause). Load average went *down* over the scanning window (1.40 → 1.16),
-which is measurement noise from the cellular side rather than a scanning
-effect.
+pause). About 0.5 MB of memory was held while the scan interface existed and
+returned when it was removed.
 
-**The number that decides acceptability is the first row.** Cellular capture
-was statistically unchanged under continuous scanning, so the feature does not
-trade cellular reliability for wireless coverage. At this rate a recording
-grows ~5.8 MB/day before radio evidence is added.
+**Read the third column before drawing a conclusion from the second.** The two
+non-scanning periods differ from each other by 32% on the same measure, which
+is much larger than the 0.4% difference between idle and scanning. That is
+expected: diag output depends on what the modem is doing, and this fork's own
+notes record that ML1 measurement reports stop entirely on an idle, stably
+attached hotspot. CPU behaves the same way (7.88 / 7.86 / 9.19%).
 
-Still not measured, and needed before shipping a continuously-running daemon:
-battery runtime impact, evidence-sidecar growth per day under a realistic
-device population, and behaviour in a dense RF environment (this was a quiet
-residential setting with 14–17 visible networks).
+So the defensible statement is that **no scanning penalty is detectable above
+the natural variation of the measure**, not that the penalty is exactly zero.
+The proxy is too noisy over seven-minute windows to resolve a small effect.
+Confirming this properly needs either much longer windows or a direct count of
+diag messages parsed rather than bytes written — worth doing before the daemon
+runs continuously, and cheap, since `rayhunter-daemon` already parses every
+message it receives.
+
+At the observed rate a recording grows roughly 6–8 MB/day before radio
+evidence is added.
+
+Still not measured: battery runtime impact, evidence-sidecar growth per day
+under a realistic device population, and behaviour in a dense RF environment
+(this was a quiet residential setting with 14–17 visible networks).
+
+The `rayhunter-daemon` log across the whole session contains only its usual
+`leftover bytes when parsing Message` warnings, which predate this work and
+are unrelated to scanning.
 
 ## 7. End-to-end verification
 
