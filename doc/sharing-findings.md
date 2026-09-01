@@ -25,6 +25,27 @@ These are exactly the things this whole tool exists to protect. A recording is
 useful evidence *because* it is detailed, and that same detail is what makes
 sharing it carelessly a real exposure.
 
+## The bundle describes itself
+
+Every download includes a `metadata.json` alongside the capture, saying what
+produced it and what has been read from it:
+
+- The Rayhunter version that **made** the recording and the version that
+  **exported** it, which are not always the same.
+- The device type, operating system and architecture.
+- The recording's id, your name and notes for it, when it started, when its last
+  message arrived, and how big it is.
+- **Which detectors ran, and at what version.**
+
+That last one matters more than it looks. A report with no warnings means
+something quite different depending on whether the detector that would have
+caught the thing existed yet. Without it, somebody reading your capture months
+later has no way to tell "nothing happened" from "nothing was looking".
+
+The sidecar deliberately contains **no identifiers**: no IMSI, IMEI or temporary
+identity, and no passwords or WiFi details. It is meant to be the safe part of
+the bundle. The capture next to it is not, which is the rest of this page.
+
 ## There is no one-click redaction
 
 Be clear-eyed about this: **Rayhunter does not have a feature that scrubs

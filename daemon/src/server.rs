@@ -691,6 +691,30 @@ pub async fn set_time_offset(Json(req): Json<SetTimeOffsetRequest>) -> StatusCod
     StatusCode::OK
 }
 
+/// The detectors that ran over a recording, from the first line of its
+/// analysis file.
+///
+/// Reads one line rather than the file, which on a long recording is large.
+/// Any failure returns `None`: the sidecar says nothing about analysis rather
+/// than the download failing.
+async fn read_analysis_header(
+    qmdl_store_lock: &Arc<RwLock<RecordingStore>>,
+    entry_index: usize,
+) -> Option<crate::export_metadata::AnalysisInfo> {
+    use tokio::io::AsyncBufReadExt;
+
+    let file = {
+        let store = qmdl_store_lock.read().await;
+        store
+            .open_file(entry_index, FileKind::Analysis)
+            .await
+            .ok()??
+    };
+    let mut lines = tokio::io::BufReader::new(file).lines();
+    let first = lines.next_line().await.ok()??;
+    crate::export_metadata::analysis_info_from_first_line(&first)
+}
+
 #[cfg_attr(feature = "apidocs", utoipa::path(
     get,
     path = "/api/zip/{name}",
@@ -711,7 +735,7 @@ pub async fn get_zip(
     Path(entry_name): Path<String>,
 ) -> Result<Response, (StatusCode, String)> {
     let qmdl_idx = entry_name.trim_end_matches(".zip").to_owned();
-    let (entry_index, download_name) = {
+    let (entry_index, download_name, manifest_entry) = {
         let qmdl_store = state.qmdl_store_lock.read().await;
         let (entry_index, entry) = qmdl_store.entry_for_name(&qmdl_idx).ok_or((
             StatusCode::NOT_FOUND,
@@ -725,11 +749,12 @@ pub async fn get_zip(
             ));
         }
 
-        (entry_index, entry.display_name.clone())
+        (entry_index, entry.display_name.clone(), entry.clone())
     };
 
     let qmdl_store_lock = state.qmdl_store_lock.clone();
     let gps_records = load_gps_records_for_entry(&state, entry_index).await;
+    let device = state.config.device.clone();
     // Kept for the download filename, since the zip writing task below takes
     // ownership of `qmdl_idx`.
     let entry_id = qmdl_idx.clone();
@@ -806,6 +831,31 @@ pub async fn get_zip(
                 }
 
                 entry_writer.into_inner().close().await?;
+            }
+
+            // The sidecar goes in last, on purpose: everything above is the
+            // capture, and a problem building a description of it must never
+            // cost somebody the thing being described.
+            {
+                let analysis = read_analysis_header(&qmdl_store_lock, entry_index).await;
+                let metadata = crate::export_metadata::build(
+                    &manifest_entry,
+                    &device,
+                    analysis,
+                    chrono::Local::now(),
+                );
+                match serde_json::to_vec_pretty(&metadata) {
+                    Ok(json) => {
+                        let entry = ZipEntryBuilder::new(
+                            "metadata.json".to_string().into(),
+                            Compression::Stored,
+                        );
+                        let mut entry_writer = zip.write_entry_stream(entry).await?.compat_write();
+                        tokio::io::AsyncWriteExt::write_all(&mut entry_writer, &json).await?;
+                        entry_writer.into_inner().close().await?;
+                    }
+                    Err(err) => error!("failed to build metadata.json: {err:?}"),
+                }
             }
 
             zip.close().await?;
@@ -1058,6 +1108,7 @@ mod tests {
                 format!("{entry_name}.ndjson"),
                 format!("{entry_name}-gps.ndjson"),
                 format!("{entry_name}.pcapng"),
+                "metadata.json".to_string(),
             ]
         );
 
@@ -1077,6 +1128,26 @@ mod tests {
             qmdl_reader.get_next_message().await.unwrap(),
             Some(Ok(expected_message)),
         );
+
+        // The sidecar has to describe this recording, not merely exist. Its
+        // whole value is what it says, and a field quietly going missing would
+        // not fail anything at run time.
+        let mut metadata_body = Vec::new();
+        zip_reader
+            .reader_without_entry(4)
+            .await
+            .unwrap()
+            .read_to_end(&mut metadata_body)
+            .await
+            .unwrap();
+        let metadata: crate::export_metadata::RecordingMetadata =
+            serde_json::from_slice(&metadata_body).expect("metadata.json parses");
+        assert_eq!(metadata.recording.id, entry_name);
+        assert_eq!(
+            metadata.metadata_version,
+            crate::export_metadata::METADATA_VERSION
+        );
+        assert!(!metadata.rayhunter.version_at_export.is_empty());
     }
 
     /// The cap may fall inside a multi-byte character, where String::truncate

@@ -8,6 +8,7 @@ pub mod demo;
 pub mod diag;
 pub mod display;
 pub mod error;
+pub mod export_metadata;
 pub mod gps;
 pub mod http_client;
 pub mod key_input;

@@ -8,6 +8,7 @@ mod demo;
 mod diag;
 mod display;
 mod error;
+mod export_metadata;
 mod gps;
 mod http_client;
 mod key_input;
