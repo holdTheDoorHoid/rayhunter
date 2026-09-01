@@ -113,10 +113,21 @@ pub async fn moxee(
         bail!("--admin-password is required");
     }
 
-    println!("Logging in and starting telnet...");
+    // start_telnet prints its own progress, so this does not announce it again.
     crate::orbic_network::start_telnet(admin_ip, admin_username, admin_password).await?;
 
-    let addr = SocketAddr::from_str(&format!("{admin_ip}:23"))
+    // The shell the exploit starts takes a moment to accept connections, and
+    // it does not listen on the standard telnet port. Both of those are the
+    // installer's own knowledge, so they are taken from it rather than
+    // written out again here: a second copy of the port number was exactly
+    // the bug this had.
+    print!("Waiting for telnet to become available... ");
+    use std::io::Write as _;
+    let _ = std::io::stdout().flush();
+    crate::orbic_network::wait_for_telnet(admin_ip).await?;
+    println!("done");
+
+    let addr = SocketAddr::from_str(&format!("{admin_ip}:{}", crate::orbic_network::TELNET_PORT))
         .with_context(|| format!("{admin_ip} is not an address"))?;
     let timeout = Duration::from_secs(20);
 

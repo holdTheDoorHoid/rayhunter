@@ -16,7 +16,7 @@ use crate::output::{eprintln, print, println};
 use crate::util::{interactive_shell, telnet_send_command, telnet_send_file};
 
 // Some kajeet devices have password protected telnetd on port 23, so we use port 24 just in case
-const TELNET_PORT: u16 = 24;
+pub(crate) const TELNET_PORT: u16 = 24;
 
 #[derive(Deserialize, Debug)]
 struct ExploitResponse {
@@ -194,7 +194,7 @@ pub async fn install(
     setup_rayhunter(&admin_ip, reset_config, &data_dir, enable_terminal).await
 }
 
-async fn wait_for_telnet(admin_ip: &str) -> Result<()> {
+pub(crate) async fn wait_for_telnet(admin_ip: &str) -> Result<()> {
     let addr = SocketAddr::from_str(&format!("{admin_ip}:{TELNET_PORT}"))?;
     let timeout = Duration::from_secs(60);
     let start_time = std::time::Instant::now();
