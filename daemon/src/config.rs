@@ -322,6 +322,39 @@ impl Default for WebdavConfig {
     }
 }
 
+impl WebdavConfig {
+    /// Reject durations that cannot be represented or would wedge the worker,
+    /// before the config is persisted. Without this, a value near the i64
+    /// extremes panics the duration constructor at startup — turning one bad
+    /// config request into a daemon that crashes on every boot until the file
+    /// is repaired by hand. A zero poll interval would busy-loop the worker.
+    ///
+    /// One week of polling, one hour per request, and ten years of minimum age
+    /// are all far past anything sensible while staying well inside the ranges
+    /// the runtime can represent.
+    pub fn validate(&self) -> Result<(), String> {
+        if !(1..=3600).contains(&self.upload_timeout_secs) {
+            return Err(format!(
+                "webdav upload_timeout_secs must be between 1 and 3600, got {}",
+                self.upload_timeout_secs
+            ));
+        }
+        if !(1..=604_800).contains(&self.poll_interval_secs) {
+            return Err(format!(
+                "webdav poll_interval_secs must be between 1 and 604800, got {}",
+                self.poll_interval_secs
+            ));
+        }
+        if !(0..=315_360_000).contains(&self.min_age_secs) {
+            return Err(format!(
+                "webdav min_age_secs must be between 0 and 315360000, got {}",
+                self.min_age_secs
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -459,7 +492,64 @@ pub fn parse_args() -> Args {
 
 #[cfg(test)]
 mod tests {
+    use super::WebdavConfig;
     use super::parse_hex_color;
+
+    /// The defaults must pass validation, and the extreme values that used to
+    /// panic the duration constructor at startup must be rejected up front.
+    #[test]
+    fn webdav_config_validation_rejects_out_of_range_durations() {
+        assert!(WebdavConfig::default().validate().is_ok());
+
+        let bad_min_age = WebdavConfig {
+            min_age_secs: i64::MAX,
+            ..WebdavConfig::default()
+        };
+        assert!(
+            bad_min_age.validate().is_err(),
+            "i64::MAX min age must be rejected"
+        );
+
+        let negative_min_age = WebdavConfig {
+            min_age_secs: -1,
+            ..WebdavConfig::default()
+        };
+        assert!(
+            negative_min_age.validate().is_err(),
+            "negative min age must be rejected"
+        );
+
+        let zero_poll = WebdavConfig {
+            poll_interval_secs: 0,
+            ..WebdavConfig::default()
+        };
+        assert!(
+            zero_poll.validate().is_err(),
+            "zero poll interval must be rejected"
+        );
+
+        let zero_timeout = WebdavConfig {
+            upload_timeout_secs: 0,
+            ..WebdavConfig::default()
+        };
+        assert!(
+            zero_timeout.validate().is_err(),
+            "zero timeout must be rejected"
+        );
+    }
+
+    /// The i64::MAX value the API now rejects must, if it somehow reaches the
+    /// runtime anyway, be handled without panicking (try_seconds, not seconds).
+    #[test]
+    fn an_extreme_min_age_does_not_panic_the_worker_config() {
+        let cfg = WebdavConfig {
+            url: "https://example.com/".to_string(),
+            min_age_secs: i64::MAX,
+            ..WebdavConfig::default()
+        };
+        // Would panic with TimeDelta::seconds; must not with try_seconds.
+        let _ = crate::webdav::WebdavUploadWorkerConfig::from(cfg);
+    }
 
     /// A config written before a detector existed must come up with that
     /// detector on, not silently off. This is the upgrade path for every

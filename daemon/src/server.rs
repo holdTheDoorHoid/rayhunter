@@ -257,6 +257,11 @@ pub async fn get_config(
 ) -> Result<Json<Config>, (StatusCode, String)> {
     let mut config = state.config.clone();
     config.wifi_password = None;
+    // The WebDAV password is a stored secret; never round-trip it through the
+    // browser. The client learns only whether one is set (a non-empty username
+    // or a configured URL implies it), and set_config preserves the stored
+    // password when this comes back blank.
+    config.webdav.password = None;
     // From the live list, not the startup snapshot, so an account added a
     // moment ago is still here on the next reload.
     config.web_users = state.web_users.read().await.clone();
@@ -292,6 +297,12 @@ pub async fn set_config(
         config.gps_fixed_latitude = None;
         config.gps_fixed_longitude = None;
     }
+    // Reject out-of-range durations before anything is written. A value that a
+    // runtime constructor cannot represent would otherwise be persisted and
+    // then crash the daemon on the next start, over and over.
+    if let Err(msg) = config.webdav.validate() {
+        return Err((StatusCode::BAD_REQUEST, msg));
+    }
     let mut config_to_write = config.clone();
     // Accounts are never taken from the request. The hashes are redacted on
     // the way out, so a client saving the settings page would otherwise post
@@ -302,6 +313,12 @@ pub async fn set_config(
     // Same for the terminal, which by design can only be switched on when
     // flashing and must never be turnable on from the interface itself.
     config_to_write.terminal_enabled = state.config.terminal_enabled;
+    // The WebDAV password is redacted in get_config, so a client saving the
+    // settings page posts it back blank. Preserve the stored one rather than
+    // wiping it; a genuine change sends a non-empty value.
+    if config_to_write.webdav.password.is_none() {
+        config_to_write.webdav.password = state.config.webdav.password.clone();
+    }
     config_to_write.wifi_ssid = None;
     config_to_write.wifi_password = None;
     config_to_write.wifi_security = None;
@@ -313,12 +330,14 @@ pub async fn set_config(
         )
     })?;
 
-    write(&state.config_path, config_str).await.map_err(|err| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("failed to write config file: {err}"),
-        )
-    })?;
+    write_config_atomically(&state.config_path, &config_str)
+        .await
+        .map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to write config file: {err}"),
+            )
+        })?;
 
     wifi_station::update_wpa_conf(&config.wifi_config()).await;
 
@@ -1311,15 +1330,51 @@ async fn write_web_users(
             format!("failed to serialize config: {err}"),
         )
     })?;
-    write(&state.config_path, config_str).await.map_err(|err| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("failed to write config: {err}"),
-        )
-    })?;
+    write_config_atomically(&state.config_path, &config_str)
+        .await
+        .map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to write config: {err}"),
+            )
+        })?;
     // Only after the write succeeded, so a failed write does not start
     // demanding a password that was never saved.
     *state.web_users.write().await = users;
+    Ok(())
+}
+
+/// Write the config file so an interruption leaves either the old contents or
+/// the new contents intact, never a half-written file. The config parser fails
+/// on invalid TOML and the daemon will not start without it, so a torn write
+/// during a settings save could otherwise brick the device until the file is
+/// repaired by hand. Write a sibling temp file, flush it to disk, then rename
+/// over the target — a rename within one filesystem is atomic.
+async fn write_config_atomically(path: &str, contents: &str) -> std::io::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    let target = std::path::Path::new(path);
+    let Some(name) = target.file_name() else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "config path has no file name",
+        ));
+    };
+    let mut tmp_name = name.to_os_string();
+    tmp_name.push(".new");
+    let tmp = target.with_file_name(tmp_name);
+
+    let mut file = tokio::fs::File::create(&tmp).await?;
+    file.write_all(contents.as_bytes()).await?;
+    file.sync_all().await?;
+    drop(file);
+    tokio::fs::rename(&tmp, target).await?;
+    // Best effort: flush the directory entry so the rename itself survives a
+    // power loss. Not fatal if the platform will not let us.
+    if let Some(parent) = target.parent()
+        && let Ok(dir) = tokio::fs::File::open(parent).await
+    {
+        let _ = dir.sync_all().await;
+    }
     Ok(())
 }
 

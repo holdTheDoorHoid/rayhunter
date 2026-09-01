@@ -27,7 +27,18 @@ impl From<WebdavConfig> for WebdavUploadWorkerConfig {
     fn from(value: WebdavConfig) -> Self {
         WebdavUploadWorkerConfig {
             poll_interval: Duration::from_secs(value.poll_interval_secs),
-            min_age: TimeDelta::seconds(value.min_age_secs),
+            // try_seconds rather than seconds: the latter panics for values near
+            // the i64 extremes, and this runs at startup from persisted config,
+            // so an out-of-range value would crash the daemon on every boot.
+            // Config validation rejects such values at the API, but this is the
+            // last line of defence for anything already on disk.
+            min_age: TimeDelta::try_seconds(value.min_age_secs).unwrap_or_else(|| {
+                warn!(
+                    "webdav min_age_secs {} is out of range, treating it as 0",
+                    value.min_age_secs
+                );
+                TimeDelta::zero()
+            }),
             url: value.url,
             username: value.username,
             password: value.password,
