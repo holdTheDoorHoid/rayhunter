@@ -213,14 +213,22 @@ enum Sensor {
 /// reading is displayed on every single device that has an unpopulated channel.
 const TSENS_UNPOPULATED_C: f32 = 125.0;
 
+/// Zones that are definitely not the processor, matched by name.
+///
+/// Everything else still falls through to the processor, because sensor naming
+/// varies by platform and an allowlist would silently drop the reading on any
+/// device whose cores are not called what this file expects. Only names with
+/// clear evidence behind them belong here: an mdm9607 exposes a `battery` zone
+/// reporting tenths of a degree, which the old "not a power amplifier, so a
+/// processor" rule filed as a core and scaled from 2800 to 2.8 C.
+const NOT_PROCESSOR: [&str; 3] = ["battery", "bms", "chg"];
+
 /// Which reading a zone belongs to, given its `type` and raw `temp`.
 ///
-/// Sensor naming varies by platform, so this classifies by name rather than by
-/// index. Anything not recognised is **ignored** rather than counted as a
-/// processor: an mdm9607 exposes a `battery` zone whose value is in tenths of a
-/// degree, and the previous "everything that is not a power amplifier is a
-/// processor" rule filed it as one, scaled 2800 to 2.8 C and only failed to
-/// show it because the real cores happened to be warmer.
+/// Classified by name rather than by index, since the naming varies by
+/// platform. Deliberately tolerant in the same direction as before: an
+/// unrecognised zone is treated as a processor sensor rather than discarded, so
+/// a device this file has never seen still reports something.
 fn classify_thermal_zone(name: &str, raw: f32) -> Option<(Sensor, f32)> {
     // Millidegrees on some platforms, whole degrees on others.
     let celsius = if raw.abs() > 200.0 { raw / 1000.0 } else { raw };
@@ -237,11 +245,11 @@ fn classify_thermal_zone(name: &str, raw: f32) -> Option<(Sensor, f32)> {
         return Some((Sensor::Radio, celsius));
     }
 
-    if name.contains("tsens") || name.contains("cpu") || name.contains("soc") {
-        return Some((Sensor::Processor, celsius));
+    if NOT_PROCESSOR.iter().any(|n| name.contains(n)) {
+        return None;
     }
 
-    None
+    Some((Sensor::Processor, celsius))
 }
 
 /// Warmest processor sensor and warmest power amplifier sensor.
@@ -584,10 +592,23 @@ mod tests {
         assert_eq!(classify_thermal_zone("tsens_tz_sensor0", 200.0), None);
     }
 
-    /// An unrecognised zone is ignored rather than guessed at. The Orbic and
-    /// the TP-Link between them expose zones for things that are neither.
+    /// An unrecognised zone still counts as a processor. Narrowing this to an
+    /// allowlist would silently drop the processor reading on every device
+    /// whose cores are not named the way an mdm9607's are, which is the whole
+    /// reason the original matched by name in the first place.
     #[test]
-    fn an_unknown_zone_is_ignored() {
-        assert_eq!(classify_thermal_zone("some-future-sensor", 45.0), None);
+    fn an_unknown_zone_is_still_treated_as_a_processor() {
+        assert_eq!(
+            classify_thermal_zone("some-future-sensor", 45.0),
+            Some((Sensor::Processor, 45.0))
+        );
+        // Names an Orbic or another Qualcomm board might plausibly use.
+        for name in ["cpu-0-0-usr", "xo_therm", "quiet_therm", "mdm-core-usr"] {
+            assert_eq!(
+                classify_thermal_zone(name, 41.0),
+                Some((Sensor::Processor, 41.0)),
+                "{name} should still report"
+            );
+        }
     }
 }
