@@ -54,3 +54,22 @@ enabled. Instead, you can use:
 ```bash
 ./installer util orbic-shell
 ```
+
+## Keeping ADB across reboots
+
+Enabling ADB on a Moxee normally lasts only until the device restarts: the boot
+scripts reset the USB composition every time. To make it stick:
+
+```bash
+./installer util moxee-persist-adb --admin-password 'PASSWORD'
+```
+
+This writes `9` to `/usrdata/mode.cfg`, which is the persistent partition the
+boot script reads to choose the USB composition. `9` gives RNDIS, DIAG, serial
+and ADB; the factory default of `3` is RNDIS only. The value is read back after
+writing, so the command fails rather than claiming success it cannot confirm.
+
+Power cycle the device afterwards. A device booted on USB power alone disables
+USB whatever this is set to, so power it off USB rather than just rebooting.
+
+To undo it, add `--revert`.
