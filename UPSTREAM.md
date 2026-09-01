@@ -83,6 +83,43 @@ severity warning at all: scenarios are chosen at random and it had simply been
 luck. Fixed in the same commit, because separating them needs an intermediate
 that does not compile.
 
+### persist-adb
+Makes ADB survive a reboot, folded into the installer from discussions.
+**Upstream:** [#893](https://github.com/EFForg/rayhunter/discussions/893) (Moxee),
+[#928](https://github.com/EFForg/rayhunter/discussions/928) (Wingtech, T-Mobile).
+**Commits:** see `git log --grep="^Feature: persist-adb"`.
+**Files:** `installer/src/persist_adb.rs`, `installer/src/lib.rs` (three util
+subcommands), `installer/src/orbic_network.rs` (exposing the telnet port and
+wait), `installer/src/util.rs` (bounding the prompt wait),
+`scripts/moxee-persist-adb.sh`, and the three device doc pages.
+**Depends on:** nothing.
+
+**Verified on a Moxee K779HSDL.** It went from `05c6:f626` (RNDIS only) to
+`05c6:f622` with root ADB, and survived both a full power cycle and a later
+warm reboot. `/usrdata/mode.cfg` reads `9`.
+
+**Wingtech and T-Mobile are still unverified**, since neither device was
+available. Given that the Moxee path needed four fixes before it worked, treat
+those two as untested rather than merely untried.
+
+**What the four fixes were**, because they are all the same mistake: the code
+was written from the discussion thread while assuming how the installer's own
+telnet helper behaved, instead of reading how the installer's Moxee path calls
+it. The answers were all in `orbic_network.rs`.
+
+1. The wrapper called `cargo`, which rustup puts somewhere a non-login shell
+   does not have on its PATH, *after* prompting for the password.
+2. The shell the exploit opens listens on port **24**, not 23. There was
+   already a `TELNET_PORT` constant saying so.
+3. It connected immediately instead of waiting for that shell to come up, as
+   `wait_for_telnet` does.
+4. It asked to wait for a shell prompt. `nc -e /bin/sh` has no terminal and
+   never prints one, and that wait had no timeout, so it hung silently. Every
+   other call to this device passes false.
+
+The port and the wait now come from the installer rather than being written out
+again, and the prompt wait is bounded so it errors instead of hanging.
+
 ### sim-health
 Says whether the SIM is working, from evidence Rayhunter already collects.
 **Upstream:** [#882](https://github.com/EFForg/rayhunter/issues/882), opened by
