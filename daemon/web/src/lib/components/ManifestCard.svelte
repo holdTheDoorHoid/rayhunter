@@ -105,6 +105,7 @@
         <DownloadLink url={entry.get_pcap_url()} text="pcap" full_button />
         <DownloadLink url={entry.get_qmdl_url()} text="qmdl" full_button />
         <DownloadLink url={entry.get_zip_url()} text="zip" full_button />
+        <DownloadLink url={entry.get_redacted_zip_url()} text="zip (shareable)" full_button />
         {#if current}
             <RecordingControls {server_is_recording} />
         {:else}

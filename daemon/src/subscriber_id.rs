@@ -96,6 +96,16 @@ const ATTACH_REQUEST: u8 = 0x41;
 /// reimplementing the NAS parser to reach one field. A missed identity is not
 /// harmful here; a wrongly decoded one would be.
 pub fn identity_from_nas(payload: &[u8]) -> Option<Identity> {
+    let (identity, _) = identity_from_nas_with_range(payload)?;
+    Some(identity)
+}
+
+/// The same, plus where in the payload the identity's bytes sit.
+///
+/// The range is what redaction needs: overwriting an identity means knowing
+/// exactly which bytes carry it, and finding them a second time by a different
+/// route is how the two would come to disagree.
+pub fn identity_from_nas_with_range(payload: &[u8]) -> Option<(Identity, std::ops::Range<usize>)> {
     // Octet 0 carries the protocol discriminator in its low nibble and, for
     // mobility management, the security header type in its high nibble.
     let header = *payload.first()?;
@@ -128,8 +138,10 @@ pub fn identity_from_nas(payload: &[u8]) -> Option<Identity> {
     };
 
     let length = *payload.get(ie_start)? as usize;
-    let value = payload.get(ie_start + 1..ie_start + 1 + length)?;
-    decode_eps_mobile_identity(value)
+    let range = ie_start + 1..ie_start + 1 + length;
+    let value = payload.get(range.clone())?;
+    let identity = decode_eps_mobile_identity(value)?;
+    Some((identity, range))
 }
 
 #[cfg(test)]

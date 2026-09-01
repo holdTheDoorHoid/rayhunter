@@ -33,7 +33,7 @@ use crate::diag::DiagDeviceCtrlMessage;
 use crate::display::DisplayState;
 use crate::gps::GpsData;
 use crate::notifications::DEFAULT_NOTIFICATION_TIMEOUT;
-use crate::pcap::{generate_pcap_data, load_gps_records_for_entry};
+use crate::pcap::{generate_pcap_data, generate_redacted_pcap_data, load_gps_records_for_entry};
 use crate::qmdl_store::{FileKind, RecordingStore};
 use crate::update::UpdateStatus;
 
@@ -733,7 +733,20 @@ async fn read_analysis_header(
 pub async fn get_zip(
     State(state): State<Arc<ServerState>>,
     Path(entry_name): Path<String>,
+    axum::extract::RawQuery(raw_query): axum::extract::RawQuery,
 ) -> Result<Response, (StatusCode, String)> {
+    // `?redact=1` asks for a bundle meant to be shared: the device's own
+    // identifiers removed from the capture, and the raw QMDL left out, since
+    // nothing removes them from that. Parsed by hand for the same reason the
+    // packet list is: axum's Query extractor needs a feature this build does
+    // not enable.
+    let redact = raw_query
+        .as_deref()
+        .map(|q| {
+            q.split('&')
+                .any(|pair| matches!(pair, "redact=1" | "redact=true"))
+        })
+        .unwrap_or(false);
     let qmdl_idx = entry_name.trim_end_matches(".zip").to_owned();
     let (entry_index, download_name, manifest_entry) = {
         let qmdl_store = state.qmdl_store_lock.read().await;
@@ -764,9 +777,16 @@ pub async fn get_zip(
     tokio::spawn(async move {
         let result: Result<(), Error> = async {
             let mut zip = ZipFileWriter::with_tokio(writer);
+            let mut redaction_report: Option<crate::redact::RedactionReport> = None;
 
-            // Add stored files
+            // Add stored files. The raw capture is left out of a redacted
+            // bundle: redaction happens on the way into the PCAP, and nothing
+            // removes identifiers from the QMDL, so including it would hand
+            // over exactly what the bundle claims to have removed.
             for &file_kind in FileKind::ALL {
+                if redact && file_kind == FileKind::Qmdl {
+                    continue;
+                }
                 let file_opt = {
                     let qmdl_store = qmdl_store_lock.read().await;
                     qmdl_store.open_file(entry_index, file_kind).await?
@@ -822,7 +842,27 @@ pub async fn get_zip(
                 };
                 let qmdl_reader = QmdlMessageReader::new(qmdl_file_for_pcap).await?;
 
-                if let Err(e) =
+                if redact {
+                    match generate_redacted_pcap_data(&mut entry_writer, qmdl_reader, gps_records)
+                        .await
+                    {
+                        Ok(report) => {
+                            warn!(
+                                "redacted export of {qmdl_idx}: removed {} identifiers from {} NAS messages",
+                                report.total(),
+                                report.messages_scanned
+                            );
+                            redaction_report = Some(report);
+                        }
+                        Err(e) => {
+                            // A redacted bundle whose PCAP failed to build has
+                            // nothing left in it, and must not look like a
+                            // successful redaction of an empty capture.
+                            error!("Failed to generate redacted PCAP: {e:?}");
+                            return Err(e);
+                        }
+                    }
+                } else if let Err(e) =
                     generate_pcap_data(&mut entry_writer, qmdl_reader, gps_records).await
                 {
                     // if we fail to generate the PCAP file, we should still continue and give the
@@ -858,6 +898,25 @@ pub async fn get_zip(
                 }
             }
 
+            // What was removed, said plainly. A redacted bundle that does not
+            // say what it took out invites the reader to assume it took out
+            // everything, which is a promise this cannot make.
+            if let Some(report) = &redaction_report {
+                match serde_json::to_vec_pretty(report) {
+                    Ok(json) => {
+                        let entry = ZipEntryBuilder::new(
+                            "redaction-report.json".to_string().into(),
+                            Compression::Stored,
+                        );
+                        let mut entry_writer =
+                            zip.write_entry_stream(entry).await?.compat_write();
+                        tokio::io::AsyncWriteExt::write_all(&mut entry_writer, &json).await?;
+                        entry_writer.into_inner().close().await?;
+                    }
+                    Err(err) => error!("failed to build redaction-report.json: {err:?}"),
+                }
+            }
+
             zip.close().await?;
             Ok(())
         }
@@ -874,9 +933,10 @@ pub async fn get_zip(
     // so two recordings with the same name never collide, and the name has
     // already been reduced to letters, digits, dash and underscore on the way
     // in, so it cannot smuggle a quote or a path separator into this header.
+    let suffix = if redact { "-redacted" } else { "" };
     let filename = match &download_name {
-        Some(name) => format!("{name}-{entry_id}.zip"),
-        None => format!("{entry_id}.zip"),
+        Some(name) => format!("{name}-{entry_id}{suffix}.zip"),
+        None => format!("{entry_id}{suffix}.zip"),
     };
     let headers = [
         (CONTENT_TYPE, "application/zip".to_string()),
@@ -1084,9 +1144,13 @@ mod tests {
         let entry_name = create_test_entry_with_data(&store_lock, &test_qmdl_data).await;
         let state = create_test_server_state(store_lock);
 
-        let response = get_zip(State(state), Path(entry_name.clone()))
-            .await
-            .unwrap();
+        let response = get_zip(
+            State(state),
+            Path(entry_name.clone()),
+            axum::extract::RawQuery(None),
+        )
+        .await
+        .unwrap();
 
         let headers = response.headers();
         assert_eq!(headers.get("content-type").unwrap(), "application/zip");
@@ -1148,6 +1212,65 @@ mod tests {
             crate::export_metadata::METADATA_VERSION
         );
         assert!(!metadata.rayhunter.version_at_export.is_empty());
+    }
+
+    /// A redacted bundle must not contain the raw capture. Redaction happens on
+    /// the way into the PCAP, and nothing removes identifiers from the QMDL, so
+    /// shipping it would hand over exactly what the bundle claims to have taken
+    /// out. This is the assertion that stops that regressing.
+    #[tokio::test]
+    async fn a_redacted_bundle_leaves_out_the_raw_capture() {
+        let (_temp_dir, store_lock) = create_test_qmdl_store().await;
+        let test_qmdl_data = create_test_container();
+        let entry_name = create_test_entry_with_data(&store_lock, &test_qmdl_data).await;
+        let state = create_test_server_state(store_lock);
+
+        let response = get_zip(
+            State(state),
+            Path(entry_name.clone()),
+            axum::extract::RawQuery(Some("redact=1".to_string())),
+        )
+        .await
+        .unwrap();
+
+        // The name has to say so too, or the two bundles are indistinguishable
+        // in a downloads folder.
+        let disposition = response
+            .headers()
+            .get("content-disposition")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(disposition.contains("-redacted.zip"), "{disposition}");
+
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let zip_reader = ZipFileReader::new(body_bytes.to_vec()).await.unwrap();
+        let filenames: Vec<String> = zip_reader
+            .file()
+            .entries()
+            .iter()
+            .map(|entry| entry.filename().as_str().unwrap().to_string())
+            .collect();
+
+        assert!(
+            !filenames.iter().any(|f| f.ends_with(".qmdl")),
+            "the raw capture is in a redacted bundle: {filenames:?}"
+        );
+        assert!(
+            filenames.contains(&"redaction-report.json".to_string()),
+            "a redacted bundle must say what it removed: {filenames:?}"
+        );
+        assert!(
+            filenames.iter().any(|f| f.ends_with(".pcapng")),
+            "{filenames:?}"
+        );
+        assert!(
+            filenames.contains(&"metadata.json".to_string()),
+            "{filenames:?}"
+        );
     }
 
     /// The cap may fall inside a multi-byte character, where String::truncate

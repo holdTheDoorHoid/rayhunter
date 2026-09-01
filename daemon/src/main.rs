@@ -16,6 +16,7 @@ mod notifications;
 mod packet_explorer;
 mod pcap;
 mod qmdl_store;
+mod redact;
 mod server;
 mod sim_health;
 mod stats;

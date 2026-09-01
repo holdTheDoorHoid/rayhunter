@@ -46,32 +46,45 @@ The sidecar deliberately contains **no identifiers**: no IMSI, IMEI or temporary
 identity, and no passwords or WiFi details. It is meant to be the safe part of
 the bundle. The capture next to it is not, which is the rest of this page.
 
-## There is no one-click redaction
+## The shareable download
 
-Be clear-eyed about this: **Rayhunter does not have a feature that scrubs
-identifiers out of a recording for you.** The display name you can set is
-restricted so it is safe in a filename, but that is not redaction of the capture
-itself. So sharing safely is a matter of deliberate choice, not a button:
+Every recording offers two downloads. The ordinary **zip** is the full evidence
+bundle, raw capture included. The **zip (shareable)** one is meant to be sent to
+somebody:
 
-- **Share the least that makes your point.** Often the analysis — which detector
-  fired, at what severity, when and where in general terms — is enough to raise
-  the alarm or ask for help, without handing over the raw capture and every
-  identifier in it.
-- **Decide who genuinely needs the raw recording.** A trusted expert verifying a
-  finding may need it; a public post almost never does. Sharing raw with one
-  person you trust is a different act from publishing.
-- **Screenshots leak too.** A screenshot of the interface can contain your IMSI,
-  IMEI, temporary identity, cell identities, and location. Crop or cover them
-  before posting an image, and check the whole frame, not only the part you meant
-  to show.
-- **Never share a recording that contains demo data as if it were real.** The
-  demo writes a clearly-labelled fake warning into the current recording; a
-  recording containing it is not evidence and must not be sent to EFF or
-  presented as a detection. Start a fresh recording after any demo. See [Your
-  First Warning](./first-warning.md).
+- The device's own identifiers are removed from the capture on the way out. The
+  digits are set to zero rather than the field being deleted, so the messages
+  still open in Wireshark and you keep the evidence of *what happened* while
+  losing *who it was*.
+- **The raw recording is left out entirely.** Nothing removes identifiers from
+  the QMDL, so including it would hand over exactly what the bundle claims to
+  have taken out.
+- A `redaction-report.json` says how many identifiers were removed and how many
+  messages were examined.
 
-If you are unsure whether something in a recording identifies you or someone
-else, treat it as if it does.
+Your original recording is never modified. Redaction happens as the download is
+built, because a recording is evidence and evidence that got quietly rewritten
+is not evidence any more.
+
+### What it does not promise
+
+**This is a real reduction in exposure, not a guarantee of cleanliness.** It
+finds identities in the messages where a device announces itself and they sit at
+a known position: identity responses and attach requests. An identity carried
+somewhere it does not look for would survive, and a ciphered message hides its
+contents from Rayhunter as much as from anyone reading the capture.
+
+That is why the bundle reports counts rather than declaring itself clean.
+Believing a capture is safe when it is not leaves you worse off than knowing it
+is not. If what you are sharing is genuinely sensitive, look at the redacted
+PCAP yourself before sending it.
+
+The capture still contains things the redaction does not touch, and you should
+decide about them deliberately:
+
+- Cell identities and network identifiers for the towers around you, which say
+  where you were.
+- Timing, and location if you had GPS configured.
 
 ## Where to report
 

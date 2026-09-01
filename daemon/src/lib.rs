@@ -16,6 +16,7 @@ pub mod notifications;
 pub mod packet_explorer;
 pub mod pcap;
 pub mod qmdl_store;
+pub mod redact;
 pub mod server;
 pub mod sim_health;
 pub mod stats;

@@ -157,15 +157,48 @@ fn find_nearest_gps(records: &[GpsRecord], packet_timestamp: i64) -> Option<GpsP
 
 pub async fn generate_pcap_data<R, W>(
     writer: W,
-    mut reader: QmdlMessageReader<R>,
+    reader: QmdlMessageReader<R>,
     gps_records: Vec<GpsRecord>,
 ) -> Result<(), Error>
 where
     W: AsyncWrite + Unpin + Send,
     R: AsyncRead + AsyncSeek + Unpin,
 {
+    generate_pcap_data_inner(writer, reader, gps_records, false)
+        .await
+        .map(|_| ())
+}
+
+/// The same, with the device's own identifiers removed on the way out.
+///
+/// Redaction happens here rather than over the stored capture: a recording is
+/// evidence, and evidence that got quietly rewritten is not evidence any more.
+/// See `crate::redact` for what this does and does not promise.
+pub async fn generate_redacted_pcap_data<R, W>(
+    writer: W,
+    reader: QmdlMessageReader<R>,
+    gps_records: Vec<GpsRecord>,
+) -> Result<crate::redact::RedactionReport, Error>
+where
+    W: AsyncWrite + Unpin + Send,
+    R: AsyncRead + AsyncSeek + Unpin,
+{
+    generate_pcap_data_inner(writer, reader, gps_records, true).await
+}
+
+async fn generate_pcap_data_inner<R, W>(
+    writer: W,
+    mut reader: QmdlMessageReader<R>,
+    gps_records: Vec<GpsRecord>,
+    redact: bool,
+) -> Result<crate::redact::RedactionReport, Error>
+where
+    W: AsyncWrite + Unpin + Send,
+    R: AsyncRead + AsyncSeek + Unpin,
+{
     let mut pcap_writer = GsmtapPcapWriter::new(writer).await?;
     pcap_writer.write_iface_header().await?;
+    let mut report = crate::redact::RedactionReport::default();
 
     while let Some(maybe_msg) = reader.get_next_message().await? {
         match maybe_msg {
@@ -173,7 +206,20 @@ where
                 // Every frame the record holds, not just the first: a MAC
                 // transport block record carries several, and dropping the
                 // rest would leave most of that traffic out of the capture.
-                for (timestamp, gsmtap_msg) in gsmtap_parser::parse_all(msg)? {
+                for (timestamp, mut gsmtap_msg) in gsmtap_parser::parse_all(msg)? {
+                    if redact
+                        && matches!(
+                            gsmtap_msg.header.gsmtap_type,
+                            rayhunter::gsmtap::GsmtapType::LteNas(_)
+                        )
+                    {
+                        report.messages_scanned += 1;
+                        if let Some(identity) =
+                            crate::redact::redact_nas_identity(&mut gsmtap_msg.payload)
+                        {
+                            report.record(&identity);
+                        }
+                    }
                     let packet_unix_ts = timestamp.to_datetime().timestamp();
                     let gps = find_nearest_gps(&gps_records, packet_unix_ts);
                     pcap_writer
@@ -185,7 +231,7 @@ where
         }
     }
 
-    Ok(())
+    Ok(report)
 }
 
 #[cfg(test)]
