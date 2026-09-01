@@ -44,6 +44,14 @@ pub struct Scenario {
     pub name: &'static str,
     /// The messages, injected in order.
     pub messages: Vec<DemoMessage>,
+    /// Whether this scenario raises a high severity warning on its own.
+    ///
+    /// A demo exists to turn the device red in front of an audience, so every
+    /// run has to contain at least one of these. Kept as a flag rather than
+    /// worked out at run time because choosing the scenarios must not mean
+    /// running the analysers first; `the_high_severity_flags_are_true` is what
+    /// stops it drifting from what the detectors actually do.
+    pub raises_high: bool,
 }
 
 /// A single synthetic message, and which protocol layer it belongs to.
@@ -56,6 +64,8 @@ pub enum DemoMessage {
     Rrc { payload: Vec<u8>, pdu_num: u8 },
     /// A 2G (GSM) Layer 3 signalling message, carried in a GSM RR log record.
     Gsm(Vec<u8>),
+    /// A random access response, carrying the timing advance a tower reported.
+    MacRach { timing_advance: u16 },
 }
 
 /// Every scenario the demo can draw from.
@@ -79,6 +89,7 @@ pub fn scenarios() -> Vec<Scenario> {
                 // cipher, meaning no encryption at all.
                 0x07, 0x5d, 0x00, 0x00, 0x02, 0x80, 0x00, 0x00,
             ])],
+            raises_high: true,
         },
         Scenario {
             name: "tower switched encryption off (RRC null cipher)",
@@ -91,6 +102,7 @@ pub fn scenarios() -> Vec<Scenario> {
                 payload: vec![0x30, 0x00, 0x10],
                 pdu_num: 7,
             }],
+            raises_high: true,
         },
         Scenario {
             name: "pushed down onto a 2G network (connection release redirect)",
@@ -103,6 +115,7 @@ pub fn scenarios() -> Vec<Scenario> {
                 payload: vec![0x28, 0x22, 0x20, 0x00, 0x00],
                 pdu_num: 7,
             }],
+            raises_high: true,
         },
         Scenario {
             name: "2G advertised as a better choice than nearby 4G (SIB downgrade)",
@@ -134,6 +147,7 @@ pub fn scenarios() -> Vec<Scenario> {
                     pdu_num: 2,
                 },
             ],
+            raises_high: true,
         },
         Scenario {
             name: "identity demanded after authentication (IMSI catcher pattern)",
@@ -148,6 +162,7 @@ pub fn scenarios() -> Vec<Scenario> {
                 // reason and is the signature this detector wants.
                 DemoMessage::Nas(vec![0x07, 0x55, 0x01]),
             ],
+            raises_high: true,
         },
         Scenario {
             name: "identity demanded with no attach request",
@@ -157,6 +172,7 @@ pub fn scenarios() -> Vec<Scenario> {
                 DemoMessage::Nas(vec![0x07, 0x45, 0x01, 0x07]),
                 DemoMessage::Nas(vec![0x07, 0x55, 0x01]),
             ],
+            raises_high: true,
         },
         Scenario {
             name: "network set up continuous location tracking (LPP)",
@@ -173,6 +189,7 @@ pub fn scenarios() -> Vec<Scenario> {
                 // than folding into the last.
                 0x07, 0x68, 0x01, 0x00, 0x07, 0x90, 0x0b, 0x20, 0x48, 0x80, 0x18, 0x70,
             ])],
+            raises_high: false,
         },
         Scenario {
             name: "2G network asked the device for its location (RRLP)",
@@ -185,6 +202,30 @@ pub fn scenarios() -> Vec<Scenario> {
                 // four byte APDU whose component is msrPositionReq.
                 0x06, 0x38, 0x00, 0x04, 0x60, 0x00, 0xbc, 0x68,
             ])],
+            raises_high: false,
+        },
+        Scenario {
+            name: "a cell answered from a different distance (timing advance)",
+            messages: vec![
+                // The SIB1 first, so the random access responses below can be
+                // attributed to a cell. Without knowing which cell answered, a
+                // change in distance means nothing: two towers at different
+                // distances are not one tower that moved.
+                DemoMessage::Rrc {
+                    payload: vec![
+                        0x40, 0x40, 0x04, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                        0x00, 0x00, 0x00,
+                    ],
+                    pdu_num: 2,
+                },
+                // Two agreeing responses establish what this cell reports.
+                DemoMessage::MacRach { timing_advance: 10 },
+                DemoMessage::MacRach { timing_advance: 10 },
+                // Then the same cell answers from about six kilometres further
+                // away, which a tower cannot do.
+                DemoMessage::MacRach { timing_advance: 90 },
+            ],
+            raises_high: false,
         },
         Scenario {
             name: "permanent equipment identity demanded (IMEI)",
@@ -196,6 +237,7 @@ pub fn scenarios() -> Vec<Scenario> {
                 // rather than the subscription.
                 DemoMessage::Nas(vec![0x07, 0x55, 0x02]),
             ],
+            raises_high: true,
         },
     ]
 }
@@ -290,6 +332,50 @@ const GSM_CHANNEL_SDCCH: u8 = 0x05;
 /// Wrap raw GSM Layer 3 bytes in a GSM RR signalling log record, the way a 2G
 /// message arrives. The body is channel type, a diag message-type byte the
 /// parser ignores, a length, then the Layer 3 message itself.
+const LOG_TYPE_LTE_MAC_RACH_RESPONSE: u16 = 0xb062;
+
+/// A random access response reporting a given timing advance.
+///
+/// Built by patching one field of a real captured packet rather than composing
+/// the structure by hand. The layout is version dependent and fiddly, and the
+/// base packet is the same one the parser is tested against, so the demo
+/// exercises exactly the shape a device really produces.
+///
+/// The two timing advance bytes sit at offset 21 within the packet: four bytes
+/// of packet header, four of subpacket header, four of attempt header, four of
+/// msg1, then msg2's backoff (2) and result (1) and tc-rnti (2).
+fn mac_rach_packet_with_ta(timing_advance: u16) -> Vec<u8> {
+    const TA_OFFSET: usize = 21;
+    let mut packet: Vec<u8> = vec![
+        0x01, 0x01, 0xa0, 0x69, 0x06, 0x02, 0x24, 0x00, 0x01, 0x00, 0x01, 0x07, 0x1b, 0xff, 0x98,
+        0xff, 0x00, 0x00, 0x01, 0x23, 0x1a, 0x04, 0x00, 0x18, 0x1c, 0x01, 0x00, 0x07, 0x00, 0x06,
+        0x00, 0x46, 0x5c, 0x80, 0xbd, 0x06, 0x48, 0x00, 0x00, 0x00,
+    ];
+    packet[TA_OFFSET..TA_OFFSET + 2].copy_from_slice(&timing_advance.to_le_bytes());
+    packet
+}
+
+/// Wrap a random access response in the diag log framing, as for the others.
+fn encapsulate_mac_rach(timing_advance: u16) -> Option<HdlcEncapsulatedMessage> {
+    let body = mac_rach_packet_with_ta(timing_advance);
+    let inner_length = u16::try_from(body.len() + 12).ok()?;
+
+    let mut frame = Vec::with_capacity(body.len() + 16);
+    frame.push(16); // Message::Log discriminant
+    frame.push(0); // pending_msgs
+    frame.extend_from_slice(&inner_length.to_le_bytes()); // outer_length
+    frame.extend_from_slice(&inner_length.to_le_bytes());
+    frame.extend_from_slice(&LOG_TYPE_LTE_MAC_RACH_RESPONSE.to_le_bytes());
+    frame.extend_from_slice(&current_diag_timestamp().to_le_bytes());
+    frame.extend_from_slice(&body);
+
+    let data = hdlc_encapsulate(&frame, &CRC_CCITT);
+    Some(HdlcEncapsulatedMessage {
+        len: data.len() as u32,
+        data,
+    })
+}
+
 fn encapsulate_gsm(msg: &[u8]) -> Option<HdlcEncapsulatedMessage> {
     let length = u8::try_from(msg.len()).ok()?;
     // Body: channel_type + message_type + length + msg.
@@ -357,6 +443,16 @@ pub fn choose_scenarios(count: usize) -> Vec<Scenario> {
         seed ^= seed << 17;
         pool.swap(i, (seed % (i as u64 + 1)) as usize);
     }
+
+    // A demo that does not turn the device red has not demonstrated anything,
+    // so one scenario that raises a high severity warning is moved to the
+    // front and always survives the truncation below. Without this the
+    // selection is simply random, and a run drawn entirely from the quieter
+    // detectors shows an audience nothing.
+    if let Some(high) = pool.iter().position(|s| s.raises_high) {
+        pool.swap(0, high);
+    }
+
     pool.truncate(count.min(pool.len()).max(1));
     pool
 }
@@ -378,6 +474,7 @@ pub fn demo_container_from(chosen: Vec<Scenario>) -> Option<MessagesContainer> {
             DemoMessage::Nas(bytes) => encapsulate_nas(bytes),
             DemoMessage::Rrc { payload, pdu_num } => encapsulate_rrc(&payload, pdu_num),
             DemoMessage::Gsm(bytes) => encapsulate_gsm(&bytes),
+            DemoMessage::MacRach { timing_advance } => encapsulate_mac_rach(timing_advance),
         })
         .collect();
 
@@ -464,6 +561,7 @@ mod tests {
                 let container = demo_container_from(vec![Scenario {
                     name: press.name,
                     messages: press.messages.clone(),
+                    raises_high: press.raises_high,
                 }])
                 .expect("container should build");
                 let highest = harness
@@ -560,6 +658,38 @@ mod tests {
             EventType::High,
             "demo should raise a high severity warning, got {highest:?} from {events:?}"
         );
+    }
+
+    /// `raises_high` has to match what the detectors actually do, or the
+    /// guarantee that every demo turns the device red is worthless. A flag
+    /// maintained by hand drifts the moment a detector's severity changes, so
+    /// this checks it against real analysis rather than trusting it.
+    #[test]
+    fn the_high_severity_flags_are_true() {
+        let mut mismatches: Vec<String> = Vec::new();
+        for scenario in scenarios() {
+            let mut harness = Harness::new_with_config(&AnalyzerConfig::default());
+            let container = demo_container_from(vec![Scenario {
+                name: scenario.name,
+                messages: scenario.messages.clone(),
+                raises_high: scenario.raises_high,
+            }])
+            .expect("container should build");
+            let highest = harness
+                .analyze_qmdl_messages(container)
+                .iter()
+                .flat_map(|row| row.events.iter().flatten())
+                .map(|e| e.event_type)
+                .max();
+            let actually_high = highest == Some(EventType::High);
+            if actually_high != scenario.raises_high {
+                mismatches.push(format!(
+                    "{}: raises_high is {} but the detectors produced {highest:?}",
+                    scenario.name, scenario.raises_high
+                ));
+            }
+        }
+        assert!(mismatches.is_empty(), "{mismatches:#?}");
     }
 
     /// Every message a demo produces has to be identifiable as fake, including

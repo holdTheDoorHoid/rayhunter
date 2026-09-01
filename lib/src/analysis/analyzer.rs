@@ -21,6 +21,7 @@ use super::{
     priority_2g_downgrade::LteSib6And7DowngradeAnalyzer,
     rrlp::RrlpLocationAnalyzer,
     test_analyzer::TestAnalyzer,
+    timing_advance::TimingAdvanceAnalyzer,
 };
 
 /// A list of booleans which stores information about which analyzers are enabled
@@ -39,6 +40,7 @@ pub struct AnalyzerConfig {
     pub lpp_location_request: bool,
     pub lpp_location_tracking: bool,
     pub rrlp_location_request: bool,
+    pub timing_advance: bool,
 }
 
 impl Default for AnalyzerConfig {
@@ -55,6 +57,7 @@ impl Default for AnalyzerConfig {
             lpp_location_request: true,
             lpp_location_tracking: true,
             rrlp_location_request: true,
+            timing_advance: true,
         }
     }
 }
@@ -415,6 +418,10 @@ impl Harness {
 
         if analyzer_config.rrlp_location_request {
             harness.add_analyzer(Box::new(RrlpLocationAnalyzer {}))
+        }
+
+        if analyzer_config.timing_advance {
+            harness.add_analyzer(Box::new(TimingAdvanceAnalyzer::new()))
         }
 
         if analyzer_config.test_analyzer {

@@ -134,6 +134,17 @@ export const HEURISTICS: HeuristicInfo[] = [
         noise: 'Legitimate on emergency calls on 2G. On a device that never touches 2G this will simply stay quiet.',
     },
     {
+        key: 'timing_advance',
+        title: 'A tower that seems to have moved',
+        summary:
+            'Watches whether a cell keeps answering from the same distance, because real towers do not move.',
+        detects:
+            'Every time your device starts talking to a tower, the tower tells it how far away it is, so the device can time its transmissions to arrive in the right slot. That figure is a rough distance. This check remembers the distance each cell reported and notices when the same cell suddenly answers from somewhere markedly different, more than about a kilometre away from where it was.',
+        matters:
+            'A fake base station attracts devices by copying a real tower\u2019s identifiers, so on paper it looks like a cell your phone already trusts. What it cannot copy is where that tower physically stands. So one cell identity answering from two different places is a strong sign that two different transmitters are using the same name, which is exactly what impersonating a tower looks like from the inside.',
+        noise: 'Moving sets this off honestly: if you carry the device any real distance, the towers around you genuinely change distance, and this will say so. It is reported gently for that reason. Many devices never report this measurement at all, including the Orbic, and on those this check stays silent rather than guessing.',
+    },
+    {
         key: 'diagnostic_analyzer',
         title: 'Identity exposure diary',
         summary:

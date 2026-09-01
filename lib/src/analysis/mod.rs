@@ -10,4 +10,5 @@ pub mod null_cipher;
 pub mod priority_2g_downgrade;
 pub mod rrlp;
 pub mod test_analyzer;
+pub mod timing_advance;
 pub mod util;

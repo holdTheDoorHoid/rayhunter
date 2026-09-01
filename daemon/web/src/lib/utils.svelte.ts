@@ -12,6 +12,8 @@ export interface AnalyzerConfig {
     lpp_location_request: boolean;
     lpp_location_tracking: boolean;
     rrlp_location_request: boolean;
+    /** Silent on modems that do not report timing advance, such as the Orbic. */
+    timing_advance: boolean;
     test_analyzer: boolean;
     diagnostic_analyzer: boolean;
 }
