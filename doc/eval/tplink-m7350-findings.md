@@ -33,7 +33,7 @@ same diag→IE→analyser chain.
 
 ## Findings
 
-### 1. A full-screen display mode leaves its picture stuck on the screen for ever
+### 1. A full-screen display mode leaves its picture stuck on the screen *(FIXED — `clear-display-on-exit`)*
 
 **Severity: high (Invisible mode is the one it hurts most).**
 
@@ -131,7 +131,7 @@ mode people actually leave running, it is a detector whose alert is easy to
 miss. Cheapest fix: use the `interrupted` return that is already there, and skip
 the GIF for one pass when it is true.
 
-### 3. The screen says "recording" when recording was refused for lack of space
+### 3. The screen says "recording" when recording was refused for lack of space *(FIXED — `paused-when-start-fails`)*
 
 **Severity: high. The display asserts a detector is running when it is not.**
 
@@ -173,7 +173,7 @@ room, and this is what it will show when it does.
 The fix is a line: send `Paused` on the error paths out of `start()`, or make
 the display's initial state something other than `Recording`.
 
-### 4. `radio_temp_c` reads 125 °C on this hardware
+### 4. `radio_temp_c` reads 125 °C on this hardware *(FIXED — `radio-temperature-sentinel`)*
 
 **Severity: medium (visible, alarming, wrong).**
 
@@ -391,27 +391,81 @@ about 20 seconds:
 * **Button handling** and **battery discharge**: both need somebody at the
   device. See the open questions below.
 
-## Open questions that need the physical device
+## Answered on the physical device
 
-1. **Press the power button once** while Rayhunter is in a full-screen mode
-   (Demo or High Visibility). Two things to watch: whether the screen steps
-   aside to the thin line (`pause_display_on_keypress`), and whether the
-   device's own interface actually **repaints** underneath — which is what
-   decides whether finding 1 also breaks the "let me read my wifi password"
-   feature, or only affects mode changes.
-2. **Double-tap the power button** with `key_input_mode = 1`, to confirm it
-   starts a new recording. Worth doing because `key_input.rs` reads
-   `/dev/input/event0` in **32-byte** blocks while this kernel's
-   `struct input_event` is **16 bytes** (32-bit ARM: two 4-byte timeval fields,
-   plus type, code, value). The unit tests are named `..._m7350_v5` and their
-   data is a 16-byte event zero-padded to 32. It works today only because key
-   events arrive in exact EV_KEY/EV_SYN pairs, so one 32-byte read happens to
-   span one pair and byte 12 lands on the value. Any device that emits an odd
-   number of events — an EV_MSC scancode before EV_KEY, which `gpio-keys`
-   commonly does — desynchronises the stream permanently. There is a second
-   input device here (`event1`, `gpio-keys`) that nothing reads.
-3. **Unplug the USB cable** for a few minutes, to check the battery reading
-   tracks discharge and that a low-battery notification would fire. `uci get
-   battery.battery_mgr.is_charging` returned 1 the whole time it was plugged in,
-   while the level fell from 96% to 86% under test load — worth knowing whether
-   that flag means "charging" or just "USB present".
+The device was held and its power button pressed while a raw
+`/dev/input/event0` capture and a framebuffer sampler ran.
+
+**The button suppression works, and the vendor UI does repaint.** A single
+press produced this, sampled every 2 seconds (`top` is row 0, `mid` is row 64):
+
+```
+t+  0s  top=GREEN     mid=GREEN      <- High Visibility, full screen
+t+112s  top=GREEN     mid=black      <- press: Rayhunter shrinks to the line,
+                                        oledd repaints the device's own menu
+t+122s  top=WHITE     mid=black      <- double tap: Paused
+t+124s  top=GREEN     mid=black      <- recording again
+t+161s  top=GREEN     mid=GREEN      <- quiet period over, full screen back
+```
+
+This is the important qualifier on finding 1: a **real button press does make
+`oledd` repaint the whole body of the screen**, so somebody who cannot read
+their wifi password can still get to it. The stale image only persists when
+nothing triggers a redraw — a mode change, or the daemon stopping — which is
+exactly what the fix addresses.
+
+**Double-tap works.** The operator saw a brief white line, which is `Paused`
+from `StopRecording`, followed immediately by green from `StartRecording`.
+
+**The button code works, but by luck rather than by construction.** 52 events
+were captured. `struct input_event` on this kernel is **16 bytes**, as the ABI
+requires for 32-bit ARM, and every `EV_KEY` is followed by an `EV_SYN` at a
+0.0 ms interval with no `EV_MSC` anywhere:
+
+```
+  0  t=  0.000s  EV_KEY code=0x74 val=1 DOWN
+  1  t=  0.000s  EV_SYN code=0x00 val=0     +   0.0ms
+  2  t=  0.178s  EV_KEY code=0x74 val=0 UP  + 178.2ms
+  3  t=  0.178s  EV_SYN code=0x00 val=0     +   0.0ms
+```
+
+`key_input.rs` reads **32 bytes** at a time and looks at byte 12. Because the
+events arrive in exact pairs, one read spans one `(EV_KEY, EV_SYN)` pair and
+byte 12 lands on the key's `value`. So the suspicion recorded earlier was
+wrong about the outcome: it works on this hardware, reliably. It is still
+wrong about the mechanism — it never looks at `type` or `code`, so any event
+on `event0` counts as a power-button press, and a single unpaired event would
+desynchronise the stream permanently. Worth tidying, not urgent, and not one
+of the three fixes here. There is a second input device (`event1`,
+`gpio-keys`) that nothing reads.
+
+Measured press durations were 74–199 ms and double-tap gaps 206–224 ms, well
+inside the 100–800 ms window the detector uses.
+
+---
+
+## The fixes, verified on the device
+
+All three were patched, cross-built, deployed to the M7350, and measured.
+
+| | before | after |
+| --- | --- | --- |
+| Green pixels left after switching High Visibility → Invisible | 16160 / 16384 | **0 / 16384** |
+| Status line while recording is refused (`current_entry: null`) | solid green (rgb 0,252,0) | **solid white (rgb 248,252,248)** |
+| `radio_temp_c` | 125.0 | **29.0** (the real `pa_therm0`) |
+
+`cargo fmt`, `cargo clippy --all-targets` clean, and 183 daemon tests plus the
+smoke test pass. Recording resumes and the line returns to green once the
+space limit is put back.
+
+## Still open
+
+* **`auto_delete_clean_recordings`** — exercising it means deleting recordings
+  that are not mine. No device-specific code path, but unrun on this hardware.
+* **Battery discharge** — `uci get battery.battery_mgr.is_charging` read 1
+  throughout while the level fell from 96% to 86% under load, so it is not
+  clear whether that flag means "charging" or "USB present". Needs the cable
+  out for a while.
+* **Anything needing a live network**, until there is a SIM on a band this
+  device supports.
+* The `key_input.rs` 32-byte read described above.
