@@ -27,6 +27,7 @@ pub mod observation;
 pub mod persistence;
 pub mod scan;
 pub mod signature;
+pub mod userrules;
 
 pub use mac::{MacAddr, MacPrefix};
 pub use observation::{
@@ -34,3 +35,4 @@ pub use observation::{
 };
 pub use persistence::{EnvironmentTracker, Persistence, PersistenceScore, PersistenceTracker};
 pub use signature::{Confidence, Detection, DetectionLog, Severity, SignatureDb};
+pub use userrules::{UserRule, UserRuleSet};

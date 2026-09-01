@@ -218,6 +218,50 @@ detail that most shapes the matching code.
 Every signature records its provenance, and anything not independently
 verified ships `enabled: false`.
 
+## Persistence and following
+
+Scoring answers "has this device stayed near me as I moved", which needs a
+notion of *place* without recording one.
+
+`EnvironmentTracker` supplies it. The current environment is the set of access
+points recently visible; when a new scan overlaps that set by less than half,
+the surroundings have changed and an environment counter advances. Only the
+counter and a rolling BSSID set are held, in memory. Nowhere is written down,
+so following-detection works with location recording off — the default — and
+GNSS remains an optional refinement rather than a prerequisite.
+
+The score weights four components, movement highest because it is the one that
+separates following from being a fixture:
+
+| Component | Weight | Saturates at |
+|---|---|---|
+| distinct environments | 0.40 | 4 environments |
+| temporal span | 0.25 | 4 hours |
+| reappearance after absence | 0.25 | 5 returns |
+| sighting density | 0.10 | 20 sightings |
+
+The rule that keeps this honest: **a device seen in only one environment can
+never be classified above `UnusuallyPersistent`**, however dense its
+sightings. A neighbour's doorbell camera is present constantly and is not
+following anyone. The classifier enforces this and the reasons say so
+explicitly.
+
+Keys are opaque strings, so a session pseudonym scores exactly as well as a
+MAC. That is what allows a device to accumulate a persistence score without
+its address ever being retained — the requirement that following-detection not
+become a permanent log of everyone nearby.
+
+Memory is bounded on both axes for a 160 MB device: a cap on tracked devices
+with stalest-first eviction, and a bounded sighting history per device.
+
+**Stated limit.** A device that rotates its hardware address between sightings
+appears as a new device each time and never accumulates a score. Modern phones
+do this by default. Correlating rotated identities needs stable fingerprints
+from frames the RC400L cannot capture, so the UI must say that
+following-detection covers devices with stable addresses and is silent about
+the rest. Claiming otherwise would be the most damaging kind of false
+reassurance this feature could offer.
+
 ## Web UI
 
 A distinct **Wireless** category, never mixed into the cellular heuristics.
@@ -232,17 +276,19 @@ without radio support rather than shown broken.
 
 Small, reviewable, independently testable steps, none of them a giant PR:
 
-1. `rayhunter-radio` crate: model, signatures, evidence, scan parsing. *(done —
-   69 tests, no hardware needed)*
+1. `rayhunter-radio` crate: model, signatures, evidence, scan parsing. *(done)*
 2. Builtin signature pack with provenance and verification tests. *(done)*
-3. `rayhunter-radio-daemon`: interface lifecycle, scan pacing, bounded caches,
+3. Persistence scoring with environment-change context, location off by
+   default. *(done)*
+4. `rayhunter-radio-daemon`: interface lifecycle, scan pacing, bounded caches,
    log rotation, IPC server.
-4. `rayhunter-daemon` client + web UI panel, feature-gated.
-5. Evidence sidecar wired into export/WebDAV, with a test that re-analysis
+5. `rayhunter-daemon` client + web UI panel, feature-gated.
+6. Evidence sidecar wired into export/WebDAV, with a test that re-analysis
    does not destroy it.
-6. Persistence scoring with environment-change context, location off by
-   default.
-7. Companion-radio ingest over the same observation API.
+7. Custom user rules from the web UI, validated, stored separately from the
+   builtin pack.
+8. Companion-radio ingest over the same observation API.
 
-Steps 1 and 2 are complete and green. Step 3 is the next piece of real work,
-and it is the one that has to earn its resource budget on a 160 MB device.
+Steps 1 to 3 are complete and green: 84 tests, none of which need a device.
+Step 4 is the next piece of real work, and it is the one that has to earn its
+resource budget on a 160 MB device.
