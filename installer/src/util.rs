@@ -30,7 +30,22 @@ pub async fn telnet_send_command_with_output(
         // Wait for the shell prompt. This also consumes any telnet IAC negotiation
         // the server sends at connection start, and ensures the shell is ready
         // for input.
-        while reader.read_u8().await? != b'#' {}
+        //
+        // Bounded by the same timeout as the command itself. A shell that never
+        // prints a prompt, which is what `nc -e /bin/sh` gives you since there
+        // is no terminal, would otherwise leave this reading forever with no
+        // error and nothing on screen.
+        timeout(command_timeout, async {
+            while reader.read_u8().await? != b'#' {}
+            Ok::<(), std::io::Error>(())
+        })
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "timed out waiting for a shell prompt after {command_timeout:?}; \
+                 this shell may not print one, in which case pass wait_for_prompt = false"
+            )
+        })??;
     }
 
     // This contraption is there so we clearly know where the command output starts and ends,

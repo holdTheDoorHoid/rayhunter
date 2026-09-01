@@ -133,7 +133,10 @@ pub async fn moxee(
 
     let command = format!("echo {wanted} > {MOXEE_MODE_FILE}");
     println!("Running: {command}");
-    crate::util::telnet_send_command(addr, &command, "command done, exit code 0", true).await?;
+    // wait_for_prompt is false, as every other call to this device is: the
+    // shell the exploit starts is nc piped into /bin/sh with no terminal, so
+    // it never prints a prompt to wait for.
+    crate::util::telnet_send_command(addr, &command, "command done, exit code 0", false).await?;
 
     // Read it back. Writing the file and hoping is not worth much when the
     // consequence of it not having worked is somebody power cycling a device
@@ -141,7 +144,7 @@ pub async fn moxee(
     let readback = crate::util::telnet_send_command_with_output(
         addr,
         &format!("cat {MOXEE_MODE_FILE}"),
-        true,
+        false,
         timeout,
     )
     .await?;
