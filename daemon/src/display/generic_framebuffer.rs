@@ -560,6 +560,41 @@ pub fn update_ui(
                 tokio::time::sleep(Duration::from_millis(FRAME_YIELD)).await;
             }
         }
+
+        // Put the screen back before letting go of it.
+        //
+        // Rayhunter does not own the framebuffer, and how the manufacturer's
+        // interface behaves differs by device. An Orbic repaints its own
+        // screens continuously, so anything Rayhunter drew is scrubbed away
+        // within seconds by itself. A TP-Link M7350 does not: `oledd` repaints
+        // the status icons along the top on a timer and the body of the screen
+        // only when something happens, such as a button press. A mode that
+        // filled the screen therefore left its last frame sitting there for
+        // ever. Measured on an M7350 v8.0: five minutes after switching from
+        // High Visibility to Invisible, 16160 of 16384 pixels were still
+        // Rayhunter's green.
+        //
+        // That is worst for Invisible, whose whole purpose is that there is no
+        // sign Rayhunter is running, and which instead left a full screen orca
+        // on the display. It also applies when the daemon stops or is
+        // uninstalled from one of these modes.
+        //
+        // Clear exactly what this mode painted and no more. Blanking the whole
+        // screen on the way out of Subtle would take away the manufacturer's
+        // own interface on a device that will not redraw it, and every config
+        // save goes through here. Clearing just the status line still matters:
+        // leaving a coloured line at the top is precisely the indicator
+        // Invisible mode exists to remove.
+        let Dimensions { width, height } = fb.dimensions();
+        let clear_height = if covers_the_screen {
+            height
+        } else {
+            configured_bar_height
+                .unwrap_or(DEFAULT_STATUS_BAR_HEIGHT)
+                .clamp(1, height)
+        };
+        let blank = vec![(0, 0, 0); (width * clear_height) as usize];
+        fb.write_buffer(blank).await;
     });
 }
 
