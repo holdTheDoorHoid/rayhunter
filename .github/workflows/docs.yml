@@ -7,7 +7,7 @@ name: docs
 
 on:
   push:
-    branches: [device-display-colors]
+    branches: [main]
     paths:
       - 'doc/**'
       - 'book.toml'

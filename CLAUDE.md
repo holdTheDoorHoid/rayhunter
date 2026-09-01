@@ -9,7 +9,8 @@ writing standards). Prefer one page per session, committed separately with
 the page name in the subject. Build with `mdbook build` from the repo root;
 `create-missing = false` makes a bad `SUMMARY.md` link fail the build.
 Decisions so far: quick-start targets the Orbic RC400L; the book lives on
-this fork's `device-display-colors` branch (see `book.toml`'s edit URL).
+this fork's `main` branch and the docs site deploys from it via
+`.github/workflows/docs.yml` (see `book.toml`'s edit URL).
 
 ## Toolchains (installed to home dir, no sudo)
 
