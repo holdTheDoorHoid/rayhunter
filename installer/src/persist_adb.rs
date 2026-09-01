@@ -107,6 +107,12 @@ pub async fn moxee(
         MOXEE_MODE_WITH_ADB
     };
 
+    // Checked before anything is announced. Printing "logging in" and then
+    // failing on a missing argument describes something that never happened.
+    if admin_password.is_none() {
+        bail!("--admin-password is required");
+    }
+
     println!("Logging in and starting telnet...");
     crate::orbic_network::start_telnet(admin_ip, admin_username, admin_password).await?;
 
