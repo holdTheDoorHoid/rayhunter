@@ -6,7 +6,7 @@ network, and then drops the connection.
 ## What you would see
 
 A warning, usually High, telling you that your phone's identity was requested
-in a suspicious way — that something asked your phone for the permanent number
+in a suspicious way, that something asked your phone for the permanent number
 identifying it, without the back-and-forth that proves a request is genuine.
 In the web interface it appears in the warnings for a recording; on the device,
 the status line turns to the warning colour. This is the clearest single thing
@@ -14,7 +14,7 @@ Rayhunter can tell you: that the permanent identity your phone normally keeps
 hidden may have been taken.
 
 Some findings from this detector arrive at lower severity, with the warning
-text itself naming a likely innocent explanation — a roaming situation, or a
+text itself naming a likely innocent explanation, a roaming situation, or a
 SIM without an active plan. Reading that text matters, because this detector
 deliberately tells you when it is less sure.
 
@@ -30,7 +30,7 @@ colleagues named *identification mode* ([Sources](#sources)).
 explanation of the attack; this page is the detector that watches for it.
 
 Because that pattern has relatively few innocent causes compared with the other
-techniques, this is the detection Rayhunter can make most confidently — which
+techniques, this is the detection Rayhunter can make most confidently, which
 is exactly why it is the one people are most likely to over-read. The next
 section is therefore as important as this one.
 
@@ -48,7 +48,7 @@ short. Do not read a warning from it as proof before weighing these:
   subscription is not active, the exchange can look like an identity request
   followed by a rejection. The detector recognises the specific rejection
   reason for this case and lowers the severity, and its warning text says as
-  much — "likely a false positive unless your SIM card has an active plan."
+  much, "likely a false positive unless your SIM card has an active plan."
 - **Roaming and unfamiliar networks.** When the tower's network identity does
   not match your phone's home network, a disconnect after an identity request
   is more likely an ordinary roaming hiccup than an attack. The detector
@@ -57,7 +57,7 @@ short. Do not read a warning from it as proof before weighing these:
 
 Two different honesty points are owed here, and keeping them apart matters.
 
-First, this detector — inherited from upstream — **has been validated against a
+First, this detector, inherited from upstream, **has been validated against a
 real cell-site simulator.** EFF exercised it against an actual catcher, using a
 test device made available through a university research group, and it fired.
 That is the strongest kind of evidence in [How We Validate
@@ -68,8 +68,8 @@ make most confidently.
 Second, and separately, **that is not the same as knowing how often it fires
 when there is no attack.** A true-positive test shows the detector catches a
 real catcher; it does not measure the false-positive rate in everyday traffic,
-which no one can state precisely because — as [Why Detection Is
-Hard](../concepts/why-detection-is-hard.md) explains — there is no field ground
+which no one can state precisely because, as [Why Detection Is
+Hard](../concepts/why-detection-is-hard.md) explains, there is no field ground
 truth to measure against. So the harmless cases above are still real, and a High
 warning is still a strong lead to preserve rather than proof. [Reading Warnings
 Without Panicking](../concepts/interpreting-warnings.md) is the method for
@@ -85,12 +85,12 @@ that goes on to include that proof.
 
 This detector follows the conversation as a small state machine, tracking where
 in the join sequence your phone is, and watches for an identity request that
-lands in the wrong place — one that is *not* followed by the network proving
+lands in the wrong place, one that is *not* followed by the network proving
 itself. The cases it treats as suspicious:
 
 - An identity request arriving **after** authentication has already succeeded,
   where there is no ordinary reason to ask again.
-- An identity request with **no preceding attach request** — the phone did not
+- An identity request with **no preceding attach request**, the phone did not
   start a join, yet something is asking who it is.
 - An identity request followed by a **disconnect with no authentication**,
   which is the identify-then-reject shape itself. Here the detector uses the
@@ -102,7 +102,7 @@ To make those judgements it also reads the network identity broadcast by the
 tower and the one your phone names for itself, so it can tell "rejected by my
 own network" from "rejected while roaming." A related companion check, the
 diagnostic analyzer, quietly notes each identity-exposing message it sees as
-context — those notes are informational and appear only alongside a real
+context, those notes are informational and appear only alongside a real
 warning, as [Severity](../severity.md) explains.
 
 ## Precise behavior
@@ -128,14 +128,15 @@ warning, as [Severity](../severity.md) explains.
   demonstration scenarios (identity demanded after authentication, and identity
   demanded with no attach request). Beyond that, EFF has validated it against a
   real cell-site simulator (a test device obtained through a university research
-  group), where it fired on a genuine attack — the real-capture level in [How We
+  group), where it fired on a genuine attack, the real-capture level in [How We
   Validate Detectors](./validation.md). That establishes it detects a real
   catcher; it does not establish a field false-positive rate, which remains
   unknown for the reasons in the harmless-cases section.
-- **Note on upstream drift:** the upstream project has recent work to read your
-  home network identity from the SIM card directly, which would sharpen the
-  roaming judgement above. That is not yet in this fork, and this page
-  describes the fork's current behavior.
+- **Home network from the SIM:** the detector now reads your home network
+  identity from the SIM card directly (merged from upstream), rather than
+  inferring it only from what your phone announced. This sharpens the roaming
+  judgement above: telling a rejection by your own network from an ordinary
+  roaming hiccup is more reliable when the home network is known for certain.
 
 ## Configuration
 
@@ -149,8 +150,7 @@ how analyzer toggles are applied.
 
 ## Sources
 
-- **The attack.** Dabrowski et al., "IMSI-Catch Me If You Can," ACSAC 2014 —
-  the identification-mode pattern this detector targets. EFF's white paper
+- **The attack.** Dabrowski et al., "IMSI-Catch Me If You Can," ACSAC 2014, the identification-mode pattern this detector targets. EFF's white paper
   *Gotta Catch 'Em All* for the mechanism. Both in
   [Sources and Further Reading](../references.md).
 - **The protocol.** 3GPP TS 24.301 (NAS for EPS): the Identity Request and

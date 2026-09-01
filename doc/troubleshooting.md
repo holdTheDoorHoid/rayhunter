@@ -50,7 +50,7 @@ reboot). If it still does not appear, re-run the installer.
 
 **Cause:** the device has no HTTPS. This is expected, not a fault.
 
-**Fix:** continue past the warning — look for "Advanced," "Show details," or
+**Fix:** continue past the warning, look for "Advanced," "Show details," or
 "visit this website" if there is no obvious button. See [Using
 Rayhunter](./using-rayhunter.md).
 
@@ -65,13 +65,13 @@ HTTPS.
 
 There are two common causes, so check them in order:
 
-**Cause 1 — the browser tab is hidden or collapsed.** Rayhunter's page pauses its
+**Cause 1, the browser tab is hidden or collapsed.** Rayhunter's page pauses its
 updates when the tab is not visible, so a backgrounded or collapsed pane can sit
 at "Loading..." with everything actually healthy.
 
 **Fix:** bring the tab fully to the foreground and give it a few seconds.
 
-**Cause 2 — an older version with GPS disabled.** In older versions, a page could
+**Cause 2, an older version with GPS disabled.** In older versions, a page could
 hang on "Loading..." when GPS was off (the normal setting). This fork fixes that.
 
 **Fix:** if you see this, updating resolves it. See [Updating
@@ -79,7 +79,7 @@ Rayhunter](./updating-rayhunter.md).
 
 ### An error says the thing answering is not your Rayhunter device
 
-**Cause:** your request reached something other than the Rayhunter daemon — a
+**Cause:** your request reached something other than the Rayhunter daemon, a
 phone on mobile data instead of the device's WiFi, a VPN, a captive portal, or a
 different device answering at that address. The page it got back is not
 Rayhunter's data. (This clear message is a fork fix; older versions showed a
@@ -101,12 +101,26 @@ repeatedly during the wait.
 ### The Cell Site panel shows the same reading and never changes
 
 **Cause:** the radio measurements behind that panel only arrive while the modem
-is active — attaching, moving, recovering. An idle, stable device stops producing
+is active, attaching, moving, recovering. An idle, stable device stops producing
 them, so the panel legitimately holds its last reading.
 
 **Fix:** none needed; this is the modem being quiet, not a fault. The panel
 updates again when the device next does radio work. A full power cycle brings the
 measurements back if you want to confirm.
+
+### Rayhunter runs but records nothing, and the SIM panel says it may not be working
+
+**Cause:** a dead, unactivated, or badly seated SIM looks a lot like a quiet
+night, because the device keeps running and the screen stays green while nothing
+is captured. The Cell Site panel's SIM verdict is there to tell the two apart: if
+it reads "SIM may not be working," the device can see towers but has not
+registered with a network, which is what a SIM problem looks like from the
+inside.
+
+**Fix:** check that the SIM is activated and properly seated. A SIM bought only
+for data may register without a data bearer, which the panel still counts as
+working. Seeing towers in the panel is not enough on its own, since a modem with
+no usable SIM still decodes the towers around it.
 
 ### Warnings are flooding in on every tower
 
@@ -122,7 +136,7 @@ Reference](./detectors/index.md).
 **Cause:** the demo feature was on and injected a labelled practice warning into
 the recording.
 
-**Fix:** that recording is not evidence — set it aside and start a fresh one, and
+**Fix:** that recording is not evidence, set it aside and start a fresh one, and
 turn the demo off in settings. Never send a demo-tainted recording to EFF or
 present it as real. See [Your First Warning](./first-warning.md).
 
@@ -130,5 +144,5 @@ present it as real. See [Your First Warning](./first-warning.md).
 
 - [Frequently Asked Questions](./faq.md).
 - [Support, Feedback, and Community](./support-feedback-community.md).
-- [Reading Warnings Without Panicking](./concepts/interpreting-warnings.md) — if
+- [Reading Warnings Without Panicking](./concepts/interpreting-warnings.md), if
   the "problem" is a real warning and you are deciding what it means.

@@ -1,8 +1,8 @@
 # Configuration Reference
 
 This is the exhaustive list of every setting Rayhunter reads from its
-configuration file, `config.toml`. For *how* to change settings — through the web
-interface or by editing the file — see [Configuration](./configuration.md); this
+configuration file, `config.toml`. For *how* to change settings, through the web
+interface or by editing the file, see [Configuration](./configuration.md); this
 page is the reference you check when you need a specific key's type, default, and
 effect.
 
@@ -15,7 +15,7 @@ before you edit it by hand:
   by an older version comes up with any newer settings at their defaults, and
   detectors absent from the file come up **on**.
 - **A misspelled key is silently ignored.** Because unknown keys are dropped
-  without error, a typo does not fail — the setting never takes effect at all.
+  without error, a typo does not fail, the setting never takes effect at all.
   Check your spelling against this page.
 - **A top-level key placed after the `[analyzers]` table lands *inside* it.** The
   shipped template ends with `[analyzers]`, so a plain key added at the bottom is
@@ -29,7 +29,7 @@ Two more behaviours that surprise people:
 - **Saving replaces the whole file.** Editing one setting in the interface and
   saving rewrites everything from what the running version understands, so a
   setting that version does not know is dropped. This matters when moving between
-  the fork and upstream — see [Compatibility With Upstream](./fork/compatibility.md).
+  the fork and upstream, see [Compatibility With Upstream](./fork/compatibility.md).
 
 In the tables below, **Fork** marks a setting this fork adds that upstream does
 not have, and **(not in template)** marks a key absent from the shipped
@@ -110,7 +110,7 @@ are uploaded in the background once old enough.
 | Key | Type | Default | Effect |
 |---|---|---|---|
 | `webdav.url` | string | empty (off) | WebDAV server base URL. Empty means no uploads. |
-| `webdav.username` / `webdav.password` | string | unset | HTTP Basic credentials. A password with no username is rejected and the request is sent unauthenticated. |
+| `webdav.username` / `webdav.password` | string | unset | HTTP Basic credentials. A password with no username is rejected and the request is sent unauthenticated. The password is redacted when the config is read back through the API, so it is not echoed to the interface. |
 | `webdav.upload_timeout_secs` | integer | `300` | Timeout per upload request. |
 | `webdav.poll_interval_secs` | integer | `3600` | How often the worker scans for eligible recordings. |
 | `webdav.min_age_secs` | integer | `86400` | How old a recording must be before it is eligible (default one day). |
@@ -127,6 +127,6 @@ Web Interface](./web-authentication.md). **Fork, (not in template)**
 
 ## Where to next
 
-- [Configuration](./configuration.md) — how to change these settings.
-- [Compatibility With Upstream](./fork/compatibility.md) — which of these keys are
+- [Configuration](./configuration.md), how to change these settings.
+- [Compatibility With Upstream](./fork/compatibility.md), which of these keys are
   fork-specific and what happens to them across versions.

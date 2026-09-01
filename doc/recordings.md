@@ -1,6 +1,6 @@
 # Recordings: Naming, Notes, and Rotation
 
-A recording is one capture session — the signalling your device saw between the
+A recording is one capture session, the signalling your device saw between the
 moment recording started and the moment it stopped. This page covers the tools
 this fork adds for managing them: naming them, adding notes, splitting them
 automatically, and clearing out the ones that found nothing. All of these are
@@ -15,7 +15,7 @@ By default a recording is identified only by its number and time. You can give i
 a **display name** and free-text **notes** from the recording history. This does
 two useful things:
 
-- It makes a recording findable later — "Federal Plaza, Tuesday" beats a
+- It makes a recording findable later, "Federal Plaza, Tuesday" beats a
   timestamp when you are looking back through a long list.
 - The display name is used for the **downloaded file**, so an exported recording
   arrives with a meaningful name instead of an opaque identifier.
@@ -33,9 +33,9 @@ A single recording left running for a long time becomes one very large file,
 which is slow to download over the device's own WiFi and cannot be analysed until
 it is closed. Rotation avoids that by starting a fresh recording automatically:
 
-- **By size** — set `max_recording_size_mb` to close the current recording and
+- **By size**, set `max_recording_size_mb` to close the current recording and
   start a new one once it reaches that size.
-- **By time** — set `max_recording_minutes` to do the same after a length of
+- **By time**, set `max_recording_minutes` to do the same after a length of
   time.
 
 If you set both, whichever limit is reached first triggers the rotation. Rotation
@@ -48,12 +48,15 @@ everything waiting until you stop.
 
 On a device that records for long stretches, storage fills up. With
 `auto_delete_clean_recordings` on, Rayhunter reclaims space by deleting
-recordings that found nothing — but only under strict conditions, and this is
+recordings that found nothing, but only under strict conditions, and this is
 worth understanding precisely because it deletes your data:
 
 A recording is eligible for automatic deletion only if **all** of these are true:
 
-- It has been analysed and raised **no warning**.
+- It has been analysed and its report **cleanly shows no warning**. A report
+  that is empty, truncated, or corrupt does not count as clean: it is treated
+  as unknown, and the recording is kept. Deletion fails closed, so a damaged
+  report can never be mistaken for "found nothing."
 - It is **not named**. A display name marks a recording as one you care about,
   and a named recording is never auto-deleted.
 - It is **not the recording currently being written**.
@@ -70,15 +73,15 @@ and shields it from cleanup.
 ## Downloading and sharing
 
 Recordings download as a bundle containing the raw capture and its analysis. What
-that bundle contains — including identifiers that should be removed before you
-show it to anyone — is the subject of [Sharing What You Find](./sharing-findings.md).
+that bundle contains, including identifiers that should be removed before you
+show it to anyone, is the subject of [Sharing What You Find](./sharing-findings.md).
 Read that before sending a recording anywhere.
 
 ## Where to next
 
-- [Configuration Reference](./configuration-reference.md) — the exact keys and
+- [Configuration Reference](./configuration-reference.md), the exact keys and
   defaults for rotation and auto-deletion.
-- [Sharing What You Find](./sharing-findings.md) — exporting and redacting a
+- [Sharing What You Find](./sharing-findings.md), exporting and redacting a
   recording.
-- [Re-analyzing Recordings](./reanalyzing.md) — running the detectors over a
+- [Re-analyzing Recordings](./reanalyzing.md), running the detectors over a
   recording again.
