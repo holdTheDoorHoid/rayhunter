@@ -1,4 +1,4 @@
-use log::{error, info};
+use log::{error, info, warn};
 use std::time::{Duration, Instant};
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
@@ -27,12 +27,27 @@ pub fn run_key_input_thread(
 ) {
     let restart_on_double_tap = config.key_input_mode != KeyInputMode::Disabled;
     let pause_on_keypress = config.pause_display_on_keypress;
+    // Switching the access point off from the buttons, when it is switched on
+    // and this device is one where it can be done at all. Checked here so a
+    // device with a WiFi stack we cannot control never pretends to offer it.
+    let ap_toggle = config.wifi_ap_button_toggle && crate::wifi_ap::is_supported();
+    if config.wifi_ap_button_toggle && !ap_toggle {
+        warn!(
+            "the WiFi access point button gesture is switched on, but this device has no access point daemon we know how to stop; ignoring it"
+        );
+    }
+    let mut ap_gesture = crate::wifi_ap::PressGesture::new(
+        config.wifi_ap_toggle_presses,
+        Duration::from_secs(config.wifi_ap_toggle_window_secs.max(1)),
+    );
+    let ap_off_mode = config.wifi_ap_off_mode;
+    let ap_off_minutes = config.wifi_ap_off_minutes.max(1);
 
     // Reading the buttons is now worth doing for either reason, so the thread
     // runs if either wants it. Previously it started only for the double tap
     // gesture, which would have left the pause feature dead for anyone who had
     // button control switched off.
-    if !restart_on_double_tap && !pause_on_keypress {
+    if !restart_on_double_tap && !pause_on_keypress && !ap_toggle {
         return;
     }
 
@@ -88,6 +103,15 @@ pub fn run_key_input_thread(
 
             match event {
                 Event::KeyUp => {
+                    // Checked before the double tap below, and on its own
+                    // timer, so the two gestures do not have to agree about
+                    // what counts as a press.
+                    if ap_toggle && ap_gesture.press(now) {
+                        toggle_access_point(ap_off_mode, ap_off_minutes);
+                        last_keyup = None;
+                        continue;
+                    }
+
                     if let Some(last_keyup_instant) = last_keyup {
                         let elapsed = now.duration_since(last_keyup_instant);
 
@@ -116,6 +140,44 @@ pub fn run_key_input_thread(
             }
         }
     });
+}
+
+/// Act on the gesture: switch the access point off, or restart to bring it
+/// back.
+///
+/// Both directions are deliberately blunt. Turning it off stops the daemon,
+/// which takes the network down at once. Turning it back on restarts the
+/// device, because on the hardware this was measured on, re-running the daemon
+/// by hand does not work and the firmware only brings it up at boot.
+fn toggle_access_point(mode: crate::wifi_ap::WifiApOffMode, off_minutes: u64) {
+    use crate::wifi_ap;
+
+    if wifi_ap::is_access_point_running() {
+        match wifi_ap::stop_access_point() {
+            Ok(()) => {
+                info!("WiFi access point switched off by button gesture");
+                if mode == wifi_ap::WifiApOffMode::Temporary {
+                    // Restarting is how it comes back, so the timer restarts
+                    // the device. Spawned rather than awaited so the buttons
+                    // keep working in the meantime, including to bring the
+                    // access point back sooner.
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_secs(off_minutes * 60)).await;
+                        info!("bringing the WiFi access point back after {off_minutes} minutes");
+                        if let Err(err) = wifi_ap::restore_access_point_by_restart() {
+                            error!("could not bring the access point back: {err}");
+                        }
+                    });
+                }
+            }
+            Err(err) => error!("could not switch the access point off: {err}"),
+        }
+    } else {
+        // Already off, so the gesture means "bring it back".
+        if let Err(err) = wifi_ap::restore_access_point_by_restart() {
+            error!("could not bring the access point back: {err}");
+        }
+    }
 }
 
 fn parse_event(input: [u8; INPUT_EVENT_SIZE]) -> Event {

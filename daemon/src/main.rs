@@ -8,6 +8,7 @@ mod demo;
 mod diag;
 mod display;
 mod error;
+mod export_metadata;
 mod gps;
 mod http_client;
 mod key_input;
@@ -15,6 +16,7 @@ mod notifications;
 mod packet_explorer;
 mod pcap;
 mod qmdl_store;
+mod redact;
 mod server;
 mod sim_health;
 mod stats;
@@ -23,6 +25,7 @@ mod timing_advance;
 mod update;
 mod web_auth;
 mod webdav;
+mod wifi_ap;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -389,6 +392,7 @@ async fn run_with_config(
         run_diag_read_thread(
             &task_tracker,
             config.device.clone(),
+            config.diag_device_path().to_string(),
             diag_rx,
             diag_tx.clone(),
             ui_update_tx.clone(),

@@ -1,5 +1,12 @@
 # cat config.toml
 qmdl_store_path = "/data/rayhunter/qmdl"
+
+# Where the modem's diagnostic device lives. Leave this alone unless you know
+# you need it: /dev/diag is correct on every device Rayhunter supports today.
+# It exists for hardware where the modem sits behind MHI or PCIe and the node
+# is somewhere else, which is otherwise the only thing stopping those devices
+# working.
+# diag_device_path = "/dev/diag"
 port = 8080
 debug_mode = false
 colorblind_mode = false
@@ -95,3 +102,22 @@ lpp_location_tracking = true
 rrlp_location_request = true
 test_analyzer = false
 diagnostic_analyzer = true
+
+# Switching this device's own WiFi off from the buttons.
+#
+# A hotspot running as a sensor does not need to be broadcasting a network, and
+# not broadcasting one saves power and draws less attention. Off by default,
+# because the access point is also how most people reach the web interface.
+#
+# Restarting the device ALWAYS brings WiFi back, whatever these are set to. That
+# is how the device behaves, not something Rayhunter arranges, so this can never
+# lock anybody out: a power cycle needs no cable, no menu and no password.
+# wifi_ap_button_toggle = false
+# Presses, and the seconds they must all land within. Fewer than four presses is
+# not accepted however this is set.
+# wifi_ap_toggle_presses = 5
+# wifi_ap_toggle_window_secs = 4
+# "temporary" brings WiFi back on its own after wifi_ap_off_minutes.
+# "until_restart" leaves it off until the device is restarted.
+# wifi_ap_off_mode = "temporary"
+# wifi_ap_off_minutes = 60

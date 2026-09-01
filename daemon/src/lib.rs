@@ -8,6 +8,7 @@ pub mod demo;
 pub mod diag;
 pub mod display;
 pub mod error;
+pub mod export_metadata;
 pub mod gps;
 pub mod http_client;
 pub mod key_input;
@@ -15,6 +16,7 @@ pub mod notifications;
 pub mod packet_explorer;
 pub mod pcap;
 pub mod qmdl_store;
+pub mod redact;
 pub mod server;
 pub mod sim_health;
 pub mod stats;
@@ -23,6 +25,7 @@ pub mod timing_advance;
 pub mod update;
 pub mod web_auth;
 pub mod webdav;
+pub mod wifi_ap;
 
 #[cfg(feature = "apidocs")]
 use utoipa::OpenApi;

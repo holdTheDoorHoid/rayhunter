@@ -58,6 +58,7 @@
             <DownloadLink url={entry.get_pcap_url()} text="pcap" />
             <DownloadLink url={entry.get_qmdl_url()} text="qmdl" />
             <DownloadLink url={entry.get_zip_url()} text="zip" />
+            <DownloadLink url={entry.get_redacted_zip_url()} text="zip (shareable)" />
         </div>
     </td>
     <td class="p-2"

@@ -166,6 +166,14 @@ pub fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
 pub struct Config {
     /// Path to store QMDL files
     pub qmdl_store_path: String,
+    /// Where the modem's diagnostic character device lives.
+    ///
+    /// `None` uses `/dev/diag`, which is right on every device Rayhunter
+    /// currently supports. It is configurable because on hardware where the
+    /// modem sits behind MHI or PCIe the node is somewhere else entirely, and
+    /// that is the only thing standing between those devices and working:
+    /// see EFForg/rayhunter#649.
+    pub diag_device_path: Option<String>,
     /// Listening port
     pub port: u16,
     /// Debug mode
@@ -234,6 +242,30 @@ pub struct Config {
     /// hotspot. A button press is how a person navigates that interface, so it
     /// is a good signal that they want to see it.
     pub pause_display_on_keypress: bool,
+    /// Let a burst of button presses switch the device's own WiFi access
+    /// point off.
+    ///
+    /// Off by default. The access point is how most people reach the web
+    /// interface, so this is not something to have switched on without meaning
+    /// it. Restarting the device always brings the access point back, whatever
+    /// this is set to, which is what stops it locking anybody out.
+    #[serde(default)]
+    pub wifi_ap_button_toggle: bool,
+    /// How many presses the gesture takes.
+    ///
+    /// Enough that a device in a bag cannot produce it. Clamped when used, so
+    /// a value typed in here cannot make the gesture trivially easy.
+    #[serde(default = "default_wifi_ap_toggle_presses")]
+    pub wifi_ap_toggle_presses: u8,
+    /// The seconds all those presses have to land within.
+    #[serde(default = "default_wifi_ap_toggle_window_secs")]
+    pub wifi_ap_toggle_window_secs: u64,
+    /// Whether the access point comes back on its own or waits for a restart.
+    #[serde(default)]
+    pub wifi_ap_off_mode: crate::wifi_ap::WifiApOffMode,
+    /// Minutes before the access point comes back, in the temporary mode.
+    #[serde(default = "default_wifi_ap_off_minutes")]
+    pub wifi_ap_off_minutes: u64,
     /// ntfy.sh URL
     pub ntfy_url: Option<String>,
     /// Vector containing the types of enabled notifications
@@ -355,10 +387,23 @@ impl WebdavConfig {
     }
 }
 
+fn default_wifi_ap_toggle_presses() -> u8 {
+    5
+}
+
+fn default_wifi_ap_toggle_window_secs() -> u64 {
+    4
+}
+
+fn default_wifi_ap_off_minutes() -> u64 {
+    60
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
             qmdl_store_path: "/data/rayhunter/qmdl".to_string(),
+            diag_device_path: None,
             port: 8080,
             debug_mode: false,
             device: Device::Orbic,
@@ -379,6 +424,18 @@ impl Default for Config {
             // On by default. It costs a thin status line for twenty seconds
             // and it prevents somebody being locked out of their own hotspot.
             pause_display_on_keypress: true,
+            // Off by default: switching off the access point is switching off
+            // the way most people reach this device, which nobody should get
+            // by accident.
+            wifi_ap_button_toggle: false,
+            // Five presses inside four seconds. Deliberate to do, and not
+            // something a pocket or a bag produces.
+            wifi_ap_toggle_presses: 5,
+            wifi_ap_toggle_window_secs: 4,
+            wifi_ap_off_mode: crate::wifi_ap::WifiApOffMode::Temporary,
+            // An hour. Long enough to be worth doing, short enough that
+            // forgetting about it is not a problem.
+            wifi_ap_off_minutes: 60,
             analyzers: AnalyzerConfig::default(),
             ntfy_url: None,
             enabled_notifications: vec![NotificationType::Warning, NotificationType::LowBattery],
@@ -408,6 +465,17 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Where to open the modem's diagnostic device.
+    ///
+    /// Falls back to the usual node when unset, so an existing config keeps
+    /// working and nobody has to set this to get the supported devices going.
+    pub fn diag_device_path(&self) -> &str {
+        self.diag_device_path
+            .as_deref()
+            .filter(|path| !path.trim().is_empty())
+            .unwrap_or(rayhunter::diag_device::DEFAULT_DIAG_PATH)
+    }
+
     pub fn wifi_config(&self) -> wifi_station::WifiConfig {
         let (wpa_bin, hostapd_conf, ctrl_interface) = match self.device {
             Device::Tmobile | Device::Wingtech => (
@@ -492,6 +560,7 @@ pub fn parse_args() -> Args {
 
 #[cfg(test)]
 mod tests {
+    use super::Config;
     use super::WebdavConfig;
     use super::parse_hex_color;
 
@@ -594,5 +663,35 @@ mod tests {
         assert_eq!(parse_hex_color("#gggggg"), None);
         assert_eq!(parse_hex_color("#ff 000"), None);
         assert_eq!(parse_hex_color("##ff000"), None);
+    }
+
+    /// An absent setting has to keep the supported devices working, since
+    /// nobody should have to configure this to get an Orbic going.
+    #[test]
+    fn an_unset_diag_path_falls_back_to_the_usual_node() {
+        let config = Config::default();
+        assert_eq!(config.diag_device_path(), "/dev/diag");
+    }
+
+    #[test]
+    fn a_configured_diag_path_is_used() {
+        let config = Config {
+            diag_device_path: Some("/dev/mhi_DIAG".to_string()),
+            ..Config::default()
+        };
+        assert_eq!(config.diag_device_path(), "/dev/mhi_DIAG");
+    }
+
+    /// A key left blank in a hand edited config means "not set", not "open the
+    /// empty path", which would fail with an error nobody could act on.
+    #[test]
+    fn a_blank_diag_path_falls_back_rather_than_failing() {
+        for blank in ["", "   "] {
+            let config = Config {
+                diag_device_path: Some(blank.to_string()),
+                ..Config::default()
+            };
+            assert_eq!(config.diag_device_path(), "/dev/diag", "for {blank:?}");
+        }
     }
 }

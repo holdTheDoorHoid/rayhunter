@@ -25,12 +25,71 @@ These are exactly the things this whole tool exists to protect. A recording is
 useful evidence *because* it is detailed, and that same detail is what makes
 sharing it carelessly a real exposure.
 
-## There is no one-click redaction
+## The bundle describes itself
 
-Be clear-eyed about this: **Rayhunter does not have a feature that scrubs
-identifiers out of a recording for you.** The display name you can set is
-restricted so it is safe in a filename, but that is not redaction of the capture
-itself. So sharing safely is a matter of deliberate choice, not a button:
+Every download includes a `metadata.json` alongside the capture, saying what
+produced it and what has been read from it:
+
+- The Rayhunter version that **made** the recording and the version that
+  **exported** it, which are not always the same.
+- The device type, operating system and architecture.
+- The recording's id, your name and notes for it, when it started, when its last
+  message arrived, and how big it is.
+- **Which detectors ran, and at what version.**
+
+That last one matters more than it looks. A report with no warnings means
+something quite different depending on whether the detector that would have
+caught the thing existed yet. Without it, somebody reading your capture months
+later has no way to tell "nothing happened" from "nothing was looking".
+
+The sidecar deliberately contains **no identifiers**: no IMSI, IMEI or temporary
+identity, and no passwords or WiFi details. It is meant to be the safe part of
+the bundle. The capture next to it is not, which is the rest of this page.
+
+## The shareable download
+
+Every recording offers two downloads. The ordinary **zip** is the full evidence
+bundle, raw capture included. The **zip (shareable)** one is meant to be sent to
+somebody:
+
+- The device's own identifiers are removed from the capture on the way out. The
+  digits are set to zero rather than the field being deleted, so the messages
+  still open in Wireshark and you keep the evidence of *what happened* while
+  losing *who it was*.
+- **The raw recording is left out entirely.** Nothing removes identifiers from
+  the QMDL, so including it would hand over exactly what the bundle claims to
+  have taken out.
+- A `redaction-report.json` says how many identifiers were removed and how many
+  messages were examined.
+
+Your original recording is never modified. Redaction happens as the download is
+built, because a recording is evidence and evidence that got quietly rewritten
+is not evidence any more.
+
+### What it does not promise
+
+**This is a real reduction in exposure, not a guarantee of cleanliness.** It
+finds identities in the messages where a device announces itself and they sit at
+a known position: identity responses and attach requests. An identity carried
+somewhere it does not look for would survive, and a ciphered message hides its
+contents from Rayhunter as much as from anyone reading the capture.
+
+That is why the bundle reports counts rather than declaring itself clean.
+Believing a capture is safe when it is not leaves you worse off than knowing it
+is not. If what you are sharing is genuinely sensitive, look at the redacted
+PCAP yourself before sending it.
+
+The capture still contains things the redaction does not touch, and you should
+decide about them deliberately:
+
+- Cell identities and network identifiers for the towers around you, which say
+  where you were.
+- Timing, and location if you had GPS configured.
+
+## Sharing carefully, whichever bundle you send
+
+The shareable download removes what it can find. The judgement about what to
+send, and to whom, is still yours:
 
 - **Share the least that makes your point.** Often the analysis, which detector
   fired, at what severity, when and where in general terms, is enough to raise
@@ -48,9 +107,6 @@ itself. So sharing safely is a matter of deliberate choice, not a button:
   recording containing it is not evidence and must not be sent to EFF or
   presented as a detection. Start a fresh recording after any demo. See [Your
   First Warning](./first-warning.md).
-
-If you are unsure whether something in a recording identifies you or someone
-else, treat it as if it does.
 
 ## Where to report
 

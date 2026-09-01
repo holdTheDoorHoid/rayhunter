@@ -17,6 +17,7 @@ mod orbic;
 mod orbic_auth;
 mod orbic_network;
 mod output;
+mod persist_adb;
 
 #[cfg(not(target_os = "android"))]
 mod pinephone;
@@ -178,6 +179,42 @@ struct MoxeeArgs {
 #[derive(Parser, Debug)]
 struct InstallPinephone {}
 
+/// Arguments for the devices reached through their admin web interface.
+#[derive(Parser, Debug)]
+struct PersistAdbArgs {
+    /// IP address for the admin interface, if custom.
+    #[arg(long, default_value = "192.168.0.1")]
+    admin_ip: String,
+
+    /// Admin password for authentication.
+    #[arg(long)]
+    admin_password: String,
+
+    /// Put the device back the way it was, so adb stops being enabled at boot.
+    #[arg(long)]
+    revert: bool,
+}
+
+/// The Moxee is reached the same way the Orbic is, over a telnet shell.
+#[derive(Parser, Debug)]
+struct MoxeePersistAdbArgs {
+    /// IP address for the admin interface, if custom.
+    #[arg(long, default_value = "192.168.1.1")]
+    admin_ip: String,
+
+    /// Admin username for authentication.
+    #[arg(long, default_value = "admin")]
+    admin_username: String,
+
+    /// Admin password for authentication.
+    #[arg(long)]
+    admin_password: Option<String>,
+
+    /// Put the device back the way it was, so adb stops being enabled at boot.
+    #[arg(long)]
+    revert: bool,
+}
+
 #[derive(Parser, Debug)]
 struct Util {
     #[command(subcommand)]
@@ -208,6 +245,12 @@ enum UtilSubCommand {
     WingtechStartTelnet(WingtechArgs),
     /// Root the Wingtech and launch adb.
     WingtechStartAdb(WingtechArgs),
+    /// Make adb survive a reboot on the Wingtech CT2MHS01.
+    WingtechPersistAdb(PersistAdbArgs),
+    /// Make adb survive a reboot on the Tmobile TMOHS1.
+    TmobilePersistAdb(PersistAdbArgs),
+    /// Make adb survive a reboot on the Moxee Hotspot.
+    MoxeePersistAdb(MoxeePersistAdbArgs),
     /// Unlock the Pinephone's modem and start adb.
     #[cfg(not(target_os = "android"))]
     PinephoneStartAdb,
@@ -351,6 +394,9 @@ async fn run(args: Args) -> Result<(), Error> {
             }
             UtilSubCommand::WingtechStartTelnet(args) => wingtech::start_telnet(&args.admin_ip, &args.admin_password).await.context("\nFailed to start telnet on the Wingtech CT2MHS01")?,
             UtilSubCommand::WingtechStartAdb(args) => wingtech::start_adb(&args.admin_ip, &args.admin_password).await.context("\nFailed to start adb on the Wingtech CT2MHS01")?,
+            UtilSubCommand::WingtechPersistAdb(args) => persist_adb::wingtech(&args.admin_ip, &args.admin_password, args.revert, "Wingtech CT2MHS01").await.context("\nFailed to make adb persistent on the Wingtech CT2MHS01")?,
+            UtilSubCommand::TmobilePersistAdb(args) => persist_adb::wingtech(&args.admin_ip, &args.admin_password, args.revert, "Tmobile TMOHS1").await.context("\nFailed to make adb persistent on the Tmobile TMOHS1")?,
+            UtilSubCommand::MoxeePersistAdb(args) => persist_adb::moxee(&args.admin_ip, &args.admin_username, args.admin_password.as_deref(), args.revert).await.context("\nFailed to make adb persistent on the Moxee")?,
             #[cfg(not(target_os = "android"))]
             UtilSubCommand::PinephoneStartAdb => pinephone::start_adb().await.context("\nFailed to start adb on the PinePhone's modem")?,
             #[cfg(not(target_os = "android"))]

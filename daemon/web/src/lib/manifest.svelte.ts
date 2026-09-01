@@ -125,6 +125,15 @@ export class ManifestEntry {
         return `/api/zip/${this.name}.zip`;
     }
 
+    /**
+     * A bundle meant to be shared: the device's own identifiers removed from
+     * the capture, and the raw recording left out, since nothing removes them
+     * from that. It reports what it took out rather than claiming to be clean.
+     */
+    get_redacted_zip_url(): string {
+        return `/api/zip/${this.name}.zip?redact=1`;
+    }
+
     get_analysis_report_url(): string {
         return `/api/analysis-report/${this.name}`;
     }

@@ -34,8 +34,8 @@ pub enum DiagDeviceError {
     OpenQmdlFileError(std::io::Error),
     #[error("Failed to write to QMDL file: {0}")]
     QmdlFileWriteError(std::io::Error),
-    #[error("Failed to open diag device: {0}")]
-    OpenDiagDeviceError(std::io::Error),
+    #[error("Failed to open diag device {1}: {0}")]
+    OpenDiagDeviceError(std::io::Error, String),
     #[error("Failed to parse MessagesContainer: {0}")]
     ParseMessagesContainerError(deku::DekuError),
 }
@@ -93,14 +93,23 @@ pub struct DiagDevice {
     use_mdm: i32,
 }
 
+/// Where the modem's diagnostic character device lives on nearly every
+/// supported device.
+///
+/// Not universal: on hardware where the modem sits behind MHI or PCIe the node
+/// is somewhere else entirely, which is why the path is configurable rather
+/// than hardcoded. See EFForg/rayhunter#649.
+pub const DEFAULT_DIAG_PATH: &str = "/dev/diag";
+
 impl DiagDevice {
-    pub async fn new(configured_device: &Device) -> DiagResult<Self> {
-        Self::new_with_retries(Duration::from_secs(30), configured_device).await
+    pub async fn new(configured_device: &Device, diag_path: &str) -> DiagResult<Self> {
+        Self::new_with_retries(Duration::from_secs(30), configured_device, diag_path).await
     }
 
     pub async fn new_with_retries(
         max_duration: Duration,
         configured_device: &Device,
+        diag_path: &str,
     ) -> DiagResult<Self> {
         // For some reason the diag device needs a very long time to become available again with in
         // the same process, on TP-Link M7350 v3. While process restart would reset it faster.
@@ -112,7 +121,7 @@ impl DiagDevice {
         let mut num_retries = 0;
 
         loop {
-            match Self::try_new(configured_device).await {
+            match Self::try_new(configured_device, diag_path).await {
                 Ok(device) => {
                     info!("Diag device initialization succeeded after {num_retries} retries");
                     return Ok(device);
@@ -136,13 +145,13 @@ impl DiagDevice {
         }
     }
 
-    async fn try_new(configured_device: &Device) -> DiagResult<Self> {
+    async fn try_new(configured_device: &Device, diag_path: &str) -> DiagResult<Self> {
         let diag_file = File::options()
             .read(true)
             .write(true)
-            .open("/dev/diag")
+            .open(diag_path)
             .await
-            .map_err(DiagDeviceError::OpenDiagDeviceError)?;
+            .map_err(|err| DiagDeviceError::OpenDiagDeviceError(err, diag_path.to_string()))?;
         let fd = diag_file.as_raw_fd();
 
         enable_frame_readwrite(fd, MEMORY_DEVICE_MODE, configured_device)?;

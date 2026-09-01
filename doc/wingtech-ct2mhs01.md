@@ -121,3 +121,24 @@ Caused by:
 ```
 
 Make sure your computer is connected to the hotspot's WiFi network.
+
+## Keeping ADB across reboots
+
+Enabling ADB normally lasts only until the device restarts, because the boot
+script `S30usb` forces a USB composition without ADB on every boot. To make it
+stick:
+
+```bash
+./installer util wingtech-persist-adb --admin-password 'PASSWORD'
+```
+
+This installs a small `/etc/init.d/enable_adb` and links it as
+`/etc/rcS.d/S31enable_adb`, so it runs immediately after the script that would
+otherwise have turned ADB off. Each command is printed as it runs.
+
+**This changes how the device boots**, and it briefly remounts the root
+filesystem writable to do so. It cannot be confirmed from the installer: this
+device is driven through its admin interface, which returns nothing to read
+back. Reboot and check `adb devices` yourself.
+
+To undo it, add `--revert`.

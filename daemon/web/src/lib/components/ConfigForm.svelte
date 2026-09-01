@@ -185,6 +185,26 @@
         }
     }
 
+    /**
+     * Set the handful of settings that actually affect how long a battery
+     * lasts, so nobody has to know which ones those are.
+     *
+     * Deliberately does not touch the detectors. Turning detection off would
+     * save a little and defeat the point of the device.
+     *
+     * Applied to the form, not saved: the person still sees what changed and
+     * presses save, so this can never quietly reconfigure a device.
+     */
+    let lowPowerApplied = $state(false);
+    function apply_low_power() {
+        if (!config) return;
+        config.ui_level = 0;
+        config.keep_screen_on = 0;
+        config.auto_check_updates = false;
+        config.wifi_ap_button_toggle = true;
+        lowPowerApplied = true;
+    }
+
     async function save_config() {
         if (!config) return;
 
@@ -393,6 +413,44 @@
                 }}
             >
                 {#if active === 'display'}
+                    <div class="mb-4 rounded-md border border-gray-200 p-3 dark:border-gray-700">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <button
+                                type="button"
+                                onclick={apply_low_power}
+                                class="rounded-md border border-gray-300 px-3 py-1 text-sm dark:border-gray-600"
+                            >
+                                Set up for longest battery life
+                            </button>
+                            {#if lowPowerApplied}
+                                <span class="text-xs text-green-700 dark:text-green-300">
+                                    Applied below. Review and save.
+                                </span>
+                            {/if}
+                        </div>
+                        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                            Turns the device display off, stops Rayhunter holding the screen awake,
+                            stops the periodic update check, and allows switching WiFi off from the
+                            buttons. It changes the settings below rather than saving them, so you
+                            can see what it did.
+                        </p>
+                        <Explainer summary="What actually uses the battery, measured.">
+                            <p>
+                                Rayhunter itself is not the expensive part. Measured while
+                                recording, the daemon used about <strong>1% of one core</strong> on
+                                an Orbic RC400L and about <strong>6.5%</strong> on a TP-Link M7350. The
+                                display mode made no measurable difference to that on either.
+                            </p>
+                            <p>
+                                What costs real power on a hotspot is the radio and the screen. So
+                                the settings worth changing are the ones that stop the screen being
+                                held on and let you switch the WiFi access point off when you are
+                                not using it, which is what this does. Detection is left alone: it
+                                is cheap, and switching it off would defeat the point of carrying
+                                the device.
+                            </p>
+                        </Explainer>
+                    </div>
                     <div
                         id="panel-display"
                         role="tabpanel"
@@ -1494,6 +1552,136 @@
                         aria-labelledby="tab-network"
                         class="space-y-4"
                     >
+                        <div class="space-y-3">
+                            <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
+                                Switching WiFi off from the buttons
+                            </h3>
+
+                            <div class="flex items-center">
+                                <input
+                                    id="wifi_ap_button_toggle"
+                                    type="checkbox"
+                                    bind:checked={config.wifi_ap_button_toggle}
+                                    class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
+                                />
+                                <label
+                                    for="wifi_ap_button_toggle"
+                                    class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                                >
+                                    Let a burst of button presses switch this device's WiFi off
+                                </label>
+                            </div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">
+                                Off by default. A hotspot running as a sensor does not need to be
+                                broadcasting a network, and not broadcasting one saves power and
+                                draws less attention.
+                            </p>
+
+                            {#if config.wifi_ap_button_toggle}
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label
+                                            for="wifi_ap_toggle_presses"
+                                            class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                        >
+                                            Presses
+                                        </label>
+                                        <input
+                                            id="wifi_ap_toggle_presses"
+                                            type="number"
+                                            min="4"
+                                            max="20"
+                                            bind:value={config.wifi_ap_toggle_presses}
+                                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label
+                                            for="wifi_ap_toggle_window_secs"
+                                            class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                        >
+                                            Within (seconds)
+                                        </label>
+                                        <input
+                                            id="wifi_ap_toggle_window_secs"
+                                            type="number"
+                                            min="1"
+                                            max="30"
+                                            bind:value={config.wifi_ap_toggle_window_secs}
+                                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                        />
+                                    </div>
+                                </div>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">
+                                    Five presses within four seconds by default. Deliberate to do,
+                                    and not something a device in a bag produces. Fewer than four
+                                    presses is not accepted.
+                                </p>
+
+                                <div>
+                                    <label
+                                        for="wifi_ap_off_mode"
+                                        class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                    >
+                                        How WiFi comes back
+                                    </label>
+                                    <select
+                                        id="wifi_ap_off_mode"
+                                        bind:value={config.wifi_ap_off_mode}
+                                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                    >
+                                        <option value="temporary">On its own, after a while</option>
+                                        <option value="until_restart">
+                                            Stays off until the device restarts
+                                        </option>
+                                    </select>
+                                </div>
+
+                                {#if config.wifi_ap_off_mode === 'temporary'}
+                                    <div>
+                                        <label
+                                            for="wifi_ap_off_minutes"
+                                            class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+                                        >
+                                            Off for (minutes)
+                                        </label>
+                                        <input
+                                            id="wifi_ap_off_minutes"
+                                            type="number"
+                                            min="1"
+                                            bind:value={config.wifi_ap_off_minutes}
+                                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-hidden focus:ring-2 focus:ring-rayhunter-blue"
+                                        />
+                                    </div>
+                                {/if}
+
+                                <Explainer
+                                    summary="How to get WiFi back, and why it can never lock you out."
+                                >
+                                    <p>
+                                        <strong
+                                            >Restarting the device always brings WiFi back.</strong
+                                        >
+                                        That is not something Rayhunter arranges, it is how the device
+                                        behaves: the firmware starts the access point when it boots. So
+                                        the worst case is a power cycle, which needs no cable, no menu
+                                        and no password.
+                                    </p>
+                                    <p>
+                                        Doing the gesture again while WiFi is off also brings it
+                                        back, by restarting. On the hardware this was measured on,
+                                        restarting is the only thing that reliably works: starting
+                                        the access point again by hand does not.
+                                    </p>
+                                    <p>
+                                        Because both routes restart the device, bringing WiFi back
+                                        interrupts recording for about half a minute. Turning it off
+                                        does not.
+                                    </p>
+                                </Explainer>
+                            {/if}
+                        </div>
+
                         {#if config.device === 'orbic' || config.device === 'moxee' || config.device === 'tmobile' || config.device === 'wingtech'}
                             <div
                                 class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3"
