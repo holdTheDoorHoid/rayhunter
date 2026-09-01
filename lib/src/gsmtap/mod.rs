@@ -3,7 +3,9 @@
 use deku::prelude::*;
 use num_enum::TryFromPrimitive;
 
-mod mac;
+// Public so the analysis side can build the same frames it reads back, which
+// is what the round-trip test for random access responses needs.
+pub mod mac;
 pub mod parser;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
