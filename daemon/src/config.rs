@@ -242,6 +242,30 @@ pub struct Config {
     /// hotspot. A button press is how a person navigates that interface, so it
     /// is a good signal that they want to see it.
     pub pause_display_on_keypress: bool,
+    /// Let a burst of button presses switch the device's own WiFi access
+    /// point off.
+    ///
+    /// Off by default. The access point is how most people reach the web
+    /// interface, so this is not something to have switched on without meaning
+    /// it. Restarting the device always brings the access point back, whatever
+    /// this is set to, which is what stops it locking anybody out.
+    #[serde(default)]
+    pub wifi_ap_button_toggle: bool,
+    /// How many presses the gesture takes.
+    ///
+    /// Enough that a device in a bag cannot produce it. Clamped when used, so
+    /// a value typed in here cannot make the gesture trivially easy.
+    #[serde(default = "default_wifi_ap_toggle_presses")]
+    pub wifi_ap_toggle_presses: u8,
+    /// The seconds all those presses have to land within.
+    #[serde(default = "default_wifi_ap_toggle_window_secs")]
+    pub wifi_ap_toggle_window_secs: u64,
+    /// Whether the access point comes back on its own or waits for a restart.
+    #[serde(default)]
+    pub wifi_ap_off_mode: crate::wifi_ap::WifiApOffMode,
+    /// Minutes before the access point comes back, in the temporary mode.
+    #[serde(default = "default_wifi_ap_off_minutes")]
+    pub wifi_ap_off_minutes: u64,
     /// ntfy.sh URL
     pub ntfy_url: Option<String>,
     /// Vector containing the types of enabled notifications
@@ -363,6 +387,18 @@ impl WebdavConfig {
     }
 }
 
+fn default_wifi_ap_toggle_presses() -> u8 {
+    5
+}
+
+fn default_wifi_ap_toggle_window_secs() -> u64 {
+    4
+}
+
+fn default_wifi_ap_off_minutes() -> u64 {
+    60
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -388,6 +424,18 @@ impl Default for Config {
             // On by default. It costs a thin status line for twenty seconds
             // and it prevents somebody being locked out of their own hotspot.
             pause_display_on_keypress: true,
+            // Off by default: switching off the access point is switching off
+            // the way most people reach this device, which nobody should get
+            // by accident.
+            wifi_ap_button_toggle: false,
+            // Five presses inside four seconds. Deliberate to do, and not
+            // something a pocket or a bag produces.
+            wifi_ap_toggle_presses: 5,
+            wifi_ap_toggle_window_secs: 4,
+            wifi_ap_off_mode: crate::wifi_ap::WifiApOffMode::Temporary,
+            // An hour. Long enough to be worth doing, short enough that
+            // forgetting about it is not a problem.
+            wifi_ap_off_minutes: 60,
             analyzers: AnalyzerConfig::default(),
             ntfy_url: None,
             enabled_notifications: vec![NotificationType::Warning, NotificationType::LowBattery],

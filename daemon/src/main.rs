@@ -25,6 +25,7 @@ mod timing_advance;
 mod update;
 mod web_auth;
 mod webdav;
+mod wifi_ap;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;

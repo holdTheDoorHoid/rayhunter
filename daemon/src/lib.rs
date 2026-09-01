@@ -25,6 +25,7 @@ pub mod timing_advance;
 pub mod update;
 pub mod web_auth;
 pub mod webdav;
+pub mod wifi_ap;
 
 #[cfg(feature = "apidocs")]
 use utoipa::OpenApi;

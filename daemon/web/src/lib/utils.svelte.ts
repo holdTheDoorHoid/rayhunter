@@ -145,6 +145,12 @@ export interface Config {
     terminal_enabled: boolean;
     /** Shrink to the thin status line briefly after a button press. */
     pause_display_on_keypress: boolean;
+    /** Let a burst of button presses switch the device's own WiFi off. */
+    wifi_ap_button_toggle: boolean;
+    wifi_ap_toggle_presses: number;
+    wifi_ap_toggle_window_secs: number;
+    wifi_ap_off_mode: 'temporary' | 'until_restart';
+    wifi_ap_off_minutes: number;
     ntfy_url: string | null;
     enabled_notifications: enabled_notifications[];
     auto_check_updates: boolean;
