@@ -82,6 +82,97 @@ pub struct RACHResponse {
     pub tc_rnti: u16,
 }
 
+/// Wireshark's MAC-LTE tags, from `packet-mac-lte.h`.
+///
+/// Only the two needed here. The payload tag must be last, since everything
+/// after it is the PDU itself.
+const MAC_LTE_PAYLOAD_TAG: u8 = 0x01;
+const MAC_LTE_FRAME_SUBFRAME_TAG: u8 = 0x04;
+
+/// The mapping as a plain byte, so a test can assert the value that actually
+/// reaches the capture rather than the enum on the way there.
+#[cfg(test)]
+pub fn wireshark_rnti_type_for_test(qualcomm: u8) -> u8 {
+    use deku::DekuContainerWrite;
+    wireshark_rnti_type(qualcomm).to_bytes().unwrap()[0]
+}
+
+/// Translate Qualcomm's RNTI type into the one Wireshark expects.
+///
+/// The two do not agree: Qualcomm's 0 is a C-RNTI, which is 3 to Wireshark, so
+/// passing the value through unchanged would label every ordinary transmission
+/// as something else. Anything unrecognised becomes NO_RNTI rather than a
+/// guess, since a confidently wrong label is worse than an absent one.
+fn wireshark_rnti_type(qualcomm: u8) -> RntiType {
+    match qualcomm {
+        0 | 4 => RntiType::C,
+        2 => RntiType::P,
+        3 => RntiType::Ra,
+        5 => RntiType::Si,
+        _ => RntiType::No,
+    }
+}
+
+/// Build one GSMTAP MAC-LTE frame for a transport block.
+///
+/// The frame carries the MAC header exactly as it was on the air, ahead of it
+/// the context Wireshark's dissector needs to make sense of it: which radio,
+/// which direction, what kind of identity, and which frame and subframe.
+fn transport_block_gsmtap(
+    downlink: bool,
+    rnti_type: u8,
+    sfn_subfn: u16,
+    mac_header: &[u8],
+) -> Result<GsmtapMessage, DekuError> {
+    let mut payload = Vec::with_capacity(mac_header.len() + 7);
+    payload.extend(
+        Header {
+            radio_type: RadioType::Fdd,
+            direction: if downlink {
+                Direction::Downlink
+            } else {
+                Direction::Uplink
+            },
+            rnti_type: wireshark_rnti_type(rnti_type),
+        }
+        .to_bytes()?,
+    );
+    payload.push(MAC_LTE_FRAME_SUBFRAME_TAG);
+    // Network order, with the frame number in the twelve high bits and the
+    // subframe in the four low ones, which is how the diag record already
+    // packs them.
+    payload.extend_from_slice(&sfn_subfn.to_be_bytes());
+    payload.push(MAC_LTE_PAYLOAD_TAG);
+    payload.extend_from_slice(mac_header);
+
+    Ok(GsmtapMessage {
+        header: GsmtapHeader::new(GsmtapType::LteMacFramed),
+        payload,
+    })
+}
+
+/// Every transport block in a downlink or uplink subpacket, as GSMTAP frames.
+///
+/// One subpacket usually holds several blocks, so this returns a frame per
+/// block rather than one per record. Measured on an Orbic: downlink records
+/// average two and reach ten, uplink reach twenty three. Keeping only the
+/// first would throw most of the capture away.
+pub fn mac_transport_to_gsmtap(subpacket: &SubpacketBody) -> Result<Vec<GsmtapMessage>, DekuError> {
+    match subpacket {
+        SubpacketBody::DlTransportBlock(blocks) => blocks
+            .samples
+            .iter()
+            .map(|b| transport_block_gsmtap(true, b.rnti_type(), b.sfn_subfn(), b.mac_header()))
+            .collect(),
+        SubpacketBody::UlTransportBlock(blocks) => blocks
+            .samples
+            .iter()
+            .map(|b| transport_block_gsmtap(false, b.rnti_type(), b.sfn_subfn(), b.mac_header()))
+            .collect(),
+        _ => Ok(Vec::new()),
+    }
+}
+
 pub fn mac_subpacket_to_gsmtap(
     subpacket: &SubpacketBody,
 ) -> Result<Option<GsmtapMessage>, DekuError> {

@@ -145,8 +145,10 @@ where
     while let Some(maybe_msg) = reader.get_next_message().await? {
         match maybe_msg {
             Ok(msg) => {
-                let maybe_gsmtap_msg = gsmtap_parser::parse(msg)?;
-                if let Some((timestamp, gsmtap_msg)) = maybe_gsmtap_msg {
+                // Every frame the record holds, not just the first: a MAC
+                // transport block record carries several, and dropping the
+                // rest would leave most of that traffic out of the capture.
+                for (timestamp, gsmtap_msg) in gsmtap_parser::parse_all(msg)? {
                     let packet_unix_ts = timestamp.to_datetime().timestamp();
                     let gps = find_nearest_gps(&gps_records, packet_unix_ts);
                     pcap_writer

@@ -28,11 +28,163 @@ pub struct Subpacket {
 pub enum SubpacketBody {
     #[deku(id = 0x06)]
     RachAttempt(#[deku(ctx = "version")] rach::Attempt),
+    #[deku(id = 0x07)]
+    DlTransportBlock(#[deku(ctx = "version")] transport::DlBlocks),
+    #[deku(id = 0x08)]
+    UlTransportBlock(#[deku(ctx = "version")] transport::UlBlocks),
     #[deku(id_pat = "_")]
     Other {
         #[deku(count = "size")]
         data: Vec<u8>,
     },
+}
+
+pub mod transport {
+    //! Downlink and uplink transport blocks.
+    //!
+    //! Each subpacket holds several samples rather than one, and each sample
+    //! carries the MAC header bytes that were actually on the air. Those bytes
+    //! are what Wireshark's MAC-LTE dissector reads, which is the whole point
+    //! of getting these into the capture: see EFForg/rayhunter#457.
+    //!
+    //! Derived from SCAT, as the rest of this file is:
+    //! <https://github.com/fgsect/scat/blob/9763cb5b1dcd5ee980f5b0ead9a8d520c8c51a51/src/scat/parsers/qualcomm/diagltelogparser.py#L644>
+
+    use super::*;
+
+    /// Downlink transport blocks in one subpacket.
+    #[derive(DekuRead, DekuWrite, Debug, Clone, PartialEq)]
+    #[deku(ctx = "version: u8")]
+    pub struct DlBlocks {
+        pub num_samples: u8,
+        #[deku(count = "num_samples", ctx = "version")]
+        pub samples: Vec<DlBlock>,
+    }
+
+    /// One downlink transport block.
+    ///
+    /// The fields ahead of the header differ by version; only `sfn_subfn`,
+    /// `rnti_type` and the header itself are needed to build a GSMTAP frame,
+    /// but the rest is read so the length works out.
+    #[derive(DekuRead, DekuWrite, Debug, Clone, PartialEq)]
+    #[deku(ctx = "version: u8", id = "version")]
+    pub enum DlBlock {
+        #[deku(id = "0x02")]
+        V2 {
+            sfn_subfn: u16,
+            rnti_type: u8,
+            harq_id: u8,
+            pmch_id: u16,
+            dl_tbs: u16,
+            rlc_pdus: u8,
+            padding: u16,
+            header_len: u8,
+            #[deku(count = "header_len")]
+            mac_header: Vec<u8>,
+        },
+        #[deku(id = "0x04")]
+        V4 {
+            sub_id: u8,
+            cell_id: u8,
+            sfn_subfn: u16,
+            rnti_type: u8,
+            harq_id: u8,
+            pmch_id: u16,
+            dl_tbs: u16,
+            rlc_pdus: u8,
+            padding: u16,
+            header_len: u8,
+            #[deku(count = "header_len")]
+            mac_header: Vec<u8>,
+        },
+    }
+
+    impl DlBlock {
+        /// System frame and subframe number, packed as GSMTAP wants them.
+        pub fn sfn_subfn(&self) -> u16 {
+            match self {
+                DlBlock::V2 { sfn_subfn, .. } | DlBlock::V4 { sfn_subfn, .. } => *sfn_subfn,
+            }
+        }
+
+        pub fn rnti_type(&self) -> u8 {
+            match self {
+                DlBlock::V2 { rnti_type, .. } | DlBlock::V4 { rnti_type, .. } => *rnti_type,
+            }
+        }
+
+        /// The MAC header as it was on the air.
+        pub fn mac_header(&self) -> &[u8] {
+            match self {
+                DlBlock::V2 { mac_header, .. } | DlBlock::V4 { mac_header, .. } => mac_header,
+            }
+        }
+    }
+
+    /// Uplink transport blocks in one subpacket.
+    #[derive(DekuRead, DekuWrite, Debug, Clone, PartialEq)]
+    #[deku(ctx = "version: u8")]
+    pub struct UlBlocks {
+        pub num_samples: u8,
+        #[deku(count = "num_samples", ctx = "version")]
+        pub samples: Vec<UlBlock>,
+    }
+
+    /// One uplink transport block.
+    #[derive(DekuRead, DekuWrite, Debug, Clone, PartialEq)]
+    #[deku(ctx = "version: u8", id = "version")]
+    pub enum UlBlock {
+        #[deku(id = "0x01")]
+        V1 {
+            harq_id: u8,
+            rnti_type: u8,
+            sfn_subfn: u16,
+            grant: u16,
+            rlc_pdus: u8,
+            padding: u16,
+            bsr_event: u8,
+            bsr_trig: u8,
+            header_len: u8,
+            #[deku(count = "header_len")]
+            mac_header: Vec<u8>,
+        },
+        #[deku(id_pat = "0x02 | 0x03 | 0x05 | 0x08")]
+        V2 {
+            sub_id: u8,
+            cell_id: u8,
+            harq_id: u8,
+            rnti_type: u8,
+            sfn_subfn: u16,
+            grant: u16,
+            rlc_pdus: u8,
+            padding: u16,
+            bsr_event: u8,
+            bsr_trig: u8,
+            header_len: u8,
+            #[deku(count = "header_len")]
+            mac_header: Vec<u8>,
+        },
+    }
+
+    impl UlBlock {
+        pub fn sfn_subfn(&self) -> u16 {
+            match self {
+                UlBlock::V1 { sfn_subfn, .. } | UlBlock::V2 { sfn_subfn, .. } => *sfn_subfn,
+            }
+        }
+
+        pub fn rnti_type(&self) -> u8 {
+            match self {
+                UlBlock::V1 { rnti_type, .. } | UlBlock::V2 { rnti_type, .. } => *rnti_type,
+            }
+        }
+
+        pub fn mac_header(&self) -> &[u8] {
+            match self {
+                UlBlock::V1 { mac_header, .. } | UlBlock::V2 { mac_header, .. } => mac_header,
+            }
+        }
+    }
 }
 
 pub mod rach {
@@ -484,5 +636,104 @@ pub(crate) mod test {
                 unk2: 1306,
             }),
         );
+    }
+}
+
+#[cfg(test)]
+mod transport_tests {
+    use super::test::*;
+    use super::*;
+    use crate::test_util::unhexlify;
+
+    /// Parse a packet, allowing bytes left over after the samples.
+    ///
+    /// Real subpackets are padded: the first downlink record below declares 32
+    /// bytes and its two samples account for 30. Insisting on exact
+    /// consumption, as the RACH tests do, would reject genuine captures.
+    fn parse_packet(bytes_str: &str) -> Packet {
+        let (_, mut reader) = unhexlify(bytes_str);
+        Packet::from_reader_with_ctx(&mut reader, ()).unwrap()
+    }
+
+    /// A real downlink record off an Orbic, carrying two samples.
+    ///
+    /// Expected values were decoded from these bytes by hand. Fields ahead of
+    /// the MAC header are read only so the length works out, but reading them
+    /// wrongly would silently misplace the header, which is the part that ends
+    /// up in the capture, so they are asserted too.
+    #[test]
+    fn a_real_downlink_record_parses() {
+        let packet = parse_packet(
+            "010100000702240002a51300000000e1000100000103a513000000009501010e00042381831f0000",
+        );
+        assert_eq!(packet.subpackets.len(), 1);
+        let SubpacketBody::DlTransportBlock(blocks) = &packet.subpackets[0].body else {
+            panic!(
+                "expected a downlink transport block, got {:?}",
+                packet.subpackets[0].body
+            );
+        };
+        assert_eq!(blocks.num_samples, 2);
+        assert_eq!(blocks.samples.len(), 2);
+
+        assert_eq!(blocks.samples[0].sfn_subfn(), 0x13a5);
+        assert_eq!(blocks.samples[0].rnti_type(), 0);
+        assert_eq!(blocks.samples[0].mac_header(), &[0x03]);
+
+        assert_eq!(blocks.samples[1].sfn_subfn(), 0x13a5);
+        assert_eq!(blocks.samples[1].mac_header(), &[0x23, 0x81, 0x83, 0x1f]);
+    }
+
+    /// A real uplink record off the same device.
+    #[test]
+    fn a_real_uplink_record_parses() {
+        let packet = parse_packet("0101ff0008011800010500b913a1000198000203073a3d23021f3200");
+        let SubpacketBody::UlTransportBlock(blocks) = &packet.subpackets[0].body else {
+            panic!(
+                "expected an uplink transport block, got {:?}",
+                packet.subpackets[0].body
+            );
+        };
+        assert_eq!(blocks.num_samples, 1);
+        assert_eq!(blocks.samples[0].sfn_subfn(), 0x13b9);
+        assert_eq!(blocks.samples[0].rnti_type(), 0);
+        assert_eq!(
+            blocks.samples[0].mac_header(),
+            &[0x3a, 0x3d, 0x23, 0x02, 0x1f, 0x32, 0x00]
+        );
+    }
+
+    /// A record with several samples of differing header lengths, which is
+    /// where a wrong stride shows up: get one length wrong and every sample
+    /// after it reads from the wrong offset.
+    #[test]
+    fn a_multi_sample_uplink_record_parses() {
+        let packet = parse_packet(
+            "0101ff00080128000205007914a1000100000203053a3d03331e04008614e7030150000103063d2383911f00",
+        );
+        let SubpacketBody::UlTransportBlock(blocks) = &packet.subpackets[0].body else {
+            panic!("expected an uplink transport block");
+        };
+        assert_eq!(blocks.num_samples, 2);
+        assert_eq!(blocks.samples.len(), 2);
+        assert_eq!(blocks.samples[0].mac_header().len(), 5);
+        assert_eq!(blocks.samples[1].mac_header().len(), 6);
+        // The second sample's header must be the bytes that really follow it,
+        // not whatever a mis-sized first sample left the cursor pointing at.
+        assert_eq!(
+            blocks.samples[1].mac_header(),
+            &[0x3d, 0x23, 0x83, 0x91, 0x1f, 0x00]
+        );
+    }
+
+    /// RACH parsing must be unaffected by the two new subpacket kinds.
+    #[test]
+    fn random_access_still_parses() {
+        for packet in mac_rach_test_packets_from_scat() {
+            assert!(matches!(
+                packet.subpackets[0].body,
+                SubpacketBody::RachAttempt(_)
+            ));
+        }
     }
 }

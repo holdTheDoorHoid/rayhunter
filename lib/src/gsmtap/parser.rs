@@ -1,6 +1,6 @@
 use crate::diag::Message;
 use crate::diag::diaglog::{LogBody, Nas4GMessageDirection, Timestamp};
-use crate::gsmtap::mac::mac_subpacket_to_gsmtap;
+use crate::gsmtap::mac::{mac_subpacket_to_gsmtap, mac_transport_to_gsmtap};
 use crate::gsmtap::{
     GsmtapHeader, GsmtapMessage, GsmtapType, LteNasSubtype, LteRrcSubtype, UmSubtype,
     UmtsRrcSubtype,
@@ -18,8 +18,35 @@ pub enum GsmtapParserError {
     InvalidLteRrcOtaHeaderPduNum(u8, u8),
     #[error("Invalid LteMacRachResponse packet: {0}")]
     InvalidLteMacRachResponse(String),
+    #[error("Invalid LTE MAC transport block: {0}")]
+    InvalidLteMacTransportBlock(String),
 }
 
+/// Every GSMTAP frame a diag message produces.
+///
+/// Most records yield one frame, but a MAC transport block record holds
+/// several samples and each is its own frame. Measured on an Orbic: downlink
+/// records average two and reach ten, uplink reach twenty three, so keeping
+/// only the first would throw most of the capture away.
+///
+/// Used for writing the PCAP. The analysis side keeps to `parse`, because it
+/// counts one row per diag message and nothing analyses transport blocks
+/// anyway; the capture has never been one frame per diag message, since
+/// records that produce nothing are skipped entirely.
+pub fn parse_all(msg: Message) -> Result<Vec<(Timestamp, GsmtapMessage)>, GsmtapParserError> {
+    let Message::Log {
+        timestamp, body, ..
+    } = msg
+    else {
+        return Ok(Vec::new());
+    };
+    Ok(log_to_gsmtap_all(body)?
+        .into_iter()
+        .map(|msg| (timestamp.clone(), msg))
+        .collect())
+}
+
+/// The first frame only. See `parse_all` for why both exist.
 pub fn parse(msg: Message) -> Result<Option<(Timestamp, GsmtapMessage)>, GsmtapParserError> {
     if let Message::Log {
         timestamp, body, ..
@@ -51,6 +78,26 @@ fn gsm_rr_subtype(channel_type: u8) -> Option<UmSubtype> {
         log_codes::FACCH_H => UmSubtype::TchH,
         _ => return None,
     })
+}
+
+fn log_to_gsmtap_all(value: LogBody) -> Result<Vec<GsmtapMessage>, GsmtapParserError> {
+    // Transport blocks are the only records holding more than one frame. They
+    // carry the MAC headers that were on the air, which is what Wireshark's
+    // MAC-LTE dissector reads: see EFForg/rayhunter#457. Rayhunter does not
+    // analyse them, but "we do not read it" is a poor reason to drop it from
+    // somebody's capture.
+    if let LogBody::LteMacDl { packet } | LogBody::LteMacUl { packet } = &value {
+        let mut frames = Vec::new();
+        for subpacket in &packet.subpackets {
+            frames.extend(mac_transport_to_gsmtap(&subpacket.body).map_err(|err| {
+                GsmtapParserError::InvalidLteMacTransportBlock(format!(
+                    "unable to serialize GSMTAP payload: {err:?}"
+                ))
+            })?);
+        }
+        return Ok(frames);
+    }
+    Ok(log_to_gsmtap(value)?.into_iter().collect())
 }
 
 fn log_to_gsmtap(value: LogBody) -> Result<Option<GsmtapMessage>, GsmtapParserError> {
@@ -417,5 +464,91 @@ mod legacy_radio_tests {
             msg: vec![0],
         };
         assert!(log_to_gsmtap(body).unwrap().is_none());
+    }
+}
+
+#[cfg(test)]
+mod mac_transport_tests {
+    use super::*;
+    use crate::diag::diaglog::mac::Packet;
+    use crate::gsmtap::GsmtapType;
+    use crate::test_util::unhexlify;
+    use deku::DekuReader;
+
+    fn mac_packet(hex: &str) -> Packet {
+        let (_, mut reader) = unhexlify(hex);
+        Packet::from_reader_with_ctx(&mut reader, ()).unwrap()
+    }
+
+    /// A real downlink record off an Orbic holds two transport blocks, and both
+    /// have to reach the capture. Keeping only the first is what the old code
+    /// effectively did by dropping the record entirely, and it is the mistake
+    /// this guards against: measured records reach ten blocks downlink and
+    /// twenty three uplink.
+    #[test]
+    fn every_downlink_block_becomes_a_frame() {
+        let packet = mac_packet(
+            "010100000702240002a51300000000e1000100000103a513000000009501010e00042381831f0000",
+        );
+        let frames = log_to_gsmtap_all(LogBody::LteMacDl { packet }).unwrap();
+        assert_eq!(frames.len(), 2, "one frame per transport block");
+
+        for frame in &frames {
+            assert_eq!(frame.header.gsmtap_type, GsmtapType::LteMacFramed);
+        }
+        // Context, frame/subframe tag, sfn in network order, payload tag, then
+        // the MAC header exactly as it was on the air.
+        assert_eq!(
+            frames[0].payload,
+            vec![0x01, 0x01, 0x03, 0x04, 0x13, 0xa5, 0x01, 0x03]
+        );
+        assert_eq!(
+            frames[1].payload,
+            vec![
+                0x01, 0x01, 0x03, 0x04, 0x13, 0xa5, 0x01, 0x23, 0x81, 0x83, 0x1f
+            ]
+        );
+    }
+
+    /// Uplink is the same shape with the direction byte flipped. Getting that
+    /// wrong labels the device's own transmissions as the network's.
+    #[test]
+    fn uplink_blocks_are_marked_uplink() {
+        let packet = mac_packet("0101ff0008011800010500b913a1000198000203073a3d23021f3200");
+        let frames = log_to_gsmtap_all(LogBody::LteMacUl { packet }).unwrap();
+        assert_eq!(frames.len(), 1);
+        // Second byte is the direction: 0 uplink, 1 downlink.
+        assert_eq!(frames[0].payload[1], 0x00, "should be marked uplink");
+        assert_eq!(
+            frames[0].payload,
+            vec![
+                0x01, 0x00, 0x03, 0x04, 0x13, 0xb9, 0x01, 0x3a, 0x3d, 0x23, 0x02, 0x1f, 0x32, 0x00
+            ]
+        );
+    }
+
+    /// Qualcomm and Wireshark number RNTI types differently. Passing the value
+    /// through unchanged would label every ordinary transmission as something
+    /// else, which a capture reader has no way to notice.
+    #[test]
+    fn rnti_types_are_translated_not_copied() {
+        use crate::gsmtap::mac::wireshark_rnti_type_for_test as map;
+        assert_eq!(map(0), 3, "Qualcomm C-RNTI is 3 to Wireshark");
+        assert_eq!(map(4), 3, "temporary C-RNTI is also a C-RNTI");
+        assert_eq!(map(2), 1, "P-RNTI");
+        assert_eq!(map(3), 2, "RA-RNTI");
+        assert_eq!(map(5), 4, "SI-RNTI");
+        assert_eq!(map(200), 0, "anything unrecognised becomes NO_RNTI");
+    }
+
+    /// Records that are not transport blocks must keep going through the old
+    /// single frame path untouched.
+    #[test]
+    fn other_records_are_unaffected() {
+        let packet = mac_packet(
+            "0101a06906022400010001071BFF98FF000001231A0400181C010007000600465C80BD0648000000",
+        );
+        let frames = log_to_gsmtap_all(LogBody::LteMacRachResponse { packet }).unwrap();
+        assert_eq!(frames.len(), 1, "a random access response is one frame");
     }
 }

@@ -109,11 +109,18 @@ pub struct MacRandomAccessResponse {
 /// then the six byte response body. Kept next to the parsing that uses them so
 /// the two cannot drift apart silently.
 mod mac_rar_offsets {
+    /// Where the tag identifying what follows sits.
+    pub const TAG: usize = 3;
     /// E/T/RAPID subheader.
     pub const SUBHEADER: usize = 4;
     /// Start of the response body: R(1) TA(11) grant(20) TC-RNTI(16).
     pub const BODY: usize = 5;
     pub const BODY_LEN: usize = 6;
+    /// The payload follows immediately in a random access response.
+    pub const PAYLOAD_TAG: u8 = 0x01;
+    /// Which identity the response is addressed to.
+    pub const RNTI_TYPE: usize = 2;
+    pub const RA_RNTI: u8 = 2;
 }
 
 /// Read a random access response out of a GSMTAP MAC-LTE payload.
@@ -124,6 +131,14 @@ mod mac_rar_offsets {
 fn parse_mac_rar(payload: &[u8]) -> Option<MacRandomAccessResponse> {
     use mac_rar_offsets::*;
     if payload.len() < BODY + BODY_LEN {
+        return None;
+    }
+    // Transport blocks are MAC-LTE frames too, and one is long enough to be
+    // read as a response full of plausible nonsense. They are told apart by
+    // what follows the context: a random access response has its payload
+    // immediately, a transport block has a frame and subframe tag first. The
+    // identity it is addressed to has to be the random access one as well.
+    if payload[TAG] != PAYLOAD_TAG || payload[RNTI_TYPE] != RA_RNTI {
         return None;
     }
     let body = &payload[BODY..BODY + BODY_LEN];
@@ -260,6 +275,27 @@ mod tests {
         };
         assert_eq!(rar.timing_advance, 0x7ff);
         assert_eq!(rar.tc_rnti, 0xabcd);
+    }
+
+    /// Transport blocks are MAC-LTE frames too, and long enough to be read as
+    /// a random access response full of plausible nonsense. Feeding a made up
+    /// timing advance to the detector that watches timing advance is exactly
+    /// the sort of quiet wrongness worth a test.
+    #[test]
+    fn a_transport_block_is_not_read_as_a_random_access_response() {
+        use crate::gsmtap::{GsmtapHeader, GsmtapMessage};
+        // Radio, direction, C-RNTI, frame/subframe tag, sfn, payload tag, then
+        // a MAC header. Exactly what the downlink path now produces.
+        let msg = GsmtapMessage {
+            header: GsmtapHeader::new(GsmtapType::LteMacFramed),
+            payload: vec![
+                0x01, 0x01, 0x03, 0x04, 0x13, 0xa5, 0x01, 0x23, 0x81, 0x83, 0x1f,
+            ],
+        };
+        assert!(
+            InformationElement::try_from(&msg).is_err(),
+            "a transport block was mistaken for a random access response"
+        );
     }
 
     /// A truncated frame must not be read as a response full of zeroes.
