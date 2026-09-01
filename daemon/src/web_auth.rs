@@ -201,6 +201,60 @@ pub async fn require_auth(
         .into_response()
 }
 
+/// Whether a request is a state-changing one made by some other website.
+///
+/// Browsers tag every request with `Sec-Fetch-Site`: a request the page made
+/// to its own origin is `same-origin`, one a different site triggered is
+/// `cross-site`. A request with no such header is not from a modern browser
+/// (curl, the dev proxy, an app) and so is not a cross-site-scripting vector.
+/// Only state-changing methods are considered; the browser's same-origin
+/// policy already stops another site reading the response to a GET.
+fn is_cross_site_state_change(method: &axum::http::Method, sec_fetch_site: Option<&str>) -> bool {
+    use axum::http::Method;
+    let mutating = matches!(
+        *method,
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+    );
+    if !mutating {
+        return false;
+    }
+    match sec_fetch_site {
+        // The app talking to itself, or a user-initiated navigation.
+        Some("same-origin") | Some("same-site") | Some("none") | None => false,
+        // "cross-site", and anything unrecognised, is treated as hostile.
+        Some(_) => true,
+    }
+}
+
+/// Axum middleware that refuses cross-site state-changing requests.
+///
+/// This stops a web page you happen to visit from silently deleting your
+/// recordings or rewriting the configuration on a Rayhunter it can reach over
+/// the network — a cross-site request forgery. It is independent of the
+/// password: it protects the device whether or not an account is configured,
+/// and the legitimate web UI, which only ever calls the API from its own
+/// origin, is unaffected.
+pub async fn csrf_protection(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+
+    let sec_fetch_site = request
+        .headers()
+        .get("sec-fetch-site")
+        .and_then(|v| v.to_str().ok());
+    if is_cross_site_state_change(request.method(), sec_fetch_site) {
+        return (
+            StatusCode::FORBIDDEN,
+            "cross-site request refused; this action can only be taken from the Rayhunter interface itself",
+        )
+            .into_response();
+    }
+    next.run(request).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,6 +363,43 @@ mod tests {
             parse_basic_auth(&format!("Basic {encoded}")),
             Some(("alice".into(), "pass:with:colons".into()))
         );
+    }
+
+    #[test]
+    fn cross_site_state_changes_are_refused_but_the_ui_and_reads_are_not() {
+        use axum::http::Method;
+        // A cross-site POST (a malicious page targeting the device) is refused.
+        assert!(is_cross_site_state_change(
+            &Method::POST,
+            Some("cross-site")
+        ));
+        assert!(is_cross_site_state_change(
+            &Method::DELETE,
+            Some("cross-site")
+        ));
+        // The legitimate web UI calls its own origin.
+        assert!(!is_cross_site_state_change(
+            &Method::POST,
+            Some("same-origin")
+        ));
+        assert!(!is_cross_site_state_change(
+            &Method::POST,
+            Some("same-site")
+        ));
+        // A user-initiated action, or a non-browser client (curl, the dev
+        // proxy) that sends no such header, is allowed.
+        assert!(!is_cross_site_state_change(&Method::POST, Some("none")));
+        assert!(!is_cross_site_state_change(&Method::POST, None));
+        // Reads are never blocked by this: the same-origin policy already stops
+        // another site reading the response.
+        assert!(!is_cross_site_state_change(
+            &Method::GET,
+            Some("cross-site")
+        ));
+        assert!(!is_cross_site_state_change(
+            &Method::HEAD,
+            Some("cross-site")
+        ));
     }
 
     #[test]

@@ -137,6 +137,9 @@ async fn run_server(
             state.clone(),
             web_auth::require_auth,
         ))
+        // Outermost, so a cross-site state-changing request is refused before
+        // anything else looks at it. Independent of whether a password is set.
+        .layer(axum::middleware::from_fn(web_auth::csrf_protection))
         .with_state(state);
 
     task_tracker.spawn(async move {
