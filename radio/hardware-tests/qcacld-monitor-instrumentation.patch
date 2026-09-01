@@ -32,6 +32,65 @@ index 9f8ba8f59..40ff9fb46 100644
                  if (VOS_MONITOR_MODE == vos_get_conparam())
                      ol_rx_mon_indication_handler(
                              pdev->txrx_pdev, htt_t2h_msg, peer_id, tid,
+diff --git a/CORE/CLD_TXRX/TLSHIM/tl_shim.c b/CORE/CLD_TXRX/TLSHIM/tl_shim.c
+index b3eb14e7e..5b5a428dd 100644
+--- a/CORE/CLD_TXRX/TLSHIM/tl_shim.c
++++ b/CORE/CLD_TXRX/TLSHIM/tl_shim.c
+@@ -581,6 +581,17 @@ static int tlshim_mgmt_rx_process(void *context, u_int8_t *data,
+ 		return 0;
+ 	}
+ 
++	/* RHMON: count every mgmt frame the firmware hands us, before any of
++	 * the driver's own filtering, so "firmware sent nothing" can be told
++	 * apart from "the driver dropped it". */
++	{
++		static unsigned int rhmon_in;
++		rhmon_in++;
++		if (rhmon_in <= 3 || (rhmon_in % 100) == 0)
++			pr_err("RHMON: entered mgmt_rx_process #%u vdev=%d saved_beacon=%d\n",
++			       rhmon_in, vdev_id, (int)saved_beacon);
++	}
++
+ 	adf_os_spin_lock_bh(&tl_shim->mgmt_lock);
+ 	param_tlvs = (WMI_MGMT_RX_EVENTID_param_tlvs *) data;
+ 	if (!param_tlvs) {
+@@ -711,6 +722,36 @@ static int tlshim_mgmt_rx_process(void *context, u_int8_t *data,
+ 	mgt_type    = (wh)->i_fc[0] & IEEE80211_FC0_TYPE_MASK;
+ 	mgt_subtype = (wh)->i_fc[0] & IEEE80211_FC0_SUBTYPE_MASK;
+ 
++	/* RHMON: census of which management subtypes the firmware actually
++	 * hands the host, and on which vdev. Probe requests (subtype 0x40)
++	 * are the ones surveillance detection needs; an AP has to see them to
++	 * answer them, so they should arrive even without monitor mode. */
++	{
++		static unsigned int rhmon_sub[16];
++		static unsigned int rhmon_total;
++		unsigned int idx = (mgt_subtype >> 4) & 0xF;
++		if (mgt_type == IEEE80211_FC0_TYPE_MGT) {
++			rhmon_sub[idx]++;
++			rhmon_total++;
++			/* Probe requests: log the first few with the sender. */
++			if (mgt_subtype == IEEE80211_FC0_SUBTYPE_PROBE_REQ &&
++			    rhmon_sub[idx] <= 8) {
++				pr_err("RHMON: PROBE_REQ #%u from %02x:%02x:%02x:%02x:%02x:%02x vdev=%d rssi=%d\n",
++				       rhmon_sub[idx],
++				       wh->i_addr2[0], wh->i_addr2[1], wh->i_addr2[2],
++				       wh->i_addr2[3], wh->i_addr2[4], wh->i_addr2[5],
++				       vdev_id, hdr->rssi);
++			}
++			/* Periodic census so we can see the mix over time. */
++			if ((rhmon_total % 200) == 0) {
++				pr_err("RHMON: mgmt census total=%u assocreq=%u probereq=%u probersp=%u beacon=%u auth=%u deauth=%u action=%u\n",
++				       rhmon_total, rhmon_sub[0], rhmon_sub[4],
++				       rhmon_sub[5], rhmon_sub[8], rhmon_sub[11],
++				       rhmon_sub[12], rhmon_sub[13]);
++			}
++		}
++	}
++
+ #ifdef FEATURE_WLAN_D0WOW
+ 	if (wma_read_d0wow_flag(wma_handle)) {
+ 		TLSHIM_LOGE("%s: Frame subtype is 0x%x", __func__, mgt_subtype);
 diff --git a/CORE/CLD_TXRX/TXRX/ol_txrx.c b/CORE/CLD_TXRX/TXRX/ol_txrx.c
 index 96d4043d5..95d04993e 100644
 --- a/CORE/CLD_TXRX/TXRX/ol_txrx.c
@@ -73,7 +132,7 @@ index bbf82b0a4..f86fcb354 100644
  		hddLog(LOGE,
  		       FL("sme_create_mon_session() failed to register. Status= %d [0x%08X]"),
 diff --git a/CORE/SERVICES/WMA/wma.c b/CORE/SERVICES/WMA/wma.c
-index aaa20d729..04e88e2a0 100644
+index aaa20d729..e58cc044a 100644
 --- a/CORE/SERVICES/WMA/wma.c
 +++ b/CORE/SERVICES/WMA/wma.c
 @@ -1154,6 +1154,12 @@ send_fail_resp:
@@ -128,3 +187,26 @@ index aaa20d729..04e88e2a0 100644
  		status = wma_vdev_start(wma, &req,
  				wma->interfaces[req.vdev_id].is_channel_switch);
  		if (status != VOS_STATUS_SUCCESS) {
+@@ -36400,6 +36417,22 @@ v_VOID_t wma_rx_service_ready_event(WMA_HANDLE handle, void *cmd_param_info)
+ 	}
+ 
+ 	WMA_LOGA("WMA <-- WMI_SERVICE_READY_EVENTID");
++	/* RHMON: enumerate what this firmware actually claims to support, to
++	 * settle which capture routes are even worth attempting. */
++	{
++		u_int32_t *rhsvc = param_buf->wmi_service_bitmap;
++		if (rhsvc) {
++			pr_err("RHMON: fw services bitmap %08x %08x %08x %08x %08x %08x %08x %08x\n",
++			       rhsvc[0], rhsvc[1], rhsvc[2], rhsvc[3],
++			       rhsvc[4], rhsvc[5], rhsvc[6], rhsvc[7]);
++			pr_err("RHMON: VDEV_RX_FILTER=%d MGMT_TX_WMI=%d MGMT_TX_HTT=%d PACKET_FILTER=%d BPF=%d\n",
++			       WMI_SERVICE_IS_ENABLED(rhsvc, WMI_SERVICE_VDEV_RX_FILTER),
++			       WMI_SERVICE_IS_ENABLED(rhsvc, WMI_SERVICE_MGMT_TX_WMI),
++			       WMI_SERVICE_IS_ENABLED(rhsvc, WMI_SERVICE_MGMT_TX_HTT),
++			       WMI_SERVICE_IS_ENABLED(rhsvc, WMI_SERVICE_PACKET_FILTER_OFFLOAD),
++			       WMI_SERVICE_IS_ENABLED(rhsvc, WMI_SERVICE_BPF_OFFLOAD));
++		}
++	}
+ 
+ 	wma_handle->phy_capability = ev->phy_capability;
+ 	wma_handle->max_frag_entry = ev->max_frag_entry;

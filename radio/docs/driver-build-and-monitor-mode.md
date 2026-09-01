@@ -150,6 +150,52 @@ Avenue 2 is the most interesting, because it does not depend on finding a
 firmware blob that may not exist, and because management frames are precisely
 what surveillance detection needs.
 
+## What the firmware already gives us
+
+Avenue 2 was measured. `tlshim_mgmt_rx_process` is the single point where
+every management frame from firmware enters the host, so it was instrumented
+with a per-subtype census and the device left running as an ordinary access
+point for three minutes:
+
+```
+RHMON: mgmt census total=200 assocreq=0 probereq=0 probersp=19 beacon=181 auth=0 deauth=0 action=0
+```
+
+Two things follow, and they pull in opposite directions.
+
+**The good half:** 181 of 200 frames were **beacons from other access points**.
+The firmware is already doing promiscuous management-frame reception and
+handing foreign frames to the host, in ordinary AP mode, with no monitor vdev
+and no special configuration. That path is live and free.
+
+**The bad half:** **zero probe requests**, across three minutes in a
+residential area where phones probe constantly. The firmware is filtering them
+out before the host ever sees them — most likely probe-response offload, where
+the firmware answers probes itself and never troubles the host.
+
+So the frames we can currently get (beacons, probe responses) are the same
+frames BSS scanning already provides. The frames we actually need for current
+Flock detection — probe requests — are withheld by the firmware, exactly as
+monitor mode is.
+
+The remaining question for this avenue is whether the RX filter can be widened
+to include probe requests. A first attempt to read the firmware's WMI service
+bitmap suggested `WMI_SERVICE_VDEV_RX_FILTER` is not advertised:
+
+```
+RHMON: fw services bitmap 0000000d 00000007 00000005 00000003 0000000f 0000000d 0000000b 0000000f
+RHMON: VDEV_RX_FILTER=0 MGMT_TX_WMI=0 MGMT_TX_HTT=0 PACKET_FILTER=0 BPF=0
+```
+
+**Treat that reading as unverified.** The bitmap is implausibly sparse for a
+firmware that demonstrably supports AP mode, offloaded scanning and beacon
+reception, so the decode is more likely wrong than the firmware is that
+limited. Before concluding anything from it, the read should be sanity-checked
+against a service the firmware is known to support. Even if the service bit
+really is absent, `WMI_PDEV_PARAM_RX_FILTER` and
+`WMI_PDEV_PARAM_SET_PROMISC_MODE_CMDID` are worth issuing directly — service
+bits are advisory and firmware often implements more than it advertises.
+
 ## Reproducing
 
 ```bash
