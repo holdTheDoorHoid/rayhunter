@@ -190,8 +190,11 @@ sentinel value of 125. `read_temperatures` in `daemon/src/stats.rs` takes the
 **maximum** across everything named `pa_therm`, and its sanity window is
 `-40..=150`, so 125 passes and wins. The web UI then prints "125°C Radio".
 
-The Orbic evidently has a single PA sensor, which is why taking the max was
-never wrong there.
+**Correction to an earlier guess in this document:** the Orbic does *not* have
+a single power amplifier sensor. Read off an RC400L (serial `aa8b68a3`) it has
+two, `pa_therm0` at 25 and `pa_therm1` at 24, and both are populated. Taking
+the maximum was never wrong there because both channels are wired, not because
+there is only one to pick from.
 
 The same function also mis-classifies `thermal_zone0`, whose type is `battery`
 and which reports **deci**-degrees (`2800` = 28.0 °C). The scaling rule divides
@@ -469,3 +472,62 @@ space limit is put back.
 * **Anything needing a live network**, until there is a SIM on a band this
   device supports.
 * The `key_input.rs` 32-byte read described above.
+
+---
+
+## Checked on an Orbic before merging
+
+The patched build was deployed to an Orbic RC400L (serial `aa8b68a3`, Linux
+3.18.48) and all three changes were measured there too. None of them alters
+Orbic behaviour except in the way intended.
+
+**Thermal zones**, read off the device:
+
+```
+thermal_zone0-4  tsens_tz_sensor0-4   32,32,32,32,34
+thermal_zone5    pa_therm0            25
+thermal_zone6    pa_therm1            24
+```
+
+Both power amplifier channels are populated and neither reads the 125
+sentinel, so the Orbic was never affected by that bug — it reported a correct
+26 C radio before the patch. After the patch: 35 C processor, 27 C radio, a
+degree of ordinary drift and nothing else. The change is a no-op here.
+
+This is also why the first version of the temperature fix was wrong. It used
+an allowlist (`tsens`, `cpu`, `soc`), which the Orbic happens to satisfy — so
+it would have passed a test on both devices while still being able to silently
+drop `cpu_temp_c` on a Wingtech, T-Mobile, UZ801 or Moxee whose zones are
+named something else. The denylist form does not depend on knowing any of
+those names.
+
+**Display cleanup.** Filled the screen from High Visibility (16384/16384
+green), then switched to Invisible:
+
+```
+immediately: 16384/16384 black
++15s       : 16258 black, 101 non-black
++30s       : 16232 black, 127 non-black
++45s       : 16232 black, 127 non-black
+```
+
+The Orbic repaints its own interface progressively, so its content comes back
+over the cleared screen on its own — the opposite of the TP-Link, and exactly
+why this bug was invisible on an Orbic. Nothing gets stuck and nothing broke.
+Black is also the better starting point for Invisible mode than the green that
+used to be left behind.
+
+**Paused when recording is refused**, measured on the status line itself:
+
+```
+recording working : row0 = rgb(0,252,0) x128   row1 = rgb(0,252,0) x128
+recording refused : row0 = rgb(248,252,248) x128  row1 = rgb(248,252,248) x128
+```
+
+Identical to the TP-Link result. The Orbic had the same bug — it is shared
+code — and the same fix.
+
+The Orbic was left recording with its green line back, on the patched build.
+The daemon it replaced was itself a main-branch 0.12.2 (same feature markers,
+no `rayhunter-radio`), so no wifi-branch work was disturbed; it is backed up
+regardless.
