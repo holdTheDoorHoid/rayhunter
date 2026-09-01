@@ -33,6 +33,7 @@ tokio = { version = "1.44.2", default-features = false, features = ["fs", "signa
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json"] }
 thiserror = "1.0.52"
 libc = "0.2.150"
+if-addrs = "0.13"
 log = "0.4.20"
 tokio-util = { version = "0.7.10", features = ["rt", "io", "compat"] }
 futures-macro = "0.3.30"

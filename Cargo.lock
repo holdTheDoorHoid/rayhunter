@@ -4637,6 +4637,7 @@ dependencies = [
  "futures",
  "futures-macro",
  "hmac",
+ "if-addrs",
  "image",
  "include_dir",
  "libc",

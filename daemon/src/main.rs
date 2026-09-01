@@ -24,7 +24,7 @@ mod update;
 mod web_auth;
 mod webdav;
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use crate::battery::run_battery_notification_worker;
@@ -118,6 +118,65 @@ fn get_router() -> AppRouter {
         .route("/{*path}", get(serve_static))
 }
 
+/// How long to wait for a private LAN interface to appear before serving on all
+/// interfaces instead. The WiFi hotspot address can be configured slightly after
+/// the daemon starts at boot, so a brief wait catches it; the fallback means a
+/// device is never left unreachable over its own WiFi if it does not.
+const WEB_BIND_INTERFACE_ATTEMPTS: u32 = 10;
+
+/// Choose the addresses the web server binds to, given the machine's interface
+/// IPs.
+///
+/// Loopback always — that is USB/adb access and the device talking to itself —
+/// plus every RFC1918 private address, which is the WiFi hotspot the device
+/// serves. The cellular/WAN interface, which carries a public or carrier-NAT
+/// (CGNAT) address, is deliberately left off, so the interface is not reachable
+/// from the internet side even on a device with a live SIM.
+///
+/// If no private address is present at all, it returns `0.0.0.0` (every
+/// interface) as a fallback. A device that cannot be reached over its own WiFi
+/// is far worse than the small exposure this removes, and this is defence in
+/// depth, not a lock.
+fn select_listen_addrs(interface_ips: &[IpAddr]) -> Vec<IpAddr> {
+    let mut addrs = vec![IpAddr::V4(Ipv4Addr::LOCALHOST)];
+    for ip in interface_ips {
+        if let IpAddr::V4(v4) = ip
+            && v4.is_private()
+            && !addrs.contains(ip)
+        {
+            addrs.push(*ip);
+        }
+    }
+    if addrs.len() == 1 {
+        // Only loopback: no hotspot address found.
+        return vec![IpAddr::V4(Ipv4Addr::UNSPECIFIED)];
+    }
+    addrs
+}
+
+/// The addresses to bind, waiting briefly for the hotspot interface to come up.
+async fn web_listen_addrs() -> Vec<IpAddr> {
+    for attempt in 0..WEB_BIND_INTERFACE_ATTEMPTS {
+        let ips: Vec<IpAddr> = match if_addrs::get_if_addrs() {
+            Ok(ifaces) => ifaces.iter().map(|i| i.ip()).collect(),
+            Err(e) => {
+                warn!("couldn't list network interfaces: {e}");
+                Vec::new()
+            }
+        };
+        let addrs = select_listen_addrs(&ips);
+        // More than just loopback means a private (hotspot) address was found.
+        if addrs.len() > 1 {
+            return addrs;
+        }
+        if attempt + 1 < WEB_BIND_INTERFACE_ATTEMPTS {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    }
+    warn!("no private LAN interface found after waiting; serving on all interfaces");
+    vec![IpAddr::V4(Ipv4Addr::UNSPECIFIED)]
+}
+
 // Runs the axum server, taking all the elements needed to build up our
 // ServerState and a oneshot Receiver that'll fire when it's time to shutdown
 // (i.e. user hit ctrl+c)
@@ -127,8 +186,7 @@ async fn run_server(
     shutdown_token: CancellationToken,
 ) -> JoinHandle<()> {
     info!("spinning up server");
-    let addr = SocketAddr::from(([0, 0, 0, 0], state.config.port));
-    let listener = TcpListener::bind(&addr).await.unwrap();
+    let port = state.config.port;
     // Wrapped around every route. When no accounts are configured the layer
     // passes everything through, so this changes nothing until somebody adds
     // one.
@@ -142,13 +200,48 @@ async fn run_server(
         .layer(axum::middleware::from_fn(web_auth::csrf_protection))
         .with_state(state);
 
-    task_tracker.spawn(async move {
-        info!("The orca is hunting for stingrays...");
-        axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown_token.cancelled_owned())
-            .await
-            .unwrap();
-    })
+    let addrs = web_listen_addrs().await;
+    info!("serving the web interface on port {port}, addresses {addrs:?}");
+
+    // One listener per address, all shut down together. The listeners bind the
+    // hotspot and loopback but not the WAN side; see select_listen_addrs.
+    let mut last_handle = None;
+    for ip in addrs {
+        let sock = SocketAddr::new(ip, port);
+        let listener = match TcpListener::bind(&sock).await {
+            Ok(listener) => listener,
+            Err(e) => {
+                error!("couldn't bind the web interface to {sock}: {e}");
+                continue;
+            }
+        };
+        let app = app.clone();
+        let shutdown = shutdown_token.clone();
+        last_handle = Some(task_tracker.spawn(async move {
+            info!("The orca is hunting for stingrays... ({sock})");
+            axum::serve(listener, app)
+                .with_graceful_shutdown(shutdown.cancelled_owned())
+                .await
+                .unwrap();
+        }));
+    }
+
+    // If every chosen address failed to bind, serve on all interfaces so the
+    // device is still reachable rather than silently offering no interface.
+    match last_handle {
+        Some(handle) => handle,
+        None => {
+            let sock = SocketAddr::from(([0, 0, 0, 0], port));
+            let listener = TcpListener::bind(&sock).await.unwrap();
+            task_tracker.spawn(async move {
+                info!("The orca is hunting for stingrays... ({sock}, fallback)");
+                axum::serve(listener, app)
+                    .with_graceful_shutdown(shutdown_token.cancelled_owned())
+                    .await
+                    .unwrap();
+            })
+        }
+    }
 }
 
 // Loads a RecordingStore if one exists, and if not, only create one if we're
@@ -452,5 +545,57 @@ mod test {
     fn test_get_router() {
         // assert that creating the router does not panic from invalid route patterns.
         let _ = get_router();
+    }
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    /// The hotspot (a private address) and loopback are bound; the cellular WAN,
+    /// whether a public address or a carrier-NAT (CGNAT, 100.64/10) one, is not.
+    #[test]
+    fn listens_on_the_hotspot_and_loopback_but_not_the_wan() {
+        let interfaces = [
+            ip("127.0.0.1"),   // loopback
+            ip("192.168.1.1"), // the WiFi hotspot
+            ip("100.64.0.5"),  // cellular WAN behind carrier NAT
+            ip("8.8.8.8"),     // a public address, for good measure
+        ];
+        let addrs = select_listen_addrs(&interfaces);
+        assert!(addrs.contains(&ip("127.0.0.1")), "loopback must be bound");
+        assert!(addrs.contains(&ip("192.168.1.1")), "hotspot must be bound");
+        assert!(
+            !addrs.contains(&ip("100.64.0.5")),
+            "CGNAT WAN must not be bound"
+        );
+        assert!(
+            !addrs.contains(&ip("8.8.8.8")),
+            "public WAN must not be bound"
+        );
+    }
+
+    /// All three RFC1918 ranges count as a hotspot, since supported devices use
+    /// different LAN subnets.
+    #[test]
+    fn all_private_ranges_are_treated_as_the_hotspot() {
+        for hotspot in ["10.0.0.1", "172.16.5.1", "192.168.8.1"] {
+            let addrs = select_listen_addrs(&[ip(hotspot)]);
+            assert!(addrs.contains(&ip(hotspot)), "{hotspot} should be bound");
+            assert!(addrs.contains(&ip("127.0.0.1")));
+        }
+    }
+
+    /// With no private interface — an unrecognised device, or the hotspot not up
+    /// yet — fall back to every interface so the UI is never unreachable.
+    #[test]
+    fn falls_back_to_all_interfaces_when_no_private_address_exists() {
+        assert_eq!(
+            select_listen_addrs(&[ip("8.8.8.8")]),
+            vec![IpAddr::V4(Ipv4Addr::UNSPECIFIED)]
+        );
+        assert_eq!(
+            select_listen_addrs(&[]),
+            vec![IpAddr::V4(Ipv4Addr::UNSPECIFIED)]
+        );
     }
 }
