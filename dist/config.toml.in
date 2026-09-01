@@ -1,5 +1,12 @@
 # cat config.toml
 qmdl_store_path = "/data/rayhunter/qmdl"
+
+# Where the modem's diagnostic device lives. Leave this alone unless you know
+# you need it: /dev/diag is correct on every device Rayhunter supports today.
+# It exists for hardware where the modem sits behind MHI or PCIe and the node
+# is somewhere else, which is otherwise the only thing stopping those devices
+# working.
+# diag_device_path = "/dev/diag"
 port = 8080
 debug_mode = false
 colorblind_mode = false

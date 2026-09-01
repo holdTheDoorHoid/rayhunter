@@ -166,6 +166,14 @@ pub fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
 pub struct Config {
     /// Path to store QMDL files
     pub qmdl_store_path: String,
+    /// Where the modem's diagnostic character device lives.
+    ///
+    /// `None` uses `/dev/diag`, which is right on every device Rayhunter
+    /// currently supports. It is configurable because on hardware where the
+    /// modem sits behind MHI or PCIe the node is somewhere else entirely, and
+    /// that is the only thing standing between those devices and working:
+    /// see EFForg/rayhunter#649.
+    pub diag_device_path: Option<String>,
     /// Listening port
     pub port: u16,
     /// Debug mode
@@ -359,6 +367,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             qmdl_store_path: "/data/rayhunter/qmdl".to_string(),
+            diag_device_path: None,
             port: 8080,
             debug_mode: false,
             device: Device::Orbic,
@@ -408,6 +417,17 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Where to open the modem's diagnostic device.
+    ///
+    /// Falls back to the usual node when unset, so an existing config keeps
+    /// working and nobody has to set this to get the supported devices going.
+    pub fn diag_device_path(&self) -> &str {
+        self.diag_device_path
+            .as_deref()
+            .filter(|path| !path.trim().is_empty())
+            .unwrap_or(rayhunter::diag_device::DEFAULT_DIAG_PATH)
+    }
+
     pub fn wifi_config(&self) -> wifi_station::WifiConfig {
         let (wpa_bin, hostapd_conf, ctrl_interface) = match self.device {
             Device::Tmobile | Device::Wingtech => (
@@ -492,6 +512,7 @@ pub fn parse_args() -> Args {
 
 #[cfg(test)]
 mod tests {
+    use super::Config;
     use super::WebdavConfig;
     use super::parse_hex_color;
 
@@ -594,5 +615,35 @@ mod tests {
         assert_eq!(parse_hex_color("#gggggg"), None);
         assert_eq!(parse_hex_color("#ff 000"), None);
         assert_eq!(parse_hex_color("##ff000"), None);
+    }
+
+    /// An absent setting has to keep the supported devices working, since
+    /// nobody should have to configure this to get an Orbic going.
+    #[test]
+    fn an_unset_diag_path_falls_back_to_the_usual_node() {
+        let config = Config::default();
+        assert_eq!(config.diag_device_path(), "/dev/diag");
+    }
+
+    #[test]
+    fn a_configured_diag_path_is_used() {
+        let config = Config {
+            diag_device_path: Some("/dev/mhi_DIAG".to_string()),
+            ..Config::default()
+        };
+        assert_eq!(config.diag_device_path(), "/dev/mhi_DIAG");
+    }
+
+    /// A key left blank in a hand edited config means "not set", not "open the
+    /// empty path", which would fail with an error nobody could act on.
+    #[test]
+    fn a_blank_diag_path_falls_back_rather_than_failing() {
+        for blank in ["", "   "] {
+            let config = Config {
+                diag_device_path: Some(blank.to_string()),
+                ..Config::default()
+            };
+            assert_eq!(config.diag_device_path(), "/dev/diag", "for {blank:?}");
+        }
     }
 }

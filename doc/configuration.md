@@ -54,6 +54,13 @@ Through web UI you can set:
   - *Off (never warn or sync)* disables both the warning and any automatic correction.
 
   Note that the correction is an offset held in memory only: it is **not** written to the device's clock and is lost when the daemon restarts, so with *Autosync* it is re-applied each time you load the web UI.
+- **Diagnostic device path** (`diag_device_path`) says where to open the modem's diagnostic character device. There is no setting for it in the web interface, deliberately: an incorrect value stops Rayhunter recording anything at all, and it is not something anyone should reach for while looking around the settings page. Edit `config.toml` on the device instead:
+
+  ```toml
+  diag_device_path = "/dev/mhi_DIAG"
+  ```
+
+  Leave it out and Rayhunter uses `/dev/diag`, which is correct on every device it currently supports. It exists for hardware where the modem sits behind MHI or PCIe and the node lives somewhere else entirely, which is otherwise the only thing standing between those devices and working. A blank value is treated as unset rather than as a path, and if the device cannot be opened the error names the path it tried, so a typo says so plainly.
 - **Automatically check for software updates** enables periodic checks against the Rayhunter GitHub releases page. When a newer release is found, the web UI shows a notice and, if ntfy update notifications are enabled, a notification is sent.
 - **ntfy URL**, which allows setting a [ntfy](https://ntfy.sh/) URL to which notifications of new detections will be sent. The topic should be unique to your device, e.g., `https://ntfy.sh/rayhunter_notifications_ba9di7ie` or `https://myserver.example.com/rayhunter_notifications_ba9di7ie`. The ntfy Android and iOS apps can then be used to receive notifications. More information can be found in the [ntfy docs](https://docs.ntfy.sh/).
 - **Enabled Notification Types** allows enabling or disabling the following types of notifications:

@@ -389,6 +389,7 @@ async fn run_with_config(
         run_diag_read_thread(
             &task_tracker,
             config.device.clone(),
+            config.diag_device_path().to_string(),
             diag_rx,
             diag_tx.clone(),
             ui_update_tx.clone(),

@@ -905,6 +905,8 @@ async fn update_cell_info(cell_tracker: &Arc<RwLock<CellTracker>>, container: &M
 pub fn run_diag_read_thread(
     task_tracker: &TaskTracker,
     device: Device,
+    // Where the modem's diagnostic device lives; see Config::diag_device_path.
+    diag_device_path: String,
     mut qmdl_file_rx: Receiver<DiagDeviceCtrlMessage>,
     qmdl_file_tx: Sender<DiagDeviceCtrlMessage>,
     ui_update_sender: Sender<display::DisplayState>,
@@ -924,7 +926,7 @@ pub fn run_diag_read_thread(
 ) {
     task_tracker.spawn(async move {
         info!("Using configuration for device: {0:?}", device);
-        let mut dev = DiagDevice::new(&device)
+        let mut dev = DiagDevice::new(&device, &diag_device_path)
             .await?;
         dev.config_logs()
             .await?;
