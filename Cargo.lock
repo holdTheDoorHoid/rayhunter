@@ -4681,6 +4681,7 @@ dependencies = [
  "log",
  "pycrate-rs",
  "rayhunter",
+ "rayhunter-radio",
  "reqwest 0.12.20",
  "rustls-post-quantum",
  "rustls-rustcrypto",

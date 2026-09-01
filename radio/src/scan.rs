@@ -49,6 +49,41 @@ const PRINTED_ELEMENT_NAMES: &[(&str, u8)] = &[
     ("VHT operation:", 192),
 ];
 
+/// Undo the `\xNN` escaping `iw` applies to SSID bytes it will not print.
+///
+/// `iw` escapes every non-printable and non-ASCII byte, so an SSID containing
+/// anything outside plain ASCII arrives as literal backslash-x text. Left
+/// alone, a network named with a curly apostrophe shows up in the UI as
+/// `Jan\xe2\x80\x99s House` rather than `Jan's House`, and any SSID rule
+/// written against the real name silently fails to match. Decoding here means
+/// the rest of the crate only ever sees real bytes.
+fn unescape_iw(text: &str) -> Vec<u8> {
+    let raw = text.as_bytes();
+    let mut out = Vec::with_capacity(raw.len());
+    let mut i = 0;
+    while i < raw.len() {
+        // \xNN -> one byte
+        if raw[i] == b'\\' && i + 3 < raw.len() && raw[i + 1] == b'x' {
+            let hi = (raw[i + 2] as char).to_digit(16);
+            let lo = (raw[i + 3] as char).to_digit(16);
+            if let (Some(hi), Some(lo)) = (hi, lo) {
+                out.push((hi * 16 + lo) as u8);
+                i += 4;
+                continue;
+            }
+        }
+        // \\ -> a single backslash, so a name really containing one survives.
+        if raw[i] == b'\\' && i + 1 < raw.len() && raw[i + 1] == b'\\' {
+            out.push(b'\\');
+            i += 2;
+            continue;
+        }
+        out.push(raw[i]);
+        i += 1;
+    }
+    out
+}
+
 /// Parse the output of `iw dev <iface> scan`.
 ///
 /// Written as a pure function over text so it can be tested against captured
@@ -106,7 +141,7 @@ pub fn parse_iw_scan(output: &str) -> Vec<WifiObservation> {
             // as the same wildcard variant a probe request would use; the
             // frame type is what distinguishes the two cases.
             let raw = v.strip_prefix(' ').unwrap_or(v);
-            obs.ssid = Some(Ssid::from_bytes(raw.as_bytes()));
+            obs.ssid = Some(Ssid::from_bytes(&unescape_iw(raw)));
         }
 
         for (name, id) in PRINTED_ELEMENT_NAMES {
@@ -206,6 +241,35 @@ BSS 70:b3:d5:7c:b4:01(on scan0)
                 .iter()
                 .all(|ie| ie.data.is_empty())
         );
+    }
+
+    /// Seen on a real device: iw escapes every non-ASCII byte, so a network
+    /// named with a curly apostrophe arrives as literal backslash-x text. Left
+    /// undecoded it displays as gibberish and no SSID rule against the real
+    /// name can ever match.
+    #[test]
+    fn non_ascii_ssids_are_decoded_rather_than_shown_as_escapes() {
+        let scan =
+            "BSS 7e:90:bc:b7:36:0d(on wlan0)\n\tfreq: 2412\n\tSSID: Jan\\xe2\\x80\\x99s House\n";
+        let networks = parse_iw_scan(scan);
+        assert_eq!(
+            networks[0].ssid.as_ref().unwrap().display(),
+            "Jan\u{2019}s House"
+        );
+    }
+
+    #[test]
+    fn a_literal_backslash_in_an_ssid_survives() {
+        let scan = "BSS aa:bb:cc:dd:ee:01(on wlan0)\n\tSSID: back\\\\slash\n";
+        let networks = parse_iw_scan(scan);
+        assert_eq!(networks[0].ssid.as_ref().unwrap().display(), "back\\slash");
+    }
+
+    #[test]
+    fn a_malformed_escape_is_left_alone_rather_than_dropped() {
+        let scan = "BSS aa:bb:cc:dd:ee:02(on wlan0)\n\tSSID: bad\\xZZ\n";
+        let networks = parse_iw_scan(scan);
+        assert_eq!(networks[0].ssid.as_ref().unwrap().display(), "bad\\xZZ");
     }
 
     #[test]

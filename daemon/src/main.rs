@@ -23,6 +23,7 @@ mod timing_advance;
 mod update;
 mod web_auth;
 mod webdav;
+mod wifi_survey;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -45,6 +46,7 @@ use crate::server::{
 use crate::stats::{get_qmdl_manifest, get_system_stats, get_update_status};
 use crate::update::{UpdateStatus, run_update_check_worker};
 use crate::webdav::run_webdav_upload_worker;
+use crate::wifi_survey::{get_wifi_rules, set_wifi_rules, wifi_survey};
 use wifi_station::WifiStatus;
 
 use analysis::{
@@ -112,6 +114,11 @@ fn get_router() -> AppRouter {
         .route("/api/debug/display-state", post(debug_set_display_state))
         .route("/api/debug/keypress", post(debug_keypress))
         .route("/api/terminal", post(run_terminal_command))
+        .route("/api/wifi/survey", get(wifi_survey))
+        .route(
+            "/api/wifi/alert-rules",
+            get(get_wifi_rules).post(set_wifi_rules),
+        )
         .route("/api/gps", get(get_gps))
         .route("/api/gps", post(post_gps))
         .route("/", get(|| async { Redirect::permanent("/index.html") }))
