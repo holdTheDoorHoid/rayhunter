@@ -53,6 +53,36 @@ merged and should not be held hostage to the feature that uncovered them.
 These have a clear upstream issue, and in each case a maintainer has said
 something encouraging on it.
 
+### timing-advance-check
+Notices when one cell identity starts answering from a different distance.
+**Upstream:** [#756](https://github.com/EFForg/rayhunter/issues/756).
+**Commits:** see `git log --grep="^Feature: timing-advance-check"`.
+**Files:** `lib/src/analysis/timing_advance.rs` (the analyzer),
+`lib/src/analysis/analyzer.rs` and `mod.rs` (registration and the config flag),
+`daemon/src/timing_advance.rs` (the same judgement in the cell tracker, for the
+live view), `daemon/src/cell_info.rs`, `daemon/src/demo.rs` (the scenario),
+`lib/heuristics.ts`, `utils.svelte.ts`, `cellInfo.ts`, `CellInfoView.svelte`.
+**Depends on:** `layer-2-mac`, for the analyzer half. The cell tracker half
+stands alone.
+**Note:** the guard matters more than the detector. **The Orbic RC400L reports
+timing advance as zero on every random access**, confirmed against three real
+attaches at RSRP -73 dBm and cross checked against SCAT's parser, so the field
+is unpopulated rather than the tower being 70 metres away. An all zero history
+is therefore treated as no data. Without that, every cell looks permanently
+consistent at zero distance and the detector looks alive while being incapable
+of firing.
+
+The threshold is about 1.2 km and the severity is low, because a device
+somebody carries produces this signal honestly and a detector that cried
+surveillance whenever its owner walked somewhere would be switched off. The
+event names moving as the explanation first.
+
+Since it cannot fire on Orbic hardware, the demo scenario is the only way to
+see it work there. Adding it exposed that demo runs did not guarantee a high
+severity warning at all: scenarios are chosen at random and it had simply been
+luck. Fixed in the same commit, because separating them needs an intermediate
+that does not compile.
+
 ### sim-health
 Says whether the SIM is working, from evidence Rayhunter already collects.
 **Upstream:** [#882](https://github.com/EFForg/rayhunter/issues/882), opened by
@@ -172,12 +202,24 @@ OpenCellID lookup or map link, and showing IMSI, TMSI and IMEI.
 
 ### layer-2-mac (#457)
 A maintainer has a work in progress branch, `fix-457`, and laid out a three
-step plan on the issue. Step one, enabling LTE MAC logging, is already in this
-fork: `LOG_LTE_MAC_DL` and `LOG_LTE_MAC_UL` are in
-`LOG_CODES_FOR_RAW_PACKET_LOGGING`, and `lib/src/gsmtap/mac.rs` already builds
-GSMTAP for RACH responses. Steps two and three, writing MAC DL and UL to the
-PCAP and parsing them for analyzers, are not done. Timing advance is the prize
-there: it gives distance to the tower.
+step plan on the issue. Step one, enabling LTE MAC logging, was already in this
+fork. **Step three is now done for the RACH path**: random access responses
+reach the analysis pipeline as `LteInformationElement::MacRar`, read back out
+of the GSMTAP MAC-LTE frame `lib/src/gsmtap/mac.rs` already built. Before this
+nothing MAC ever reached an analyzer, which is why `timing-advance-check` could
+not be written.
+**Commits:** see `git log --grep="^Feature: layer-2-mac"`.
+**Files:** `lib/src/analysis/information_element.rs` (`MacRandomAccessResponse`,
+`parse_mac_rar`, the `LteMacFramed` arm), `lib/src/gsmtap/mod.rs` (making `mac`
+public so the round-trip test can build what it reads).
+**Still missing:** writing MAC **DL and UL** to the PCAP. They parse into
+`LogBody::LteMacDl` / `LteMacUl` but `lib/src/gsmtap/parser.rs` has no arm for
+them, so they are dropped. That needs the subpacket layouts from SCAT and real
+captures to check against.
+**Note:** the offsets are verified by running the whole chain on SCAT's own
+captured fixture and asserting values decoded by hand (timing advance 4,
+TC-RNTI 0x1a23, preamble 27). Hand-derived offsets that quietly read a
+neighbouring field are the failure to guard against here.
 
 ### lpp-heuristic (#1072)
 Two analyzers for LPP, the LTE Positioning Protocol (the network asking the
