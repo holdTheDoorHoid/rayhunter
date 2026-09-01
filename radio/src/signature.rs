@@ -113,6 +113,12 @@ pub enum MatchCondition {
     SsidExact { ssid: String },
     /// The SSID contains this substring.
     SsidContains { substring: String },
+    /// The SSID matches a glob (`*` for any run, `?` for one character).
+    ///
+    /// Bounded by construction — see [`crate::glob`]. This exists because
+    /// user-written rules need it; curated signatures should prefer an exact
+    /// or prefix match, which is easier to reason about.
+    SsidGlob { pattern: String },
     /// A zero-length SSID element: a wildcard probe.
     SsidWildcard,
     /// The observation came from this kind of frame.
@@ -355,6 +361,11 @@ fn match_wifi(condition: &MatchCondition, w: &WifiObservation) -> Option<String>
             observed
                 .contains(substring)
                 .then(|| format!("SSID contains {substring:?}"))
+        }
+        MatchCondition::SsidGlob { pattern } => {
+            let observed = w.ssid.as_ref()?.display();
+            crate::glob::glob_match(pattern, &observed)
+                .then(|| format!("SSID matches pattern {pattern:?}"))
         }
         MatchCondition::SsidWildcard => w
             .ssid

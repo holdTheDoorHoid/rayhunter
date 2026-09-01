@@ -311,11 +311,8 @@ fn convert_criterion(criterion: &UserCriterion) -> Result<MatchCondition, RuleEr
         UserCriterion::SsidContains { substring } => MatchCondition::SsidContains {
             substring: substring.clone(),
         },
-        // Globs are expanded by the caller via `glob_match`; there is no glob
-        // condition in the builtin vocabulary because curated signatures do
-        // not need one.
-        UserCriterion::SsidGlob { pattern } => MatchCondition::SsidContains {
-            substring: pattern.trim_matches('*').to_string(),
+        UserCriterion::SsidGlob { pattern } => MatchCondition::SsidGlob {
+            pattern: pattern.clone(),
         },
         UserCriterion::BleCompanyId { id } => MatchCondition::BleCompanyId { id: *id },
         UserCriterion::BleServiceUuid { uuid } => {
@@ -336,42 +333,6 @@ fn check_len(field: &'static str, value: &str, max: usize) -> Result<(), RuleErr
         });
     }
     Ok(())
-}
-
-/// Glob match supporting `*` and `?`, with no recursion and no backtracking
-/// explosion.
-///
-/// This is the standard two-pointer algorithm: on a mismatch it rewinds to
-/// just after the last `*` and advances the input by one. Worst case is
-/// O(pattern x input), and both are capped by [`limits`], so a crafted
-/// pattern cannot become a denial of service.
-pub fn glob_match(pattern: &str, input: &str) -> bool {
-    let p: Vec<char> = pattern.chars().collect();
-    let s: Vec<char> = input.chars().collect();
-    let (mut pi, mut si) = (0usize, 0usize);
-    let mut star: Option<usize> = None;
-    let mut resume = 0usize;
-
-    while si < s.len() {
-        if pi < p.len() && (p[pi] == '?' || p[pi] == s[si]) {
-            pi += 1;
-            si += 1;
-        } else if pi < p.len() && p[pi] == '*' {
-            star = Some(pi);
-            resume = si;
-            pi += 1;
-        } else if let Some(sp) = star {
-            pi = sp + 1;
-            resume += 1;
-            si = resume;
-        } else {
-            return false;
-        }
-    }
-    while pi < p.len() && p[pi] == '*' {
-        pi += 1;
-    }
-    pi == p.len()
 }
 
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -519,6 +480,54 @@ mod tests {
         );
     }
 
+    /// A glob rule has to reach the matcher as a glob. An earlier version
+    /// validated the pattern and then converted it to a plain substring
+    /// match, so a wildcard in the middle silently never matched anything.
+    #[test]
+    fn a_glob_rule_matches_as_a_glob_not_as_a_substring() {
+        let set = UserRuleSet {
+            rules: vec![rule(vec![UserCriterion::SsidGlob {
+                pattern: "Flock?afety*".into(),
+            }])],
+            allowlist: vec![],
+        };
+        let db = db_from(&set);
+
+        let hits = db.match_observation(&seen("11:22:33:44:55:66", Some("FlockSafety-1234")));
+        assert_eq!(hits.len(), 1, "the wildcard pattern should have matched");
+        assert!(hits[0].matched_fields[0].contains("Flock?afety*"));
+
+        assert!(
+            db.match_observation(&seen("11:22:33:44:55:66", Some("FlockXafet")))
+                .is_empty()
+        );
+        assert!(
+            db.match_observation(&seen("11:22:33:44:55:66", Some("HomeWiFi")))
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_trailing_star_glob_still_anchors_at_the_start() {
+        let set = UserRuleSet {
+            rules: vec![rule(vec![UserCriterion::SsidGlob {
+                pattern: "cam-*".into(),
+            }])],
+            allowlist: vec![],
+        };
+        let db = db_from(&set);
+        assert_eq!(
+            db.match_observation(&seen("11:22:33:44:55:66", Some("cam-backyard")))
+                .len(),
+            1
+        );
+        // Anchored: a name merely containing "cam-" must not match.
+        assert!(
+            db.match_observation(&seen("11:22:33:44:55:66", Some("my-cam-backyard")))
+                .is_empty()
+        );
+    }
+
     #[test]
     fn allowlist_silences_a_device() {
         let set = UserRuleSet {
@@ -623,35 +632,6 @@ mod tests {
             set.validate(),
             Err(RuleError::TooManyWildcards { .. })
         ));
-    }
-
-    #[test]
-    fn glob_matches_the_obvious_cases() {
-        assert!(glob_match("Flock*", "FlockSafety-1234"));
-        assert!(glob_match("*Safety*", "FlockSafety-1234"));
-        assert!(glob_match("Flock?afety*", "FlockSafety-1234"));
-        assert!(glob_match("exact", "exact"));
-        assert!(!glob_match("Flock*", "HomeWiFi"));
-        assert!(!glob_match("Flock?", "Flock"));
-        assert!(glob_match("*", "anything"));
-        assert!(glob_match("", ""));
-        assert!(!glob_match("", "x"));
-    }
-
-    /// The pathological input that makes a naive backtracking matcher hang.
-    /// The two-pointer scan handles it in linear time; capped lengths mean it
-    /// cannot get large anyway.
-    #[test]
-    fn glob_does_not_blow_up_on_adversarial_input() {
-        let pattern = "a*a*a*a*b";
-        let input = "a".repeat(2000);
-        let start = std::time::Instant::now();
-        assert!(!glob_match(pattern, &input));
-        assert!(
-            start.elapsed().as_millis() < 500,
-            "glob matching took {:?}, which suggests backtracking blow-up",
-            start.elapsed()
-        );
     }
 
     #[test]

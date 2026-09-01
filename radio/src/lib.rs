@@ -22,6 +22,7 @@
 //! * [`evidence`] — durable NDJSON records and their retention policy
 
 pub mod evidence;
+pub mod glob;
 pub mod mac;
 pub mod observation;
 pub mod persistence;
