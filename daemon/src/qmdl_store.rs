@@ -2,6 +2,13 @@ use std::fmt::Display;
 use std::io::{self, ErrorKind};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Distinguishes recordings created within the same clock second. Monotonic for
+/// the life of the process, so two recordings started in the same second get
+/// different names; combined with exclusive file creation in `new_entry`, a
+/// name collision can never be resolved by truncating existing evidence.
+static ENTRY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 use crate::config::GpsMode;
 use chrono::{DateTime, Local, TimeDelta};
@@ -10,7 +17,7 @@ use rayhunter::util::RuntimeMetadata;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{
-    fs::{self, File, OpenOptions, try_exists},
+    fs::{self, File, OpenOptions},
     io::AsyncWriteExt,
 };
 
@@ -175,8 +182,13 @@ impl ManifestEntry {
     fn new(gps_mode: GpsMode) -> Self {
         let now = rayhunter::clock::get_adjusted_now();
         let metadata = RuntimeMetadata::new();
+        // "<unix-seconds>-<sequence>". The seconds keep the name human-readable
+        // and chronological; the sequence makes it unique even when two
+        // recordings start in the same second. Recovery parses the seconds back
+        // off the front, and still accepts the old bare-seconds names.
+        let sequence = ENTRY_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         ManifestEntry {
-            name: format!("{}", now.timestamp()),
+            name: format!("{}-{}", now.timestamp(), sequence),
             start_time: now,
             last_message_time: None,
             qmdl_size_bytes: 0,
@@ -198,21 +210,6 @@ impl ManifestEntry {
 }
 
 impl RecordingStore {
-    // Returns whether a directory with a "manifest.toml" exists at the given
-    // path (though doesn't check if that manifest is valid)
-    pub async fn exists<P>(path: P) -> Result<bool, RecordingStoreError>
-    where
-        P: AsRef<Path>,
-    {
-        let manifest_path = path.as_ref().join("manifest.toml");
-        let dir_exists = try_exists(path)
-            .await
-            .map_err(RecordingStoreError::OpenDirError)?;
-        let manifest_exists = try_exists(manifest_path)
-            .await
-            .map_err(RecordingStoreError::ReadManifestError)?;
-        Ok(dir_exists && manifest_exists)
-    }
 
     // Loads an existing RecordingStore at the given path. Errors if no store exists,
     // or if it's malformed.
@@ -282,7 +279,11 @@ impl RecordingStore {
                 continue;
             };
 
-            let Ok(start_timestamp) = stem.parse::<i64>() else {
+            // Names are "<unix-seconds>" (legacy) or "<unix-seconds>-<sequence>"
+            // (current). The start time is the seconds part in both, before any
+            // hyphen.
+            let seconds_part = stem.split('-').next().unwrap_or(stem);
+            let Ok(start_timestamp) = seconds_part.parse::<i64>() else {
                 warn!("QMDL file has invalid name {os_filename:?}, skipping");
                 continue;
             };
@@ -361,23 +362,63 @@ impl RecordingStore {
         if self.current_entry.is_some() {
             self.close_current_entry().await?;
         }
-        let new_entry = ManifestEntry::new(gps_mode);
-        let qmdl_filepath = new_entry.get_filepath(FileKind::Qmdl, &self.path);
-        let qmdl_file = File::create(&qmdl_filepath)
-            .await
-            .map_err(RecordingStoreError::CreateFileError)?;
-        let analysis_filepath = new_entry.get_filepath(FileKind::Analysis, &self.path);
-        let analysis_file = File::create(&analysis_filepath)
-            .await
-            .map_err(RecordingStoreError::CreateFileError)?;
-        let gps_filepath = new_entry.get_filepath(FileKind::Gps, &self.path);
-        File::create(&gps_filepath)
-            .await
-            .map_err(RecordingStoreError::CreateFileError)?;
-        self.manifest.entries.push(new_entry);
-        self.current_entry = Some(self.manifest.entries.len() - 1);
-        self.write_manifest().await?;
-        Ok((qmdl_file, analysis_file))
+        // Create the recording files exclusively: a name collision must return
+        // an error, never truncate an existing recording. The name carries a
+        // per-process sequence, so on the one path where a collision is possible
+        // at all — a restart within the same second reusing a sequence value —
+        // the retry gets a fresh name and makes progress.
+        const MAX_ATTEMPTS: usize = 1024;
+        let mut last_collision = None;
+        for _ in 0..MAX_ATTEMPTS {
+            let new_entry = ManifestEntry::new(gps_mode);
+            let qmdl_filepath = new_entry.get_filepath(FileKind::Qmdl, &self.path);
+            let qmdl_file = match OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&qmdl_filepath)
+                .await
+            {
+                Ok(file) => file,
+                Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+                    warn!(
+                        "recording name {} already exists on disk, retrying with a new one",
+                        new_entry.name
+                    );
+                    last_collision = Some(e);
+                    continue;
+                }
+                Err(e) => return Err(RecordingStoreError::CreateFileError(e)),
+            };
+            // The QMDL name is now claimed. The companion files share its stem,
+            // so they cannot pre-exist unless orphaned; create them exclusively
+            // too and surface an orphan loudly rather than clobber it.
+            let analysis_filepath = new_entry.get_filepath(FileKind::Analysis, &self.path);
+            let analysis_file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&analysis_filepath)
+                .await
+                .map_err(RecordingStoreError::CreateFileError)?;
+            let gps_filepath = new_entry.get_filepath(FileKind::Gps, &self.path);
+            OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&gps_filepath)
+                .await
+                .map_err(RecordingStoreError::CreateFileError)?;
+            self.manifest.entries.push(new_entry);
+            self.current_entry = Some(self.manifest.entries.len() - 1);
+            self.write_manifest().await?;
+            return Ok((qmdl_file, analysis_file));
+        }
+        Err(RecordingStoreError::CreateFileError(
+            last_collision.unwrap_or_else(|| {
+                io::Error::new(
+                    ErrorKind::AlreadyExists,
+                    "exhausted recording name attempts",
+                )
+            }),
+        ))
     }
 
     pub async fn open_file(
@@ -572,18 +613,11 @@ impl RecordingStore {
             .iter()
             .position(|entry| entry.name == name)
             .ok_or(RecordingStoreError::NoSuchEntryError)?;
-        match self.current_entry {
-            Some(current_entry) if current_entry == entry_to_delete_idx => {
-                self.close_current_entry().await?;
-            }
-            Some(current_entry) => {
-                self.current_entry = Some(current_entry - 1);
-            }
-            None => {}
-        };
-        let entry_to_delete = self.manifest.entries.remove(entry_to_delete_idx);
-        self.write_manifest().await?;
-
+        // Delete the files *first*, and only drop the manifest entry once they
+        // are gone. Doing it the other way round means a failed file deletion
+        // leaves the recording invisible to Rayhunter but still on disk — the
+        // bulk-delete path already avoids that, and this matches it.
+        let entry_to_delete = &self.manifest.entries[entry_to_delete_idx];
         for &file_kind in FileKind::ALL {
             let filepath = file_kind.get_filepath(
                 &entry_to_delete.name,
@@ -594,6 +628,18 @@ impl RecordingStore {
                 .await
                 .map_err(RecordingStoreError::DeleteFileError)?;
         }
+
+        match self.current_entry {
+            Some(current_entry) if current_entry == entry_to_delete_idx => {
+                self.close_current_entry().await?;
+            }
+            Some(current_entry) if current_entry > entry_to_delete_idx => {
+                self.current_entry = Some(current_entry - 1);
+            }
+            _ => {}
+        };
+        self.manifest.entries.remove(entry_to_delete_idx);
+        self.write_manifest().await?;
         Ok(())
     }
 
@@ -645,9 +691,10 @@ mod tests {
     #[tokio::test]
     async fn test_load_from_empty_dir() {
         let dir = make_temp_dir();
-        assert!(!RecordingStore::exists(dir.path()).await.unwrap());
+        let manifest = dir.path().join("manifest.toml");
+        assert!(!fs::try_exists(&manifest).await.unwrap());
         let _created_store = RecordingStore::create(dir.path()).await.unwrap();
-        assert!(RecordingStore::exists(dir.path()).await.unwrap());
+        assert!(fs::try_exists(&manifest).await.unwrap());
         let loaded_store = RecordingStore::load(dir.path()).await.unwrap();
         assert_eq!(loaded_store.manifest.entries.len(), 0);
     }
@@ -706,6 +753,129 @@ mod tests {
         let new_entry_index = store.current_entry.unwrap();
         assert_ne!(entry_index, new_entry_index);
         assert_eq!(store.manifest.entries.len(), 2);
+    }
+
+    /// Two recordings created in quick succession (the same clock second) must
+    /// get different names, and starting the second must never truncate the
+    /// first's QMDL file. This is the collision/overwrite hazard.
+    #[tokio::test]
+    async fn two_entries_in_the_same_second_do_not_collide_or_truncate() {
+        let dir = make_temp_dir();
+        let mut store = RecordingStore::create(dir.path()).await.unwrap();
+
+        let (mut qmdl_a, _) = store.new_entry(GpsMode::Disabled).await.unwrap();
+        let name_a = store.manifest.entries[0].name.clone();
+        qmdl_a
+            .write_all(b"evidence from recording A")
+            .await
+            .unwrap();
+        qmdl_a.flush().await.unwrap();
+        let path_a = FileKind::Qmdl.get_filepath(&name_a, dir.path(), true);
+
+        // Start a second recording immediately; in practice this is the same
+        // wall-clock second.
+        let _ = store.new_entry(GpsMode::Disabled).await.unwrap();
+        let name_b = store.manifest.entries[1].name.clone();
+
+        assert_ne!(name_a, name_b, "names must differ within a second");
+        let a_after = fs::read(&path_a).await.unwrap();
+        assert_eq!(
+            a_after, b"evidence from recording A",
+            "recording A's QMDL must not be truncated by starting B"
+        );
+    }
+
+    /// Creating an entry whose QMDL file already exists on disk must not
+    /// silently truncate it. Exclusive creation retries onto a fresh name.
+    #[tokio::test]
+    async fn an_existing_qmdl_file_is_never_truncated() {
+        let dir = make_temp_dir();
+        let mut store = RecordingStore::create(dir.path()).await.unwrap();
+        // Pre-place a file at the exact name the next entry would try first.
+        let now = rayhunter::clock::get_adjusted_now().timestamp();
+        let seq = ENTRY_SEQUENCE.load(Ordering::Relaxed);
+        let squatted = format!("{now}-{seq}");
+        let squatted_path = FileKind::Qmdl.get_filepath(&squatted, dir.path(), true);
+        fs::write(&squatted_path, b"do not clobber me")
+            .await
+            .unwrap();
+
+        let _ = store.new_entry(GpsMode::Disabled).await.unwrap();
+        let new_name = store.manifest.entries[0].name.clone();
+
+        // The squatted file is untouched...
+        assert_eq!(
+            fs::read(&squatted_path).await.unwrap(),
+            b"do not clobber me"
+        );
+        // ...and the new recording took a different name if it collided.
+        if new_name == squatted {
+            panic!("new entry reused the squatted name, which means it truncated it");
+        }
+    }
+
+    /// A directory of QMDL files with no manifest must be recoverable, and the
+    /// old bare-seconds names must still parse alongside the new ones.
+    #[tokio::test]
+    async fn recovers_entries_when_the_manifest_is_missing() {
+        let dir = make_temp_dir();
+        let mut store = RecordingStore::create(dir.path()).await.unwrap();
+        let _ = store.new_entry(GpsMode::Disabled).await.unwrap();
+        let new_name = store.manifest.entries[0].name.clone();
+        store.close_current_entry().await.unwrap();
+        // A legacy bare-seconds recording alongside it.
+        fs::write(
+            FileKind::Qmdl.get_filepath("1725123456", dir.path(), true),
+            b"legacy",
+        )
+        .await
+        .unwrap();
+
+        // Lose the manifest, then recover.
+        fs::remove_file(dir.path().join("manifest.toml"))
+            .await
+            .unwrap();
+        let recovered = RecordingStore::recover(dir.path()).await.unwrap();
+
+        let names: Vec<&str> = recovered
+            .manifest
+            .entries
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect();
+        assert!(
+            names.contains(&new_name.as_str()),
+            "new-format name recovered"
+        );
+        assert!(names.contains(&"1725123456"), "legacy name recovered");
+    }
+
+    /// Deleting a recording whose files cannot be removed must leave the entry
+    /// in the manifest, so it stays discoverable rather than becoming an
+    /// orphan. Here the QMDL is made undeletable by removing it out from under
+    /// the store and replacing the path with a non-empty directory, which
+    /// `remove_file` refuses.
+    #[tokio::test]
+    async fn a_failed_delete_keeps_the_entry_discoverable() {
+        let dir = make_temp_dir();
+        let mut store = RecordingStore::create(dir.path()).await.unwrap();
+        let _ = store.new_entry(GpsMode::Disabled).await.unwrap();
+        let name = store.manifest.entries[0].name.clone();
+        store.close_current_entry().await.unwrap();
+
+        // Replace the QMDL file path with a non-empty directory so that
+        // remove_file fails on it.
+        let qmdl_path = FileKind::Qmdl.get_filepath(&name, dir.path(), true);
+        fs::remove_file(&qmdl_path).await.unwrap();
+        fs::create_dir(&qmdl_path).await.unwrap();
+        fs::write(qmdl_path.join("blocker"), b"x").await.unwrap();
+
+        let result = store.delete_entry(&name).await;
+        assert!(result.is_err(), "delete should report the failure");
+        assert!(
+            store.entry_for_name(&name).is_some(),
+            "the recording must remain in the manifest after a failed delete"
+        );
     }
 
     #[tokio::test]

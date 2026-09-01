@@ -152,27 +152,41 @@ async fn run_server(
 // not in debug mode. If we fail to parse the manifest AND we're not in debug
 // mode, try to recover the manifest from the existing QMDL files
 async fn init_qmdl_store(config: &config::Config) -> Result<RecordingStore, RayhunterError> {
-    let store_exists = RecordingStore::exists(&config.qmdl_store_path).await?;
+    let path = &config.qmdl_store_path;
+    let dir_exists = tokio::fs::try_exists(path)
+        .await
+        .map_err(|e| RayhunterError::from(RecordingStoreError::OpenDirError(e)))?;
+    let manifest_exists = dir_exists
+        && tokio::fs::try_exists(std::path::Path::new(path).join("manifest.toml"))
+            .await
+            .map_err(|e| RayhunterError::from(RecordingStoreError::ReadManifestError(e)))?;
+
     if config.debug_mode {
-        if store_exists {
-            Ok(RecordingStore::load(&config.qmdl_store_path).await?)
+        if manifest_exists {
+            Ok(RecordingStore::load(path).await?)
         } else {
-            Err(RayhunterError::NoStoreDebugMode(
-                config.qmdl_store_path.clone(),
-            ))
+            Err(RayhunterError::NoStoreDebugMode(path.clone()))
         }
-    } else if store_exists {
-        match RecordingStore::load(&config.qmdl_store_path).await {
+    } else if manifest_exists {
+        match RecordingStore::load(path).await {
             Ok(store) => Ok(store),
             Err(RecordingStoreError::ParseManifestError(err)) => {
                 error!("failed to parse QMDL manifest: {err}");
                 info!("recovering manifest from existing QMDL files...");
-                Ok(RecordingStore::recover(&config.qmdl_store_path).await?)
+                Ok(RecordingStore::recover(path).await?)
             }
             Err(err) => Err(err.into()),
         }
+    } else if dir_exists {
+        // The directory is there but the manifest is not. Reconstruct it from
+        // the QMDL files on disk rather than starting fresh, which would leave
+        // existing recordings physically present but invisible to Rayhunter.
+        warn!(
+            "recording directory exists but manifest.toml is missing; recovering from QMDL files"
+        );
+        Ok(RecordingStore::recover(path).await?)
     } else {
-        Ok(RecordingStore::create(&config.qmdl_store_path).await?)
+        Ok(RecordingStore::create(path).await?)
     }
 }
 
