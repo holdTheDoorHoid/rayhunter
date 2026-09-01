@@ -18,11 +18,13 @@
 //! * [`observation`] — what a radio saw, independent of which radio saw it
 //! * [`signature`] — data-driven rules, confidence, and escalation
 //! * [`scan`] — the BSS-scan capture backend and its limits
+//! * [`persistence`] — whether a device has stayed near the user as they moved
 //! * [`evidence`] — durable NDJSON records and their retention policy
 
 pub mod evidence;
 pub mod mac;
 pub mod observation;
+pub mod persistence;
 pub mod scan;
 pub mod signature;
 
@@ -30,4 +32,5 @@ pub use mac::{MacAddr, MacPrefix};
 pub use observation::{
     ObservationPayload, ObservationSource, RadioObservation, RadioTech, WifiObservation,
 };
+pub use persistence::{EnvironmentTracker, Persistence, PersistenceScore, PersistenceTracker};
 pub use signature::{Confidence, Detection, DetectionLog, Severity, SignatureDb};
