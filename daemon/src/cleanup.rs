@@ -27,34 +27,52 @@ pub enum Verdict {
     Unknown,
 }
 
-/// Whether an analysis report contains any warning.
+/// How a single line of an analysis report reads, for pruning purposes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LineClass {
+    /// A well-formed line carrying at least one non-informational event.
+    Warning,
+    /// A well-formed line with no warning: metadata, a clean row, or blank.
+    NoWarning,
+    /// A line that could not be parsed. We cannot say what it means.
+    Malformed,
+}
+
+/// Classify one line of an analysis report.
 ///
-/// Reads the report a line at a time and stops at the first warning rather
-/// than parsing the whole file. Most reports are clean and have to be read
-/// through, but the ones that are not are usually decided in the first few
-/// lines, and this runs on a device with one slow core.
+/// The safety property is that a line nobody can parse must be distinguishable
+/// from a clean one. A truncated write, a corrupt row, or an
+/// as-yet-unrecognised format must not let a recording read as "found nothing"
+/// and then be deleted to make room. So every non-blank line is parsed as JSON,
+/// and anything that does not parse is [`LineClass::Malformed`] rather than
+/// silently treated as no-warning.
 ///
-/// Informational events do not count. They are diagnostics rather than
-/// detections, and a recording carrying only those is still one that found
-/// nothing.
-pub fn line_has_warning(line: &str) -> bool {
-    // Cheap reject first: the overwhelming majority of lines never mention a
-    // severity at all, and this saves parsing them as JSON.
-    if !line.contains("event_type") {
-        return false;
+/// Informational events do not count as warnings. They are diagnostics rather
+/// than detections, and a recording carrying only those still found nothing.
+pub fn classify_line(line: &str) -> LineClass {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return LineClass::NoWarning;
     }
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-        return false;
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+        return LineClass::Malformed;
     };
-    let Some(events) = value.get("events").and_then(|e| e.as_array()) else {
-        return false;
-    };
-    events.iter().any(|event| {
-        event
-            .get("event_type")
-            .and_then(|t| t.as_str())
-            .is_some_and(|t| t != "Informational")
-    })
+    let has_warning = value
+        .get("events")
+        .and_then(|e| e.as_array())
+        .is_some_and(|events| {
+            events.iter().any(|event| {
+                event
+                    .get("event_type")
+                    .and_then(|t| t.as_str())
+                    .is_some_and(|t| t != "Informational")
+            })
+        });
+    if has_warning {
+        LineClass::Warning
+    } else {
+        LineClass::NoWarning
+    }
 }
 
 /// Decide whether one recording can be removed to make room.
@@ -89,14 +107,36 @@ async fn verdict_for(store: &RecordingStore, index: usize, uploads_configured: b
     };
 
     let mut lines = BufReader::new(file).lines();
+    let mut saw_a_line = false;
     loop {
         match lines.next_line().await {
             Ok(Some(line)) => {
-                if line_has_warning(&line) {
-                    return Verdict::HasWarnings;
+                if !line.trim().is_empty() {
+                    saw_a_line = true;
+                }
+                match classify_line(&line) {
+                    LineClass::Warning => return Verdict::HasWarnings,
+                    // A line nobody can parse means we cannot certify the
+                    // recording as clean, so it is kept rather than deleted.
+                    LineClass::Malformed => {
+                        warn!(
+                            "analysis for {} has an unparseable line; keeping the recording",
+                            entry.name
+                        );
+                        return Verdict::Unknown;
+                    }
+                    LineClass::NoWarning => {}
                 }
             }
-            Ok(None) => return Verdict::Clean,
+            // Reached the end with every line parsed and none a warning. An
+            // empty report proves nothing was analysed, so it is not "clean".
+            Ok(None) => {
+                return if saw_a_line {
+                    Verdict::Clean
+                } else {
+                    Verdict::Unknown
+                };
+            }
             Err(e) => {
                 warn!("couldn't read the analysis for {}: {e}", entry.name);
                 return Verdict::Unknown;
@@ -179,11 +219,11 @@ mod tests {
     #[test]
     fn a_warning_on_a_line_is_recognised() {
         let line = r#"{"packet_timestamp":"2024-08-19T03:33:54Z","events":[null,{"event_type":"High","message":"bad"}]}"#;
-        assert!(line_has_warning(line));
+        assert_eq!(classify_line(line), LineClass::Warning);
         let low = r#"{"events":[{"event_type":"Low","message":"x"}]}"#;
-        assert!(line_has_warning(low));
+        assert_eq!(classify_line(low), LineClass::Warning);
         let medium = r#"{"events":[{"event_type":"Medium","message":"x"}]}"#;
-        assert!(line_has_warning(medium));
+        assert_eq!(classify_line(medium), LineClass::Warning);
     }
 
     /// Informational events are diagnostics, not detections. A recording
@@ -192,17 +232,21 @@ mod tests {
     #[test]
     fn informational_events_are_not_warnings() {
         let line = r#"{"events":[{"event_type":"Informational","message":"note"}]}"#;
-        assert!(!line_has_warning(line));
+        assert_eq!(classify_line(line), LineClass::NoWarning);
     }
 
     #[test]
     fn ordinary_report_lines_are_not_warnings() {
-        assert!(!line_has_warning(
-            r#"{"skipped_message_reason":"unparsed"}"#
-        ));
-        assert!(!line_has_warning(r#"{"events":[null,null]}"#));
-        assert!(!line_has_warning(r#"{"events":[]}"#));
-        assert!(!line_has_warning(""));
+        assert_eq!(
+            classify_line(r#"{"skipped_message_reason":"unparsed"}"#),
+            LineClass::NoWarning
+        );
+        assert_eq!(
+            classify_line(r#"{"events":[null,null]}"#),
+            LineClass::NoWarning
+        );
+        assert_eq!(classify_line(r#"{"events":[]}"#), LineClass::NoWarning);
+        assert_eq!(classify_line(""), LineClass::NoWarning);
     }
 
     /// The metadata line names every analyzer and their descriptions, which
@@ -211,16 +255,77 @@ mod tests {
     #[test]
     fn the_metadata_line_is_not_mistaken_for_a_warning() {
         let metadata = r#"{"analyzers":[{"name":"Null Cipher","description":"Tests whether the cell suggests using a null cipher (EEA0)","version":1}],"report_version":3}"#;
-        assert!(!line_has_warning(metadata));
+        assert_eq!(classify_line(metadata), LineClass::NoWarning);
     }
 
-    /// Malformed input must not be read as "clean", since that would delete a
-    /// recording on the strength of a line nobody could parse.
+    /// Malformed input must be Malformed, not silently no-warning. The caller
+    /// turns a single malformed line into Verdict::Unknown, which is what keeps
+    /// a corrupt or truncated report from being read as "clean" and deleted.
     #[test]
-    fn unparseable_lines_do_not_report_a_warning_either_way() {
-        // Reported as no warning, and the caller treats an unreadable *file*
-        // as Unknown, which is what actually protects the recording.
-        assert!(!line_has_warning("{not json"));
-        assert!(!line_has_warning("event_type"));
+    fn unparseable_lines_are_malformed() {
+        assert_eq!(classify_line("{not json"), LineClass::Malformed);
+        assert_eq!(classify_line("event_type"), LineClass::Malformed);
+        // A row truncated mid-write, which used to read as no-warning.
+        assert_eq!(
+            classify_line(r#"{"events":[{"event_type":"Hi"#),
+            LineClass::Malformed
+        );
+    }
+
+    async fn store_with_analysis(dir: &std::path::Path, contents: &[u8]) -> RecordingStore {
+        use tokio::io::AsyncWriteExt;
+        let mut store = RecordingStore::create(dir).await.unwrap();
+        let (_qmdl, mut analysis) = store
+            .new_entry(crate::config::GpsMode::Disabled)
+            .await
+            .unwrap();
+        analysis.write_all(contents).await.unwrap();
+        analysis.flush().await.unwrap();
+        store.close_current_entry().await.unwrap();
+        store
+    }
+
+    /// A report with a malformed line must keep the recording, not delete it.
+    #[tokio::test]
+    async fn a_malformed_report_is_unknown_not_clean() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_with_analysis(
+            dir.path(),
+            b"{\"report_version\":3}\n{\"events\":[null]}\n{ truncated and broken\n",
+        )
+        .await;
+        assert_eq!(verdict_for(&store, 0, false).await, Verdict::Unknown);
+    }
+
+    /// An empty analysis report proves nothing was analysed, so it is not clean.
+    #[tokio::test]
+    async fn an_empty_report_is_unknown_not_clean() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_with_analysis(dir.path(), b"").await;
+        assert_eq!(verdict_for(&store, 0, false).await, Verdict::Unknown);
+    }
+
+    /// A well-formed report with no warnings is the one case that may be pruned.
+    #[tokio::test]
+    async fn a_clean_finished_report_is_clean() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_with_analysis(
+            dir.path(),
+            b"{\"report_version\":3}\n{\"skipped_message_reason\":\"unparsed\"}\n",
+        )
+        .await;
+        assert_eq!(verdict_for(&store, 0, false).await, Verdict::Clean);
+    }
+
+    /// A warning anywhere in a valid report keeps the recording.
+    #[tokio::test]
+    async fn a_report_with_a_warning_has_warnings() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_with_analysis(
+            dir.path(),
+            b"{\"report_version\":3}\n{\"events\":[{\"event_type\":\"High\",\"message\":\"x\"}]}\n",
+        )
+        .await;
+        assert_eq!(verdict_for(&store, 0, false).await, Verdict::HasWarnings);
     }
 }

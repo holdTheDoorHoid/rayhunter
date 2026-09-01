@@ -588,11 +588,11 @@ impl Analyzer for LppLocationRequestAnalyzer {
 
         if !container_is_lpp {
             // Container type 2 carries other location service messages; anything
-            // else is not about positioning at all.
-            return Some(Event {
-                event_type: EventType::Informational,
-                message: "Non-LPP generic NAS transport message".to_string(),
-            });
+            // else is not about positioning at all. This analyzer has nothing to
+            // say about it, so it stays silent rather than claiming an unrelated
+            // message as an LPP event (which would show up alongside another
+            // detector's warning on the same packet).
+            return None;
         }
 
         match decode_lpp_prefix(container) {
@@ -1166,6 +1166,24 @@ mod tests {
         let nas = NASMessage::parse(&[0x07, 0x55, 0x01]).unwrap();
         let ie = InformationElement::LTE(Box::new(LteInformationElement::NAS(nas)));
         assert_eq!(analyzer.analyze_information_element(&ie, 1), None);
+    }
+
+    /// A Generic NAS Transport whose container is *not* LPP (type 2, location
+    /// services) is not this analyzer's business: it must stay silent rather
+    /// than emit an event that would ride along on another detector's row.
+    #[test]
+    fn a_non_lpp_generic_nas_transport_is_ignored() {
+        let mut analyzer = LppLocationRequestAnalyzer::new();
+        // Downlink Generic NAS Transport (0x68) with container type 0x02, then
+        // a two-byte length and a one-byte payload.
+        let nas = NASMessage::parse(&[0x07, 0x68, 0x02, 0x00, 0x01, 0x00])
+            .expect("test NAS message must parse");
+        let ie = InformationElement::LTE(Box::new(LteInformationElement::NAS(nas)));
+        assert_eq!(analyzer.analyze_information_element(&ie, 1), None);
+
+        // The deep tracking analyzer already ignores it too.
+        let mut tracking = LppLocationTrackingAnalyzer::new();
+        assert_eq!(tracking.analyze_information_element(&ie, 1), None);
     }
 
     // --- The deep tracking analyzer ---

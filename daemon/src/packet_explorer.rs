@@ -39,6 +39,14 @@ use crate::server::ServerState;
 const MAX_LIMIT: usize = 500;
 const DEFAULT_LIMIT: usize = 100;
 
+/// Answering a packet request means scanning the recording from the start, which
+/// is work proportional to its size. This caps how many such scans run at once,
+/// so a burst of requests — including ones asking for a packet far past the end,
+/// which scan the whole recording — cannot monopolise the single processor and
+/// starve capture. Requests beyond the cap wait their turn rather than run in
+/// parallel.
+static PACKET_SCAN_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+
 /// Largest raw payload rendered as hex in a detail view.
 const MAX_HEX_BYTES: usize = 2048;
 
@@ -518,6 +526,8 @@ pub async fn list_packets(
     };
     let limit = limit.clamp(1, MAX_LIMIT);
 
+    // Bound how many recording scans run concurrently. Held for the whole scan.
+    let _scan_slot = PACKET_SCAN_SLOTS.acquire().await;
     let mut reader = open_recording(&state, &recording).await?;
 
     let mut packets = Vec::new();
@@ -564,6 +574,16 @@ pub async fn get_packet(
     State(state): State<Arc<ServerState>>,
     Path((recording, wanted)): Path<(String, usize)>,
 ) -> Result<Json<PacketDetail>, (StatusCode, String)> {
+    // Packets count from 1. Reject 0 up front rather than scanning the whole
+    // recording only to never match it.
+    if wanted == 0 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "packet numbers start at 1".to_string(),
+        ));
+    }
+    // Bound how many recording scans run concurrently. Held for the whole scan.
+    let _scan_slot = PACKET_SCAN_SLOTS.acquire().await;
     let mut reader = open_recording(&state, &recording).await?;
     let mut packet_num = 0usize;
 
