@@ -1,0 +1,19 @@
+[package]
+name = "rayhunter-radio"
+version = "0.12.2"
+edition = "2024"
+description = "Transport-agnostic wireless observation, signature matching and persistence analysis for Rayhunter"
+
+[lib]
+name = "rayhunter_radio"
+path = "src/lib.rs"
+
+[dependencies]
+chrono = { version = "0.4.31", features = ["serde"] }
+log = "0.4.20"
+serde = { version = "1.0.197", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0.50"
+
+[dev-dependencies]
+tempfile = "3"

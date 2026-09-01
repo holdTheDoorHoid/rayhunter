@@ -1,0 +1,268 @@
+{
+  "schema_version": 1,
+  "pack_version": "builtin-2026.08.31",
+  "signatures": [
+    {
+      "id": "imsi.harris.oui",
+      "vendor": "Harris Corporation",
+      "product": "cellular surveillance equipment (vendor)",
+      "technology": "wifi",
+      "conditions": [
+        { "type": "mac_prefix", "field": "any", "prefix": "00:17:f3" }
+      ],
+      "confidence": "info",
+      "severity": "informational",
+      "description": "Wi-Fi interface using a Harris Corporation address block. Harris is named in EFForg/rayhunter#1000 as a cell-site-simulator vendor. A match means only that hardware from this vendor is nearby; Harris ships a great deal of non-surveillance equipment.",
+      "evidence": [
+        "IEEE MA-L public registry: 00-17-F3 assigned to Harris Corporation",
+        "EFForg/rayhunter#1000 names Harris among IMSI-catcher manufacturers"
+      ],
+      "last_verified": "2026-08-31",
+      "notes": "Corroborating evidence only. Never raise this above informational on its own.",
+      "enabled": true
+    },
+    {
+      "id": "imsi.harris.oui.2",
+      "vendor": "Harris Corporation",
+      "product": "cellular surveillance equipment (vendor)",
+      "technology": "wifi",
+      "conditions": [
+        { "type": "mac_prefix", "field": "any", "prefix": "00:06:ec" }
+      ],
+      "confidence": "info",
+      "severity": "informational",
+      "description": "Second Harris Corporation address block. Same caveats as imsi.harris.oui.",
+      "evidence": [
+        "IEEE MA-L public registry: 00-06-EC assigned to Harris Corporation"
+      ],
+      "last_verified": "2026-08-31",
+      "enabled": true
+    },
+    {
+      "id": "imsi.octasic.oui",
+      "vendor": "Octasic Inc.",
+      "product": "baseband/SDR hardware (vendor)",
+      "technology": "wifi",
+      "conditions": [
+        { "type": "mac_prefix", "field": "any", "prefix": "00:0c:90" }
+      ],
+      "confidence": "info",
+      "severity": "informational",
+      "description": "Wi-Fi interface using an Octasic address block. Octasic is named in EFForg/rayhunter#1000; its DSP and SDR parts appear in cellular test and interception equipment as well as in ordinary telecoms gear.",
+      "evidence": [
+        "IEEE MA-L public registry: 00-0C-90 assigned to Octasic Inc.",
+        "EFForg/rayhunter#1000 names Octastic/Octasic among IMSI-catcher manufacturers"
+      ],
+      "last_verified": "2026-08-31",
+      "enabled": true
+    },
+    {
+      "id": "imsi.keyw.mas",
+      "vendor": "KeyW Corporation",
+      "product": "cellular surveillance equipment (vendor)",
+      "technology": "wifi",
+      "conditions": [
+        { "type": "mac_prefix", "field": "any", "prefix": "70:b3:d5:7c:b" }
+      ],
+      "confidence": "info",
+      "severity": "informational",
+      "description": "Nine-nibble MA-S allocation attributed to KeyW Corporation. The parent block 70:b3:d5 belongs to the IEEE Registration Authority and is shared by many small assignees, so only the full nine-nibble prefix is meaningful; matching 70:b3:d5 alone would fire on unrelated hardware.",
+      "evidence": [
+        "EFForg/rayhunter#1042 comment by cooperq (EFF) identifying 70:b3:d5:7c:b as KeyW",
+        "IEEE MA-L public registry: 70-B3-D5 is the IEEE Registration Authority MA-S parent block, not an end-vendor assignment"
+      ],
+      "last_verified": null,
+      "notes": "Provenance is the upstream PR discussion; not independently re-verified against the IEEE MA-S registry here. This is the signature that motivates nibble-precision prefix matching.",
+      "enabled": true
+    },
+    {
+      "id": "camera.flock.oui",
+      "vendor": "Flock Safety",
+      "product": "automated licence plate reader",
+      "technology": "wifi",
+      "conditions": [
+        { "type": "mac_prefix", "field": "any", "prefix": "b4:1e:52" }
+      ],
+      "confidence": "info",
+      "severity": "informational",
+      "description": "Wi-Fi interface using the Flock Safety address block.",
+      "evidence": [
+        "IEEE MA-L public registry: B4-1E-52 assigned to Flock Safety"
+      ],
+      "last_verified": "2026-08-31",
+      "notes": "Reachable from BSS scanning only if the camera transmits a beacon or probe response. Community research (flock-you) reports that Flock's management access point was withdrawn around December 2025 and that current units emit wildcard probe requests instead, which BSS scanning cannot see. Treat a non-detection as uninformative.",
+      "enabled": true
+    },
+    {
+      "id": "bodycam.axon.oui",
+      "vendor": "Axon Enterprise, Inc.",
+      "product": "body-worn camera / evidence hardware",
+      "technology": "wifi",
+      "conditions": [
+        { "type": "mac_prefix", "field": "any", "prefix": "00:25:df" }
+      ],
+      "confidence": "info",
+      "severity": "informational",
+      "description": "Wi-Fi interface using the Axon Enterprise address block.",
+      "evidence": [
+        "IEEE MA-L public registry: 00-25-DF assigned to Axon Enterprise, Inc."
+      ],
+      "last_verified": "2026-08-31",
+      "notes": "Deliberately excludes 'Axon Networks Inc.' (00-58-28, 00-C0-D4) and 'Axonne Inc.' (FC-85-96), which are unrelated companies whose names merely resemble Axon Enterprise. OUI-SPY's Axon detection combines a MAC/OUI with a Bluetooth company identifier and a BLE service UUID; the composite is expressible in this schema but needs BLE input, which the RC400L cannot provide.",
+      "enabled": true
+    },
+    {
+      "id": "camera.ring.oui",
+      "vendor": "Ring LLC",
+      "product": "consumer doorbell/security camera",
+      "technology": "wifi",
+      "conditions": [
+        { "type": "mac_prefix", "field": "any", "prefix": "54:e0:19" }
+      ],
+      "confidence": "info",
+      "severity": "informational",
+      "description": "Wi-Fi interface using the Ring LLC address block. Consumer camera hardware: extremely common in residential areas and not evidence of targeted surveillance.",
+      "evidence": [
+        "IEEE MA-L public registry: 54-E0-19 assigned to Ring LLC"
+      ],
+      "last_verified": "2026-08-31",
+      "notes": "High base rate in residential environments. Kept informational so it can corroborate a persistence finding without generating standalone alerts.",
+      "enabled": true
+    },
+    {
+      "id": "drone.dji.oui.481cb9",
+      "vendor": "SZ DJI Technology Co., Ltd",
+      "product": "drone",
+      "technology": "wifi",
+      "conditions": [
+        { "type": "mac_prefix", "field": "any", "prefix": "48:1c:b9" }
+      ],
+      "confidence": "info",
+      "severity": "informational",
+      "description": "Wi-Fi interface using a DJI address block. A nearby drone is not by itself evidence of surveillance; this belongs in the drone category of the UI, not the surveillance category.",
+      "evidence": [
+        "IEEE MA-L public registry: 48-1C-B9 assigned to SZ DJI TECHNOLOGY CO.,LTD"
+      ],
+      "last_verified": "2026-08-31",
+      "enabled": true
+    },
+    {
+      "id": "drone.dji.oui.60601f",
+      "vendor": "SZ DJI Technology Co., Ltd",
+      "product": "drone",
+      "technology": "wifi",
+      "conditions": [
+        { "type": "mac_prefix", "field": "any", "prefix": "60:60:1f" }
+      ],
+      "confidence": "info",
+      "severity": "informational",
+      "description": "Second DJI address block. Same caveats as drone.dji.oui.481cb9.",
+      "evidence": [
+        "IEEE MA-L public registry: 60-60-1F assigned to SZ DJI TECHNOLOGY CO.,LTD"
+      ],
+      "last_verified": "2026-08-31",
+      "enabled": true
+    },
+    {
+      "id": "drone.skydio.oui",
+      "vendor": "Skydio Inc.",
+      "product": "drone",
+      "technology": "wifi",
+      "conditions": [
+        { "type": "mac_prefix", "field": "any", "prefix": "38:1d:14" }
+      ],
+      "confidence": "info",
+      "severity": "informational",
+      "description": "Wi-Fi interface using the Skydio address block. Drone category, not surveillance category.",
+      "evidence": [
+        "IEEE MA-L public registry: 38-1D-14 assigned to Skydio Inc."
+      ],
+      "last_verified": "2026-08-31",
+      "enabled": true
+    },
+    {
+      "id": "drone.parrot.oui",
+      "vendor": "Parrot SA",
+      "product": "drone",
+      "technology": "wifi",
+      "conditions": [
+        { "type": "mac_prefix", "field": "any", "prefix": "90:3a:e6" }
+      ],
+      "confidence": "info",
+      "severity": "informational",
+      "description": "Wi-Fi interface using a Parrot SA address block. Drone category, not surveillance category.",
+      "evidence": [
+        "IEEE MA-L public registry: 90-3A-E6 assigned to PARROT SA"
+      ],
+      "last_verified": "2026-08-31",
+      "enabled": true
+    },
+
+    {
+      "id": "research.flock.nitekry.826bf2",
+      "vendor": "Flock Safety (reported)",
+      "product": "automated licence plate reader",
+      "technology": "wifi",
+      "conditions": [
+        {
+          "type": "mac_prefix",
+          "field": "transmitter",
+          "prefix": "82:6b:f2",
+          "allow_locally_administered": true
+        }
+      ],
+      "confidence": "info",
+      "severity": "informational",
+      "description": "Locally-administered transmitter prefix reported by the DeFlockJoplin research and carried in flock-you. Not an IEEE assignment, so it cannot be checked against the public registry.",
+      "evidence": [
+        "colonelpanichacks/flock-you (MIT), target_ouis table, attributed to DeFlockJoplin"
+      ],
+      "last_verified": null,
+      "notes": "Disabled by default: field-reported, not independently verified here. This prefix has the locally-administered bit set, which is why it needs allow_locally_administered; flock-you explicitly warns that a blanket randomisation filter drops it. Scoped to the transmitter so that an access point merely answering the camera does not match.",
+      "enabled": false
+    },
+    {
+      "id": "research.flock.nitekry.wildcard-probe",
+      "vendor": "Flock Safety (reported)",
+      "product": "automated licence plate reader",
+      "technology": "wifi",
+      "conditions": [
+        { "type": "mac_prefix", "field": "transmitter", "prefix": "70:c9:4e" },
+        { "type": "ssid_wildcard" },
+        { "type": "frame_type", "frame": "probe_request" }
+      ],
+      "confidence": "high",
+      "severity": "medium",
+      "description": "Composite: a reported Flock transmitter prefix sending a wildcard probe request. This is the tier-3/4 behaviour flock-you describes, where the camera enumerates networks by asking every access point to identify itself.",
+      "evidence": [
+        "colonelpanichacks/flock-you (MIT), README describing wildcard-probe behaviour at ~0.125s intervals",
+        "@NitekryDPaul nite-oui-collection, via flock-you target_ouis table"
+      ],
+      "last_verified": null,
+      "notes": "Disabled by default, and additionally unreachable on the Orbic RC400L: probe requests require monitor mode, which the QCA9377's qcacld-2.0 build does not expose. Retained so the rule is ready when a capture source that can see probe requests is available (companion radio, or a platform whose driver supports monitor mode).",
+      "enabled": false
+    },
+    {
+      "id": "research.flock.ie-fingerprint",
+      "vendor": "Flock Safety (reported)",
+      "product": "automated licence plate reader",
+      "technology": "wifi",
+      "conditions": [
+        { "type": "mac_prefix", "field": "transmitter", "prefix": "70:c9:4e" },
+        { "type": "ssid_wildcard" },
+        { "type": "frame_type", "frame": "probe_request" },
+        { "type": "ie_id_sequence", "ids": [0, 1, 50, 45, 127] }
+      ],
+      "confidence": "high",
+      "severity": "high",
+      "description": "Strongest reported Flock signature: vendor prefix, wildcard probe behaviour, and a matching information-element fingerprint. Element fingerprinting of probe requests is a documented identification technique (Pintor and Atzori, 2022).",
+      "evidence": [
+        "Pintor, L. & Atzori, L. (2022). Analysis of Wi-Fi Probe Requests Towards Information Element Fingerprinting. GLOBECOM 2022, 3857-3862. doi:10.1109/GLOBECOM48099.2022.10001618",
+        "colonelpanichacks/flock-you (MIT), tier-4 wildcard_probe_ie_sig path"
+      ],
+      "last_verified": null,
+      "notes": "Disabled by default. The element ID sequence here is a PLACEHOLDER and must be replaced with a sequence captured from a real device before this rule is ever enabled. Enabling it as written would produce meaningless results. Also unreachable on the RC400L for the same reason as research.flock.nitekry.wildcard-probe.",
+      "enabled": false
+    }
+  ]
+}

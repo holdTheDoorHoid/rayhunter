@@ -4700,6 +4700,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rayhunter-radio"
+version = "0.12.2"
+dependencies = [
+ "chrono",
+ "log",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "rayon"
 version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

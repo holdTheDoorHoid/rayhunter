@@ -5,3 +5,6 @@
 
 # Internal doc-planning notes; not for the public repo or the rendered book
 doc/INVENTORY.md
+
+# Phase 0 scratch: pulled vendor binaries (wlan.ko, BT firmware) and raw dumps
+.phase0/
