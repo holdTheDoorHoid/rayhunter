@@ -270,7 +270,7 @@ async fn install_file_impl(
     Ok(())
 }
 
-fn adb_command(adb_device: &mut ADBUSBDevice, command: &[&str]) -> Result<String> {
+pub(crate) fn adb_command(adb_device: &mut ADBUSBDevice, command: &[&str]) -> Result<String> {
     let mut buf = Vec::<u8>::new();
     adb_device.shell_command(command, &mut buf)?;
     Ok(String::from_utf8_lossy(&buf).into_owned())

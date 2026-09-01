@@ -12,6 +12,7 @@ mod files;
 pub(crate) use files::*;
 
 mod moxee;
+mod moxee_adb;
 #[cfg(not(target_os = "android"))]
 mod orbic;
 mod orbic_auth;
@@ -54,6 +55,12 @@ enum Command {
     Orbic(OrbicNetworkArgs),
     /// Install rayhunter on the Moxee Hotspot via network.
     Moxee(MoxeeArgs),
+    /// Install rayhunter on a Moxee over ADB, with no admin password.
+    ///
+    /// Needs ADB to have been turned on once, with
+    /// `util moxee-persist-adb`.
+    #[cfg(not(target_os = "android"))]
+    MoxeeAdb(MoxeeAdbArgs),
     /// Install rayhunter on the TMobile TMOHS1.
     Tmobile(TmobileArgs),
     /// Install rayhunter on the Uz801.
@@ -174,6 +181,17 @@ struct MoxeeArgs {
     /// Set a password under Configuration if you use this.
     #[arg(long)]
     enable_terminal: bool,
+    /// Also make ADB persist, so later installs need no password.
+    ///
+    /// The first install cannot avoid the admin password: ADB is off, and the
+    /// password is the only way in. This turns it on as the install finishes,
+    /// so that is a one-time cost and `moxee-adb` can be used from then on.
+    ///
+    /// Off by default. Root ADB over USB is a real change to what physical
+    /// access to the device gets somebody, and not something to switch on
+    /// without being asked.
+    #[arg(long)]
+    persist_adb: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -213,6 +231,22 @@ struct MoxeePersistAdbArgs {
     /// Put the device back the way it was, so adb stops being enabled at boot.
     #[arg(long)]
     revert: bool,
+}
+
+/// The ADB path needs no address or credentials: it finds the device on USB.
+#[derive(Parser, Debug)]
+struct MoxeeAdbArgs {
+    /// Overwrite config.toml even if it already exists on the device.
+    #[arg(long)]
+    reset_config: bool,
+
+    /// Override the data directory path. Defaults to /cache/rayhunter-data.
+    #[arg(long)]
+    data_dir: Option<String>,
+
+    /// Let the web interface run commands on the device.
+    #[arg(long)]
+    enable_terminal: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -351,6 +385,8 @@ async fn run(args: Args) -> Result<(), Error> {
         Command::OrbicUsb(args) => orbic::install(args.reset_config).await.context("\nFailed to install rayhunter on the Orbic RC400L (USB installer)")?,
         Command::Orbic(args) => orbic_network::install(args.admin_ip, args.admin_username, args.admin_password, args.reset_config, args.data_dir, args.enable_terminal).await.context("\nFailed to install rayhunter on the Orbic RC400L")?,
         Command::Moxee(args) => moxee::install(args).await.context("\nFailed to install rayhunter on the Moxee Hotspot")?,
+        #[cfg(not(target_os = "android"))]
+        Command::MoxeeAdb(args) => moxee_adb::install(args.data_dir, args.reset_config, args.enable_terminal).await.context("\nFailed to install rayhunter on the Moxee Hotspot over ADB")?,
         Command::Wingtech(args) => wingtech::install(args).await.context("\nFailed to install rayhunter on the Wingtech CT2MHS01")?,
         Command::Util(subcommand) => {
             match subcommand.command {

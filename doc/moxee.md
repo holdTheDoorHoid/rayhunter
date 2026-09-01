@@ -55,6 +55,30 @@ enabled. Instead, you can use:
 ./installer util orbic-shell
 ```
 
+## Installing again without the password
+
+The install above goes through the admin web interface, so it needs the admin
+password. The first time, that is unavoidable: ADB is off, and the password is
+the only way in.
+
+It does not have to be typed again. Add `--persist-adb` to the install and it
+turns ADB on as part of the same run, so from then on you can install over ADB
+with no password at all:
+
+```bash
+./installer moxee-adb
+```
+
+That path is simpler in every way that matters: no login, no exploit, no
+telnet, and every file checked by hash after it is written. It refuses to run
+against a device that has not had ADB turned on yet, and says how to do that.
+
+**ADB here runs as root**, unlike the Orbic where it is unprivileged and
+commands have to go through `rootshell`. That is what makes this path
+straightforward, and it is also the reason `--persist-adb` is opt-in rather than
+the default: root ADB over USB is a real change to what physical access to the
+device gets somebody.
+
 ## Keeping ADB across reboots
 
 Enabling ADB on a Moxee normally lasts only until the device restarts: the boot
