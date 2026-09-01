@@ -55,20 +55,25 @@ short. Do not read a warning from it as proof before weighing these:
   detects this mismatch, marks the finding Low rather than High, and says
   "could be a false positive roaming issue" in the text, naming both networks.
 
-There is a deeper honesty owed here. This detector was inherited from the
-upstream Rayhunter project and has real-world history there, but **this
-repository does not record a specific measurement of its false-positive rate
-against real traffic**, and no one can state that rate precisely, because —
-as [Why Detection Is Hard](../concepts/why-detection-is-hard.md) explains —
-there is no ground truth to measure against. Treat its High warnings as strong
-leads worth preserving, not as proof. [Reading Warnings Without
-Panicking](../concepts/interpreting-warnings.md) is the method for weighing
-them.
+Two different honesty points are owed here, and keeping them apart matters.
 
-<!-- NEEDS INPUT: has this detector been validated against a known real capture
-(upstream's or ours) containing a genuine identity-capture attack? If a
-reference capture exists, name it here and upgrade the validation statement in
-Precise behavior. -->
+First, this detector — inherited from upstream — **has been validated against a
+real cell-site simulator.** EFF exercised it against an actual catcher, using a
+test device made available through a university research group, and it fired.
+That is the strongest kind of evidence in [How We Validate
+Detectors](./validation.md): confirmation that it detects a genuine attack, not
+only encoder-built test messages. It is why this is the detection Rayhunter can
+make most confidently.
+
+Second, and separately, **that is not the same as knowing how often it fires
+when there is no attack.** A true-positive test shows the detector catches a
+real catcher; it does not measure the false-positive rate in everyday traffic,
+which no one can state precisely because — as [Why Detection Is
+Hard](../concepts/why-detection-is-hard.md) explains — there is no field ground
+truth to measure against. So the harmless cases above are still real, and a High
+warning is still a strong lead to preserve rather than proof. [Reading Warnings
+Without Panicking](../concepts/interpreting-warnings.md) is the method for
+weighing one.
 
 ## How it works
 
@@ -121,8 +126,12 @@ warning, as [Severity](../severity.md) explains.
   missing a reject delivered specifically by connection release.
 - **Validation:** inherited from upstream and exercised by two of Rayhunter's
   demonstration scenarios (identity demanded after authentication, and identity
-  demanded with no attach request). This repository does not record a
-  real-capture validation; see the note above.
+  demanded with no attach request). Beyond that, EFF has validated it against a
+  real cell-site simulator (a test device obtained through a university research
+  group), where it fired on a genuine attack — the real-capture level in [How We
+  Validate Detectors](./validation.md). That establishes it detects a real
+  catcher; it does not establish a field false-positive rate, which remains
+  unknown for the reasons in the harmless-cases section.
 - **Note on upstream drift:** the upstream project has recent work to read your
   home network identity from the SIM card directly, which would sharpen the
   roaming judgement above. That is not yet in this fork, and this page

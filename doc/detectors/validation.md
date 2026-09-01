@@ -81,10 +81,18 @@ everything else.
 The [detector reference table](./index.md) is the current summary, but the shape
 of it is worth stating here:
 
-- **The fork's location detectors** (LPP request, LPP tracking, RRLP) have
-  reference-encoder vectors and demonstration round-trips, but **no real-capture
-  validation**. The RRLP one has never seen real 2G traffic at all.
-- **The inherited upstream detectors** (identity, the two downgrades, the two
+- **The identity detector** stands apart: EFF has validated it against a real
+  cell-site simulator (a test device obtained through a university research
+  group), where it fired on a genuine attack. That is real-capture validation of
+  its ability to *catch* an attack — the strongest level here. It does not, on
+  its own, establish a field false-positive rate, which is a separate question no
+  detector here can answer precisely.
+- **The fork's newer detectors** (LPP request, LPP tracking, RRLP, timing
+  advance) have reference-encoder vectors or unit tests and demonstration
+  round-trips, but **no real-capture validation**. The RRLP one has never seen
+  real 2G traffic at all, and the timing-advance one has never seen a real
+  distance jump from a second transmitter.
+- **The other inherited upstream detectors** (the two downgrades, the two
   null-cipher checks, incomplete SIB) have demonstration coverage and real-world
   history in the upstream project, but this repository does not record a specific
   real-capture validation, so this book does not claim one for them.

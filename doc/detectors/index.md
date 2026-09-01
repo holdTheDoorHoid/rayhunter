@@ -44,7 +44,7 @@ it.
 
 | Detector | Code identifier | Severity it can raise | Default | Validation |
 |---|---|---|---|---|
-| [Identity Requested Without Authentication](./imsi-requested.md) | `imsi_requested` | High, Low, Informational | On | Inherited from upstream; demo-exercised. Real-capture status not established here. |
+| [Identity Requested Without Authentication](./imsi-requested.md) | `imsi_requested` | High, Low, Informational | On | Inherited; demo-exercised. **Validated by EFF against a real cell-site simulator** (fires on a genuine attack); field false-positive rate still unknown. |
 | [Redirected to 2G](./connection-redirect-downgrade.md) | `connection_redirect_2g_downgrade` | High, Informational | On | Inherited; demo-exercised. Real-capture status not established here. |
 | [2G/3G Advertised Above 4G](./priority-2g-downgrade.md) | `lte_sib6_and_7_downgrade` | High, Informational | On | Inherited; demo-exercised. Earlier versions were noisy; current is stricter. |
 | [Encryption Disabled (RRC)](./null-cipher.md) | `null_cipher` | High | On | Inherited; demo-exercised. |
