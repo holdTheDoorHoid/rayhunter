@@ -11,33 +11,33 @@ A report is **newline-delimited JSON** (NDJSON): one JSON object per line, not o
 big array. Read it a line at a time.
 
 - **The first line is the report metadata.**
-- **Every following line is one analysis row** — one message from the recording
+- **Every following line is one analysis row**, one message from the recording
   that had something worth writing.
 
 ## The metadata line
 
 The first line describes the analysis as a whole:
 
-- `analyzers` — the list of detectors that were active, each with its `name`,
+- `analyzers`, the list of detectors that were active, each with its `name`,
   `description`, and code `version`. This records which detectors, at which
   versions, produced the report.
-- `rayhunter` — runtime metadata about the Rayhunter build and the run.
-- `report_version` — the format version number (currently **3**).
+- `rayhunter`, runtime metadata about the Rayhunter build and the run.
+- `report_version`, the format version number (currently **3**).
 
 ## The analysis rows
 
 Each subsequent line is one row, describing one message:
 
-- `packet_num` — which message in the recording this row is about, counting from
+- `packet_num`, which message in the recording this row is about, counting from
   1. **Added in version 3** (see below). It is what lets a warning be traced to,
   and jumped to, the exact message that produced it.
-- `packet_timestamp` — when that message was seen.
-- `skipped_message_reason` — set if the message could not be analysed, saying
+- `packet_timestamp`, when that message was seen.
+- `skipped_message_reason`, set if the message could not be analysed, saying
   why; absent otherwise.
-- `events` — the findings for this message: a list in which each entry is either
+- `events`, the findings for this message: a list in which each entry is either
   an event or empty (empty entries correspond to detectors that had nothing to
-  say about this message). Each event has an `event_type` — `Informational`,
-  `Low`, `Medium`, or `High` — and a `message` describing it in plain text.
+  say about this message). Each event has an `event_type`, `Informational`,
+  `Low`, `Medium`, or `High`, and a `message` describing it in plain text.
 
 ### Rows that are not written
 
@@ -45,7 +45,7 @@ A row whose events are all `Informational`, and which has no skipped-message
 reason, is **not written at all**. This keeps a report to the findings plus the
 context on the same messages, rather than a full log of routine traffic. The
 consequence for reading a report: absence of a message from the report does not
-mean it did not occur — see [Severity, and What It Means](./severity.md).
+mean it did not occur, see [Severity, and What It Means](./severity.md).
 
 ## Version history
 
@@ -53,14 +53,14 @@ The `report_version` distinguishes formats that have changed over time. Rayhunte
 reads the older ones and normalises them when it opens an old report, so you can
 open a report made by an earlier version; it writes the current version.
 
-- **Version 0** — the legacy, unversioned era. Reports from before versioning is
+- **Version 0**, the legacy, unversioned era. Reports from before versioning is
   treated as version 0, which lets some known false-positive results from that
   period be told apart from later ones.
-- **Version 1** — an earlier structured format, grouping analysis entries and
+- **Version 1**, an earlier structured format, grouping analysis entries and
   skipped-message reasons differently from today. Rayhunter still reads it.
-- **Version 2** — rows in roughly the current shape (`packet_timestamp`,
+- **Version 2**, rows in roughly the current shape (`packet_timestamp`,
   `skipped_message_reason`, `events`) but **without** `packet_num`.
-- **Version 3 — the current version.** Adds `packet_num` to each row, so a
+- **Version 3, the current version.** Adds `packet_num` to each row, so a
   finding can be tied to the exact message that produced it. This is the change
   the [packet explorer](./packet-explorer.md) needed, and carrying it is why the
   explorer advanced the format version. Reports written before version 3
@@ -78,8 +78,8 @@ Upstream](./fork/compatibility.md) covers the cross-version picture.
 
 ## Where to next
 
-- [The Packet Explorer](./packet-explorer.md) — the feature the version-3 field
+- [The Packet Explorer](./packet-explorer.md), the feature the version-3 field
   serves.
-- [Severity, and What It Means](./severity.md) — the event types and the
+- [Severity, and What It Means](./severity.md), the event types and the
   empty-row rule.
-- [REST API](./api-docs.md) — the endpoints that serve reports and recordings.
+- [REST API](./api-docs.md), the endpoints that serve reports and recordings.

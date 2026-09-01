@@ -4,7 +4,7 @@ Everything your phone sends over the air travels through open space, where
 anyone with the right radio can pick it up. What stops a listener from
 understanding it is encryption: your phone and the network scramble their
 conversation so that, to anyone in between, it is noise. Take the scrambling
-away and the noise becomes plain speech again — your messages, who you are
+away and the noise becomes plain speech again, your messages, who you are
 calling, readable by whoever is listening.
 
 That is what this technique does. It does not break the encryption, which
@@ -30,7 +30,7 @@ With encryption switched off, the protection described above is gone. Whoever
 operates the tower your phone is talking to can read what passes between you
 and it, and in some cases change it as it goes by
 ([Sources and Further Reading](../references.md), EFF's white paper on how
-catchers deal with encryption). Not metadata about your traffic — the traffic.
+catchers deal with encryption). Not metadata about your traffic, the traffic.
 
 The two detectors that catch this are not redundant, and the difference
 between them is a difference in how serious the finding is:
@@ -40,7 +40,7 @@ between them is a difference in how serious the finding is:
 - **The core network turning off encryption, after your phone has already
   proven its identity,** is worse, and points somewhere different. Reaching
   that point means whoever is doing it holds genuine cryptographic key
-  material for your SIM — something an ordinary fake tower cannot obtain. It
+  material for your SIM, something an ordinary fake tower cannot obtain. It
   can indicate cooperation from the carrier itself, or an attack on the
   signalling network that carriers use to exchange subscriber information
   between each other. The [NAS detector page](../detectors/nas-null-cipher.md)
@@ -62,7 +62,7 @@ shut.
 ### The "no lock" option, and why it exists
 
 Among the algorithms both sides recognise is one that means *no encryption at
-all*. It is a real, standardised option — not an oversight — and it is worth
+all*. It is a real, standardised option, not an oversight, and it is worth
 knowing why the specification includes it, because the reason is legitimate
 and the abuse borrows that legitimacy.
 
@@ -78,7 +78,7 @@ defines these null algorithms and the narrow circumstances they are meant for.
 
 A real network, having proven itself with your SIM's secret, uses that same
 secret to drive genuine encryption. A fake tower cannot, because it does not
-hold the secret — this is the same wall it hit when it skipped authentication
+hold the secret, this is the same wall it hit when it skipped authentication
 in [Capturing Your Identity](./attack-identity.md). Real encryption is exactly
 the thing it has no key for.
 
@@ -93,7 +93,7 @@ matter of course.
 ### Two layers, two detectors
 
 Encryption on a mobile network is set up at two levels, and the "no
-encryption" option exists at both — which is why Rayhunter has two detectors
+encryption" option exists at both, which is why Rayhunter has two detectors
 here rather than one.
 
 - The **radio layer (RRC)** protects the link between your phone and the
@@ -119,7 +119,7 @@ signal than the RRC one, and the pages for each explain how to weigh them.
   including in handover and dual-connectivity configurations, and warns at
   high severity. **The NAS detector** (`lib/src/analysis/nas_null_cipher.rs`)
   inspects the NAS *Security Mode Command* for the null cipher and also warns
-  at high severity — the greater seriousness is in what it implies, described
+  at high severity, the greater seriousness is in what it implies, described
   above and on its page, not in the severity number.
 - **The rare honest cause.** A genuinely misconfigured carrier, or one
   operating where strong encryption is restricted by law, could also produce
@@ -129,7 +129,7 @@ signal than the RRC one, and the pages for each explain how to weigh them.
 - **What falls outside.** Rayhunter sees the negotiation aimed at this device.
   It cannot report on encryption between other phones and a tower, nor on an
   interception that reads traffic without changing the encryption settings at
-  all — [What This Tool Cannot Tell You](./limitations.md).
+  all, [What This Tool Cannot Tell You](./limitations.md).
 
 ## Where to next
 

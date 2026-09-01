@@ -1,7 +1,7 @@
 # Making Your Phone Report Its Position
 
 Every technique so far has been about someone working out something *about*
-you — who you are, what network you are on, what you are saying. This one is
+you, who you are, what network you are on, what you are saying. This one is
 different, and more precise. It does not work your position out. It asks your
 phone to measure exactly where it is and send the answer back. Your phone
 carries a satellite receiver and can time signals from towers to within
@@ -32,7 +32,7 @@ This request goes to the modem, beneath the part of the phone you interact
 with, and produces no sign on the screen.
 
 In a Rayhunter recording, a caught request appears as a warning that your
-location was asked for, and — if the deeper detector is running — whether it
+location was asked for, and, if the deeper detector is running, whether it
 was asked for once or on a repeating timer. That distinction is the most
 important thing on the page, and the next section is why.
 
@@ -44,7 +44,7 @@ have shown a semi-passive attacker can place a phone within roughly a
 two-square-kilometre area in a city, and that the measurement reports phones
 send out can be detailed enough to trilaterate a position, sometimes down to
 exact GPS coordinates (Shaik et al., 2016; EFF's white paper on measurement
-reports — [Sources and Further Reading](../references.md)).
+reports, [Sources and Further Reading](../references.md)).
 
 This technique skips the estimation. It asks your phone for a fix, and your
 phone can answer with satellite-grade coordinates. That is a difference in
@@ -52,7 +52,7 @@ kind, not degree.
 
 And it can ask for that fix **repeatedly**. A single request during an
 emergency call is ordinary. A standing request that reports your position
-every few seconds, for as long as it lasts, is not a locate — it is a track.
+every few seconds, for as long as it lasts, is not a locate, it is a track.
 The gap between those two is the whole subject of surveillance, and reading
 which one you are looking at is what the deeper of the two location detectors
 exists to do.
@@ -62,7 +62,7 @@ exists to do.
 ### A protocol for asking a phone where it is
 
 Mobile networks include a dedicated protocol for positioning. The network
-sends a request — measure your position and report back — and your phone
+sends a request, measure your position and report back, and your phone
 complies, because the feature was built for a good reason and the phone cannot
 tell a worthy request from an unworthy one. On modern networks this protocol
 is called LPP; on 2G there is an older equivalent called RRLP. They do the
@@ -71,12 +71,12 @@ same job in different eras, which is why Rayhunter has a detector for each.
 The request can name *how* it wants your phone to find itself, and the choice
 says a lot about the intent and the precision:
 
-- **By satellite** — your phone reads GPS or other satellite systems, with
+- **By satellite**, your phone reads GPS or other satellite systems, with
   help from the network to do it faster. This is the most precise, a true fix.
-- **By tower timing** — your phone measures the tiny differences in when
+- **By tower timing**, your phone measures the tiny differences in when
   signals arrive from several towers, which pins it down by geometry. Precise,
   and it makes your phone actively measure.
-- **By cell** — which cell you are in, plus timing to it. The coarsest, but
+- **By cell**, which cell you are in, plus timing to it. The coarsest, but
   cheap and quiet.
 
 Which method a request asks for is part of what the deeper detector reads and
@@ -94,7 +94,7 @@ Periodic reporting is the signature that separates a routine locate from
 tracking, and Rayhunter treats it accordingly. The basic detector notes that a
 location exchange happened at all. The deeper detector reads far enough into
 the request to tell one-off from periodic, and raises the periodic case to a
-higher severity than the single one — because "the network asked where I am"
+higher severity than the single one, because "the network asked where I am"
 and "the network arranged to be told where I am, continuously" are genuinely
 different events. The [detector page](../detectors/lpp.md) gives the exact
 severities and rules.
@@ -114,8 +114,8 @@ moments, where a phone is on 2G.
   RRLP is the Radio Resource LCS Protocol, 3GPP TS 44.031, carried inside a
   GSM Radio Resource message on 2G ([Sources and Further Reading](../references.md)).
 - **The methods**, in the protocol's terms: A-GNSS (assisted satellite
-  positioning), OTDOA (Observed Time Difference Of Arrival — the tower-timing
-  method), and E-CID (Enhanced Cell ID — cell plus timing). These names appear
+  positioning), OTDOA (Observed Time Difference Of Arrival, the tower-timing
+  method), and E-CID (Enhanced Cell ID, cell plus timing). These names appear
   in the [detector page](../detectors/lpp.md) and the
   [Glossary](../glossary.md).
 - **The three detectors.** A basic LPP detector notes any location exchange; a
@@ -124,8 +124,8 @@ moments, where a phone is on 2G.
   RRLP detector covers the 2G case. Sources: `lib/src/analysis/lpp.rs` and
   `lib/src/analysis/rrlp.rs`.
 - **Validation, stated plainly.** The LPP layouts were verified against
-  pycrate's reference TS 36.355 encoder — a check that caught a real one-bit
-  error during development — and the RRLP layouts against reference TS 44.018
+  pycrate's reference TS 36.355 encoder, a check that caught a real one-bit
+  error during development, and the RRLP layouts against reference TS 44.018
   and TS 44.031 encoders. Neither has yet been confirmed against a capture of
   a real network issuing one of these requests; the fork's test devices see
   only LTE, so the 2G detector in particular is unexercised against live
@@ -134,12 +134,12 @@ moments, where a phone is on 2G.
 - **The honest uses.** Emergency calls use this protocol to be located, and
   some carriers use it for lawful location-based services. A hotspot sitting
   on a desk should see it rarely, so an unexplained warning is worth
-  attention — but "worth attention" is not "proof," and
+  attention, but "worth attention" is not "proof," and
   [Reading Warnings Without Panicking](./interpreting-warnings.md) is the
   page for turning one into the other.
 - **What Rayhunter cannot see.** It sees a positioning request aimed at this
   device. Location worked out passively from measurement reports, without any
-  explicit request — the Shaik and white-paper mechanism above — is a
+  explicit request, the Shaik and white-paper mechanism above, is a
   different exposure that this detector does not cover; see
   [What This Tool Cannot Tell You](./limitations.md).
 

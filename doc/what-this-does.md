@@ -11,7 +11,7 @@ fuller page later in the book.
 
 Your phone is useful because it is always in touch with the phone network. To
 stay in touch, it constantly looks for the nearest, strongest connection point
-and links up with it — automatically, without asking you, dozens of times a
+and links up with it, automatically, without asking you, dozens of times a
 day as you move around. This is normal and it is how every phone has always
 worked.
 
@@ -25,13 +25,13 @@ being trusting, connects to it. And now that device can do things: learn a
 permanent code that identifies you, work out where you are, or in some cases
 listen to what you send. These fake connection points are what people mean by
 "stingray" or "IMSI catcher." They are real, they are used by police and others
-around the world, and to your phone they are invisible — no warning, no sign,
+around the world, and to your phone they are invisible, no warning, no sign,
 nothing on your screen.
 
 ## What Rayhunter does about it
 
-Rayhunter is a small device — a cheap mobile hotspot with special software on
-it — that watches the connection your phone network makes and looks for the
+Rayhunter is a small device, a cheap mobile hotspot with special software on
+it, that watches the connection your phone network makes and looks for the
 tell-tale signs of one of these fakes at work.
 
 Think of it as a smoke detector for your phone signal. It sits quietly. It does
@@ -50,7 +50,7 @@ seriously:
   can set it off too, and learning to tell the difference is a real part of
   using it.
 - **A quiet detector is not a promise of safety.** No alarm means it did not
-  see anything it recognises — not that nothing could possibly be happening.
+  see anything it recognises, not that nothing could possibly be happening.
 
 None of that makes it useless. A smoke detector is worth having. But knowing
 exactly what it is for keeps you from trusting it too much or too little, and
@@ -74,8 +74,8 @@ and being misled by it, which is why the book keeps returning to them.
 
 ## Is it for you?
 
-Maybe. For some people — those with specific, real reasons to worry about this
-kind of surveillance — it is a genuinely useful instrument. For many others it
+Maybe. For some people, those with specific, real reasons to worry about this
+kind of surveillance, it is a genuinely useful instrument. For many others it
 is fascinating but not actually protective, and it is worth being honest with
 yourself about which you are before you invest time in it. The next page,
 [Is This For Me?](./threat-models.md), walks through who tends to benefit and
@@ -87,7 +87,7 @@ who does not, without trying to talk you into anything.
   [Is This For Me?](./threat-models.md).
 - If you already have a device and want to get it running, jump to the
   [Quick Start](./quick-start.md).
-- If you want to understand the real machinery behind all of this — what these
-  fake devices actually do, and how the detection works — the
+- If you want to understand the real machinery behind all of this, what these
+  fake devices actually do, and how the detection works, the
   [Understanding the problem](./concepts/cell-networks.md) section builds it up
   from the beginning, still in plain language.

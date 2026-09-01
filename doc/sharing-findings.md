@@ -19,7 +19,7 @@ does before sharing:
 - Your device's own permanent identity (IMSI, IMEI) and temporary identity, if
   they appeared in the traffic.
 - Cell identities and network identifiers for the towers around you.
-- Timing, and — if you had GPS configured — location.
+- Timing, and, if you had GPS configured, location.
 
 These are exactly the things this whole tool exists to protect. A recording is
 useful evidence *because* it is detailed, and that same detail is what makes
@@ -32,8 +32,8 @@ identifiers out of a recording for you.** The display name you can set is
 restricted so it is safe in a filename, but that is not redaction of the capture
 itself. So sharing safely is a matter of deliberate choice, not a button:
 
-- **Share the least that makes your point.** Often the analysis — which detector
-  fired, at what severity, when and where in general terms — is enough to raise
+- **Share the least that makes your point.** Often the analysis, which detector
+  fired, at what severity, when and where in general terms, is enough to raise
   the alarm or ask for help, without handing over the raw capture and every
   identifier in it.
 - **Decide who genuinely needs the raw recording.** A trusted expert verifying a
@@ -57,7 +57,7 @@ else, treat it as if it does.
 What to do with a verified finding depends on your situation:
 
 - **To contribute to public knowledge**, the upstream Rayhunter project and its
-  community are where distributed findings are gathered — see [Support, Feedback,
+  community are where distributed findings are gathered, see [Support, Feedback,
   and Community](./support-feedback-community.md). Send the least identifying
   useful information, and never a recording containing demo data.
 - **If your situation is sensitive**, consider whether a lawyer, an editor, a
@@ -67,8 +67,8 @@ What to do with a verified finding depends on your situation:
 
 ## How to describe a finding without overstating it
 
-This is the part that outlives the recording. If you repeat a finding — to a
-colleague, a reporter, or an audience — the words matter as much as the data,
+This is the part that outlives the recording. If you repeat a finding, to a
+colleague, a reporter, or an audience, the words matter as much as the data,
 because an overstated claim that collapses discredits the real work and misleads
 people who trusted you. The full guidance is in [Reading Warnings Without
 Panicking](./concepts/interpreting-warnings.md); the essentials:
@@ -86,8 +86,8 @@ of what no recording can establish.
 
 ## Where to next
 
-- [Reading Warnings Without Panicking](./concepts/interpreting-warnings.md) — the
+- [Reading Warnings Without Panicking](./concepts/interpreting-warnings.md), the
   full method for weighing and describing a finding.
-- [Legal and Personal Risk](./concepts/risk.md) — before you publish anything.
-- [Support, Feedback, and Community](./support-feedback-community.md) — where
+- [Legal and Personal Risk](./concepts/risk.md), before you publish anything.
+- [Support, Feedback, and Community](./support-feedback-community.md), where
   findings are gathered.

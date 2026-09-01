@@ -48,12 +48,12 @@ being used, and the range is wide:
 
 - **At the low end, your presence.** The simplest use collects the permanent
   identifiers of every phone in range. Run at a protest, a place of worship,
-  or a border crossing, that produces a list of who was there — enough to
+  or a border crossing, that produces a list of who was there, enough to
   place a specific person at a specific place and time
   ([EFF's protest surveillance guide](../references.md) walks through this
   scenario).
 - **At the high end, your communications.** More capable devices can push
-  your phone onto a weak network and read or alter what passes through — the
+  your phone onto a weak network and read or alter what passes through, the
   [downgrade](./attack-downgrade.md) and [encryption](./attack-encryption.md)
   pages cover how.
 
@@ -76,7 +76,7 @@ A cell-site simulator exploits both. It transmits the same kind of
 announcements a real tower does, claiming to belong to your carrier, often
 with a strong signal and attractive settings so that nearby phones prefer it.
 The phones have no way to check the claim before they act on it, so they
-connect — exactly as they were designed to. The white paper *Gotta Catch 'Em
+connect, exactly as they were designed to. The white paper *Gotta Catch 'Em
 All* ([Sources and Further Reading](../references.md)) lays out this
 mechanism in full; the short version is that the phone is not tricked by
 anything clever. It is behaving correctly, in a system that asks it to trust
@@ -96,7 +96,7 @@ reconnects to a genuine tower and carries on, and the operator has what they
 came for: your identity, and proof you were in range. This is the mode built
 for harvesting a crowd. Rayhunter's
 [identity detector](../detectors/imsi-requested.md) is written to catch this
-exact sequence — an identity demanded, no proof of the network offered, then
+exact sequence, an identity demanded, no proof of the network offered, then
 a disconnect.
 
 **Camping.** The device keeps your phone connected and sits in the middle,
@@ -143,7 +143,7 @@ in the [Glossary](../glossary.md):
   *cell-site simulator* for the device and *IMSI catcher* where the emphasis
   is on identity capture, and treats them as the same thing.
 - **Identification vs camping** are Dabrowski et al.'s terms (ACSAC 2014),
-  and their taxonomy of operating modes maps onto Rayhunter's detectors — the
+  and their taxonomy of operating modes maps onto Rayhunter's detectors, the
   [identity detector](../detectors/imsi-requested.md) targets the
   identification pattern specifically. See
   [How We Validate Detectors](../detectors/validation.md) for what "targets"
@@ -153,7 +153,7 @@ in the [Glossary](../glossary.md):
   for a cell that appears to belong to a real carrier, chosen to be an
   attractive reselection or handover target. Later generations (4G, 5G) made
   this harder by requiring the network to authenticate, so a common move is
-  to first push the phone down to a generation that does not — which is the
+  to first push the phone down to a generation that does not, which is the
   [downgrade attack](./attack-downgrade.md).
 - **The limit of a passive detector.** Rayhunter is on the network as an
   ordinary device and sees only what a tower sends *to it*. It can see the

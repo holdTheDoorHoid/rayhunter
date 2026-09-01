@@ -36,7 +36,7 @@ than react to every warning; and you value **evidence you can preserve and
 share** over a sense of personal safety it cannot provide. The clearest fits:
 
 - **Journalists**, especially those covering protests, security, organized
-  crime, or working with sensitive sources — where knowing whether surveillance
+  crime, or working with sensitive sources, where knowing whether surveillance
   equipment was present at a place and time is part of the story, and a
   preserved recording is part of the reporting.
 - **Organizers and activists**, particularly around protests and actions,
@@ -50,7 +50,7 @@ share** over a sense of personal safety it cannot provide. The clearest fits:
   distributed, public knowledge, and here its evidence-gathering strength is
   the whole point.
 - **People with a concrete, individual reason** to believe they may be
-  targeted — some human-rights defenders, some people in specific legal or
+  targeted, some human-rights defenders, some people in specific legal or
   personal situations. If you are in this group you likely already know it, and
   the [risk](./concepts/risk.md) and [interpretation](./concepts/interpreting-warnings.md)
   pages matter especially for you.
@@ -63,11 +63,11 @@ profile Rayhunter fits.
 
 For many thoughtful, privacy-conscious people, the honest answer is that
 Rayhunter is a fascinating instrument that will not meaningfully change their
-safety. There is nothing wrong with using it anyway — curiosity is a fine
+safety. There is nothing wrong with using it anyway, curiosity is a fine
 reason, and more eyes on the problem has real public value. But go in clear:
 
-- **If your worry is general rather than specific** — "surveillance is
-  everywhere and I want to be safe" — Rayhunter will not deliver safety. It
+- **If your worry is general rather than specific**, "surveillance is
+  everywhere and I want to be safe", Rayhunter will not deliver safety. It
   watches one narrow threat, on one device, and defends against none of it. Your
   privacy is better served by the ordinary measures: strong device security,
   encrypted messaging, and the platform settings that can turn off the old
@@ -75,7 +75,7 @@ reason, and more eyes on the problem has real public value. But go in clear:
   covers those).
 - **If you would read every warning as proof you are being watched**, Rayhunter
   may cost you more peace than it gives, because most warnings are not that.
-  This is a real consideration, not a small one — the tool asks for a certain
+  This is a real consideration, not a small one, the tool asks for a certain
   steadiness in how you read it.
 - **If you want a device that protects your phone**, this is not that device,
   and no amount of configuration makes it one.
@@ -87,7 +87,7 @@ this page. It means it answered its question.
 
 Ask, in order:
 
-1. **Do I have a specific reason** — a role, an activity, a situation — to
+1. **Do I have a specific reason**, a role, an activity, a situation, to
    think I might be near a cell-site simulator? Not "could anyone," but "is
    there something particular about me or what I do."
 2. **Do I want evidence, or do I want protection?** Rayhunter offers the first
@@ -99,7 +99,7 @@ Ask, in order:
 
 Three yeses means Rayhunter probably fits, and the [Quick
 Start](./quick-start.md) is your next stop. A no at question 1 or 2, and it is
-likely interesting-but-not-protective for you — still fine to explore, as long
+likely interesting-but-not-protective for you, still fine to explore, as long
 as you hold that framing.
 
 ## Where to next

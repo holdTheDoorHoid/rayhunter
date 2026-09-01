@@ -19,8 +19,8 @@ position.
 ## This is the formal statement; the plain-language version is elsewhere
 
 This page is the formal disclaimer. For a plain-language walk through the kinds of
-risk to think about — running the software, carrying the device, and publishing
-what you find — see [Legal and Personal Risk](./concepts/risk.md). That page is
+risk to think about, running the software, carrying the device, and publishing
+what you find, see [Legal and Personal Risk](./concepts/risk.md). That page is
 orientation, not legal advice, and it does not replace this statement or a
 conversation with a qualified professional in your jurisdiction.
 
@@ -28,6 +28,6 @@ conversation with a qualified professional in your jurisdiction.
 
 This documentation, including the risk pages, cannot know your situation and does
 not create any reliance. Where the stakes are real for you, the authority is the
-law where you are and a professional who practises it — not a documentation page.
+law where you are and a professional who practises it, not a documentation page.
 
 *Good hunting.*

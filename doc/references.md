@@ -2,14 +2,14 @@
 
 Everything in these docs that makes a claim about how cellular networks behave, how
 cell-site simulators work, or how often they are used should be traceable to something on
-this page. If you find a claim in these docs that is not, that is a bug — please report it.
+this page. If you find a claim in these docs that is not, that is a bug, please report it.
 
 Entries are annotated so you can tell, before you click, whether a source is worth your
 time and what it will assume you already know. Difficulty is marked as:
 
-- **Accessible** — written for a general audience, no background needed
-- **Technical** — assumes some networking background, but self-contained
-- **Research** — academic paper, assumes familiarity with the field
+- **Accessible**, written for a general audience, no background needed
+- **Technical**, assumes some networking background, but self-contained
+- **Research**, academic paper, assumes familiarity with the field
 
 ---
 
@@ -51,7 +51,7 @@ interception, authentication spoofing, and how encryption is dealt with.
 Directly relevant to several of our detectors: it explains that paging messages are usually
 addressed to a temporary identifier but sometimes to the permanent one, that unencrypted
 paging channels can be monitored by anyone, and that phones periodically transmit
-unencrypted measurement reports which can be enough to compute position — sometimes
+unencrypted measurement reports which can be enough to compute position, sometimes
 including exact GPS coordinates.
 
 Released under a Creative Commons Attribution license, so you may quote it freely with
@@ -64,16 +64,16 @@ credit.
 ### Dabrowski, A., Pianta, N., Klepp, T., Mulazzani, M., Weippl, E. "IMSI-Catch Me If You Can: IMSI-Catcher-Catchers." ACSAC 2014
 DOI: <https://doi.org/10.1145/2664243.2664272>
 Open preprint: <https://publications.sba-research.org/publications/AdrianDabrowski-IMSI-Catcher-Catcher-ACSAC2014-preprint-20140820.pdf>
-**Research.** The foundational detection paper — this is where the detection-by-artifact
+**Research.** The foundational detection paper, this is where the detection-by-artifact
 approach our heuristics use comes from. It identifies and describes multiple methods of
 detecting the artifacts a catcher leaves in the mobile network.
 
 Its taxonomy of operating modes is worth internalizing, because our detectors map onto it:
 
-- **Identification mode** — the phone is lured in, its permanent identifiers are read, and
+- **Identification mode**, the phone is lured in, its permanent identifiers are read, and
   it is then pushed back to its real network by rejecting its location update. This is the
   exact pattern our identity detector looks for.
-- **Camping mode** — the phone is held on the fake cell and its traffic collected, forwarded
+- **Camping mode**, the phone is held on the fake cell and its traffic collected, forwarded
   on to the real network so the user notices nothing.
 
 The paper also notes the economics: once vendor count rose and prices fell, self-built
@@ -85,8 +85,7 @@ DOI: <https://doi.org/10.1515/popets-2017-0027>
 <https://petsymposium.org/popets/2017/popets-2017-0027.php>
 **Research.** University of Washington. Sensors in 15 ridesharing vehicles across two
 cities, two months of data each. Important to us for two reasons. First, it establishes the
-method of learning a city's normal network behavior and then flagging deviations from it —
-the same logic behind treating an unfamiliar cell as interesting. Second, its framing of the
+method of learning a city's normal network behavior and then flagging deviations from it, the same logic behind treating an unfamiliar cell as interesting. Second, its framing of the
 problem: the richest public information about US government use comes from anonymous leaks,
 public records requests, and court proceedings, which is precisely the deficiency
 distributed detection is meant to address.
@@ -143,7 +142,7 @@ when a detector's behavior is questioned. Cite the clause, not just the document
 | TS 36.331 | E-UTRA Radio Resource Control (RRC) | System information blocks, redirection, cell reselection priorities |
 | TS 24.301 | NAS protocol for EPS | Identity request/response, security mode command, attach reject |
 | TS 33.401 | 3GPP System Architecture Evolution: Security architecture | Which cipher and integrity algorithms are permitted, including the null algorithms |
-| TS 36.355 | LTE Positioning Protocol (LPP) | The LPP detectors — request/response structure, positioning methods, periodic reporting |
+| TS 36.355 | LTE Positioning Protocol (LPP) | The LPP detectors, request/response structure, positioning methods, periodic reporting |
 | TS 44.031 | Radio Resource LCS Protocol (RRLP) | The 2G location detector |
 | TS 44.018 | GSM/EDGE RRC protocol | The transport framing RRLP arrives in |
 | TS 36.321 | E-UTRA Medium Access Control (MAC) | The random access response and its timing advance command, read by the timing-advance detector |
@@ -152,23 +151,23 @@ when a detector's behavior is questioned. Cite the clause, not just the document
 
 ## Human factors and documentation craft
 
-Not about cellular networks — about writing docs people can actually act on. These inform
+Not about cellular networks, about writing docs people can actually act on. These inform
 [the writing standards](../STYLE.md) rather than the technical content.
 
-- Procida, D. **Diátaxis.** <https://diataxis.fr/> — the four documentation modes and why
+- Procida, D. **Diátaxis.** <https://diataxis.fr/>, the four documentation modes and why
   mixing them makes both halves worse.
-- Sweller, J., Ayres, P., Kalyuga, S. **Cognitive Load Theory.** Springer, 2011 — why
+- Sweller, J., Ayres, P., Kalyuga, S. **Cognitive Load Theory.** Springer, 2011, why
   dumping everything on one page teaches less than staging it.
-- Mayer, R. E. **Multimedia Learning.** 3rd ed., Cambridge, 2020 — signaling, segmenting,
+- Mayer, R. E. **Multimedia Learning.** 3rd ed., Cambridge, 2020, signaling, segmenting,
   and pre-training principles, applied here to diagrams and to teaching vocabulary before
   process.
 - Carroll, J. M. **The Nurnberg Funnel: Designing Minimalist Instruction for Practical
-  Computer Skill.** MIT Press, 1990 — action-oriented documentation and designing for error
+  Computer Skill.** MIT Press, 1990, action-oriented documentation and designing for error
   recovery.
 - Lee, J. D., See, K. A. "Trust in Automation: Designing for Appropriate Reliance."
-  *Human Factors* 46(1), 2004, 50–80 — the framework behind
+  *Human Factors* 46(1), 2004, 50–80, the framework behind
   [Reading Warnings Without Panicking](./concepts/interpreting-warnings.md). Appropriate
   reliance, not maximum trust, is the goal.
 - Parasuraman, R., Riley, V. "Humans and Automation: Use, Misuse, Disuse, Abuse."
-  *Human Factors* 39(2), 1997, 230–253 — why users abandon detectors that cry wolf, and why
+  *Human Factors* 39(2), 1997, 230–253, why users abandon detectors that cry wolf, and why
   false-positive honesty in our detector pages is a safety feature rather than a weakness.

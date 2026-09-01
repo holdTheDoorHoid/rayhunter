@@ -8,7 +8,7 @@ choices than the 4G towers around it.
 A High warning that a tower ranked an old network above nearby 4G. It appears
 among a recording's warnings and turns the device status line to the warning
 colour. Unlike a redirect, nothing visible happens on your phone at the moment
-this fires — the tower is broadcasting misleading directions, and an idle phone
+this fires, the tower is broadcasting misleading directions, and an idle phone
 may act on them later without any single visible event.
 
 ## Why it matters
@@ -20,7 +20,7 @@ phones nearby use that list to decide which network to prefer. Recall from
 are unencrypted and carry no signature, so anyone with the right equipment can
 transmit their own. Advertising weak 2G or 3G networks as the *preferred*
 choice is a way to herd many idle phones down onto a network where they can be
-intercepted — without ever sending a message to any particular phone. A
+intercepted, without ever sending a message to any particular phone. A
 properly configured tower ranks its modern 4G neighbours highest.
 [Downgrading You to Weaker Networks](../concepts/attack-downgrade.md) is the
 full picture; this detector watches the broadcast-priority form of it.
@@ -40,8 +40,8 @@ full picture; this detector watches the broadcast-priority form of it.
 This detector has a specific history worth knowing, because it is a case of the
 honesty this book asks for working as intended. **Earlier versions raised many
 false alarms.** The current version (2) is stricter: it separates a true
-inversion — an old network ranked *above a 4G neighbour that is actually
-present* — from the much weaker case of a tower that advertises old neighbours
+inversion, an old network ranked *above a 4G neighbour that is actually
+present*, from the much weaker case of a tower that advertises old neighbours
 but lists no 4G neighbour at all. The first still warns at High; the second is
 now only an informational note, because a cell with no 4G neighbours to list is
 not necessarily doing anything wrong. That change removed a large source of
@@ -94,7 +94,7 @@ toggles.
 
 - **The heuristic.** Derived from heuristic T7 in Shinjo Park's "Why We Cannot
   Win," cited in the detector source. Background on downgrade attacks is in
-  EFF's white paper and 2023 post — [Sources and Further
+  EFF's white paper and 2023 post, [Sources and Further
   Reading](../references.md).
 - **The protocol.** 3GPP TS 36.331 (E-UTRA RRC): System Information Blocks and
   the cell-reselection priorities carried in SIB3, SIB5 (LTE), SIB6 (3G) and

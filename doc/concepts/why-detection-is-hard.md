@@ -8,14 +8,14 @@ broken. It may be telling the truth about a hard problem.
 This page explains the four reasons catching a cell-site simulator is hard,
 none of which is a flaw in any particular tool. They are properties of the
 situation itself. Understanding them is what makes the difference between
-trusting Rayhunter too much and trusting it about the right amount — which is
+trusting Rayhunter too much and trusting it about the right amount, which is
 the whole subject of the next page,
 [Reading Warnings Without Panicking](./interpreting-warnings.md).
 
 ## What you would see
 
 The symptom of these difficulties, in daily use, is warnings that are real
-signals but not proof — and quiet stretches that are reassuring but not a
+signals but not proof, and quiet stretches that are reassuring but not a
 guarantee. Both are honest outputs of a hard problem, and both are
 misread often if you do not know why they look the way they do.
 
@@ -29,7 +29,7 @@ research on detection apps names both failure modes directly, and they are the
 reason this page comes before you read a single warning in anger.
 
 The goal is not maximum suspicion or maximum trust. It is *appropriate*
-trust — believing the tool exactly as much as its evidence supports on that
+trust, believing the tool exactly as much as its evidence supports on that
 occasion. Getting there requires knowing what stands in the way.
 
 ## How it works
@@ -37,7 +37,7 @@ occasion. Getting there requires knowing what stands in the way.
 ### One: a passive tool sees only its own mail
 
 Rayhunter is on the network as an ordinary device, and it watches what the
-network sends *to it*. That is its great virtue — it is cheap, silent, carries
+network sends *to it*. That is its great virtue, it is cheap, silent, carries
 no risk of transmitting anything, and cannot itself be easily detected. It is
 also a hard limit. Rayhunter does not see what a tower says to the phone next
 to yours, cannot observe a device that is only listening and never transmits,
@@ -52,7 +52,7 @@ To know for certain how good a detector is, you would need a list of where and
 when cell-site simulators actually operated, to check its warnings against.
 No such list exists. These deployments are secret by design. The richest
 public knowledge of how, say, US government agencies use them comes from
-leaked documents, public-records requests, and things surfaced in court — not
+leaked documents, public-records requests, and things surfaced in court, not
 from any published registry (the SeaGlass project makes exactly this point
 about why distributed detection is needed at all;
 [Sources and Further Reading](../references.md)).
@@ -66,7 +66,7 @@ saying so plainly is more useful than inventing a number.
 
 ### Three: honest networks look guilty all the time
 
-The detectors work by spotting artifacts — the traces a catcher tends to
+The detectors work by spotting artifacts, the traces a catcher tends to
 leave. But real networks, run by real people under real budget and coverage
 pressure, produce many of the same traces without any ill intent. Towers are
 misconfigured. Old equipment behaves oddly. A phone reconnecting after a
@@ -84,7 +84,7 @@ weaker and more truthful claim.
 
 The people who operate these devices can read this documentation too. Once a
 detection method is public, a well-resourced operator can adjust to avoid the
-artifact it keys on — behave a little more like a normal network, skip the
+artifact it keys on, behave a little more like a normal network, skip the
 step that gives them away. Detection and evasion push against each other over
 time, and a method that worked well last year may be quietly worked around
 this year. This is not a reason for despair; it is a reason not to read silence
@@ -118,7 +118,7 @@ Rayhunter warning.
   of evidence.
 - **The disagreement finding** is Park et al., "White-Stingray," USENIX WOOT
   2017; **the deviation-from-normal method and the secrecy of deployment data**
-  are Ney et al., "SeaGlass," PoPETs 2017 — both in
+  are Ney et al., "SeaGlass," PoPETs 2017, both in
   [Sources and Further Reading](../references.md). The framing of appropriate
   trust over maximum trust comes from the human-factors literature cited there
   (Lee & See, 2004).

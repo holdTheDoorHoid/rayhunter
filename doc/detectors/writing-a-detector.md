@@ -6,7 +6,7 @@ cleanly at each step, and states the evidence a detector needs before its page
 can honestly describe it.
 
 It assumes you have read [How We Validate Detectors](./validation.md), because
-the test-vector expectation at the end is not optional — it is the difference
+the test-vector expectation at the end is not optional, it is the difference
 between a detector this book can stand behind and one it cannot.
 
 ## Before you write code
@@ -14,7 +14,7 @@ between a detector this book can stand behind and one it cannot.
 A detector is a safety claim. Two things are worth settling first:
 
 - **What message carries the evidence, and can Rayhunter see it?** Rayhunter
-  reads the control messages its own modem logged — LTE RRC and NAS, and now 2G
+  reads the control messages its own modem logged, LTE RRC and NAS, and now 2G
   Layer 3 bytes. If your signal lives somewhere Rayhunter does not parse, the
   work starts there, not in a new analyzer.
 - **What is the honest false-positive story?** If you cannot describe when your
@@ -27,12 +27,12 @@ A detector is a safety claim. Two things are worth settling first:
 Every detector implements one trait, `Analyzer`, defined in
 `lib/src/analysis/analyzer.rs`. It has four methods:
 
-- `get_name` — a short, human name.
-- `get_description` — what it looks for, the events it can raise, and its
+- `get_name`, a short, human name.
+- `get_description`, what it looks for, the events it can raise, and its
   false-positive conditions.
-- `analyze_information_element` — the heart of it: given one parsed message (an
+- `analyze_information_element`, the heart of it: given one parsed message (an
   `InformationElement`) and its packet number, optionally return an `Event`.
-- `get_version` — a number you increase whenever you materially change the
+- `get_version`, a number you increase whenever you materially change the
   heuristic, so old and new reports can be told apart.
 
 An `Event` carries a severity (`EventType`: `Informational`, `Low`, `Medium`,
@@ -54,7 +54,7 @@ your detector needs to be seen, its meaningful events must be at least `Low`.
 
 3. **Add a config switch.** In `AnalyzerConfig` (in `analyzer.rs`), add a
    `pub my_detector: bool` field, and set its default in the `Default` impl.
-   Default to `true` for a real detector — the config test
+   Default to `true` for a real detector, the config test
    `analyzers_missing_from_an_old_config_default_on` checks that a detector
    absent from an older config file comes up enabled, so an update never
    silently disables one.
@@ -81,7 +81,7 @@ your detector needs to be seen, its meaningful events must be at least `Low`.
    (see [Your First Warning](../first-warning.md)) and is part of its
    validation.
 
-8. **Write the tests.** Covered next — this is the part that cannot be skipped.
+8. **Write the tests.** Covered next, this is the part that cannot be skipped.
 
 ## The test-vector expectation
 
@@ -99,7 +99,7 @@ The pattern the existing location detectors follow:
   relevant 3GPP specifications), and round-trip each through that
   implementation's own decoder before trusting it.
 - Check the encoded bytes in as hex constants in your analyzer's test module.
-  The encoder itself stays an offline, throwaway tool — not a runtime
+  The encoder itself stays an offline, throwaway tool, not a runtime
   dependency.
 - Only decode fields by hand that sit at a fixed offset, with no
   variable-length content in front of them, and stop at the first field you
@@ -109,8 +109,8 @@ The pattern the existing location detectors follow:
   detector never panics. Some of this traffic is attacker-shaped; robustness is
   part of correctness.
 
-If your detector cannot yet be tested against real captures — which is true of
-several here, because the test devices see only LTE — that is acceptable, but its
+If your detector cannot yet be tested against real captures, which is true of
+several here, because the test devices see only LTE, that is acceptable, but its
 page must say so plainly. It cannot claim real-world validation it does not have.
 
 ## Keep the docs in step
@@ -125,12 +125,12 @@ should say so:
   §6](../../STYLE.md) seven-heading template, plus a row in the [detector
   reference table](./index.md) and an entry in `SUMMARY.md`. Because the book
   sets `create-missing = false`, a `SUMMARY.md` link with no file fails the
-  build — so the page and the summary entry land together.
+  build, so the page and the summary entry land together.
 
 ## Where to next
 
-- [How We Validate Detectors](./validation.md) — the evidence standard in full.
-- [Detector Reference](./index.md) — the existing detectors as worked examples;
+- [How We Validate Detectors](./validation.md), the evidence standard in full.
+- [Detector Reference](./index.md), the existing detectors as worked examples;
   the LPP and RRLP sources are the model for reference-vector testing.
-- [How Detection Works](../heuristics.md) — the shared background on how messages
+- [How Detection Works](../heuristics.md), the shared background on how messages
   reach an analyzer.

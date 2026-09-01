@@ -18,7 +18,7 @@ this detector stays silent.
 
 Being [pushed onto 2G](../concepts/attack-downgrade.md) is itself a known
 surveillance move, because 2G's protections are weak. Once a phone is there,
-this older location protocol is how it can be pinpointed — the 2G ancestor of
+this older location protocol is how it can be pinpointed, the 2G ancestor of
 the modern positioning protocol covered in [Location Requested (LPP)](./lpp.md).
 Watching for it means a switch to 2G followed by a location request does not go
 unnoticed. The two location detectors are companions: the same concern applies
@@ -38,8 +38,7 @@ Two honesty notes matter more than the list, and they pull in opposite
 directions:
 
 - **It has never been seen against real 2G traffic.** The fork's test devices
-  are LTE-only and do not produce 2G RRLP messages to capture, so this detector
-  — though carefully built and tested against reference encodings — is the least
+  are LTE-only and do not produce 2G RRLP messages to capture, so this detector, though carefully built and tested against reference encodings, is the least
   exercised-in-the-wild of them all. Treat a warning as a real but entirely
   unproven-in-practice signal.
 - **A false positive cannot come from a wrong guess about the message type
@@ -92,7 +91,7 @@ misidentification-only false positive impossible.
   change underneath this detector: the internal representation of a 2G message
   now carries its raw bytes, where before it was an empty placeholder. Any
   future 2G detector builds on that.
-- **Validation — stated plainly.** The 2G transport framing was verified against
+- **Validation, stated plainly.** The 2G transport framing was verified against
   pycrate_mobile's implementation of 3GPP TS 44.018, and the location-message
   front against pycrate's 3GPP TS 44.031, both as round-tripped test vectors. A
   truncation sweep confirms malformed input never crashes the detector, and a
@@ -110,7 +109,7 @@ a device that never uses 2G it costs nothing, staying silent.
 ## Sources
 
 - **The exposure.** Shaik et al., NDSS 2016, and EFF's white paper on
-  measurement reports — [Sources and Further Reading](../references.md).
+  measurement reports, [Sources and Further Reading](../references.md).
 - **The protocol.** 3GPP TS 44.031 (Radio Resource LCS Protocol, RRLP): the
   location message this detector reads. 3GPP TS 44.018 (GSM/EDGE RRC): the
   Application Information message that carries RRLP on 2G.

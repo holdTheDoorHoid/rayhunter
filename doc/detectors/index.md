@@ -6,7 +6,7 @@ Work](../concepts/attacks.md). This page lists every one of them in a single
 table, and then explains the column that matters most: how thoroughly each has
 actually been tested.
 
-Each detector has its own page with the full picture — what it watches for,
+Each detector has its own page with the full picture, what it watches for,
 when it fires harmlessly, and how it works. Start here to see the whole set and
 decide which pages to read; follow a link for the detail.
 
@@ -18,8 +18,7 @@ detectors here have been tested to genuinely different depths. This book marks
 three levels, and uses them plainly:
 
 - **Reference-encoder vectors.** The detector was checked against messages
-  produced by an independent, authoritative implementation of the protocol —
-  strong evidence that it reads the bytes correctly, and in one case this
+  produced by an independent, authoritative implementation of the protocol, strong evidence that it reads the bytes correctly, and in one case this
   caught a real one-bit error during development. It is **not** evidence that
   the detector behaves well on a live network, which produces messier and more
   varied traffic than any encoder.
@@ -27,7 +26,7 @@ three levels, and uses them plainly:
   demonstration scenarios or hand-built test messages, which confirm the
   pipeline works end to end but are made by the same project that wrote the
   detector.
-- **Real traffic — status not established here.** Several detectors were
+- **Real traffic, status not established here.** Several detectors were
   inherited from the upstream project and have real-world history there, but
   this repository does not record a specific real-capture validation, so this
   book does not claim one. Where that is the case, the detector's page says so
@@ -73,12 +72,12 @@ Notes on reading the table:
 
 ## The fork's additions
 
-Four of the detectors above — the two LPP location detectors, the RRLP one, and
-the timing-advance check — are additions in this fork of Rayhunter and are not
+Four of the detectors above, the two LPP location detectors, the RRLP one, and
+the timing-advance check, are additions in this fork of Rayhunter and are not
 present upstream. They are also the ones carrying the "never confirmed against
 real traffic" caveat, which is not a coincidence: they are new, and newly
 written code watching for something the project's own test devices cannot
-readily produce (a live location request, or — for timing advance — a real
+readily produce (a live location request, or, for timing advance, a real
 distance jump the Orbic cannot even measure). [What It
 Adds](../fork/features.md) lists the fork's changes as a whole, and each
 detector's page states its fork status and validation directly.

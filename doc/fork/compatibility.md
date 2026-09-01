@@ -1,7 +1,7 @@
 # Compatibility With Upstream
 
-If you are moving between this fork and upstream Rayhunter — in either direction,
-or in a hurry — this is the page to read first. It is precise on purpose. The
+If you are moving between this fork and upstream Rayhunter, in either direction,
+or in a hurry, this is the page to read first. It is precise on purpose. The
 short answer: **your raw recordings and your config are safe to move both ways;
 the analysis report format is the one thing to handle deliberately, and
 re-analysing a recording sidesteps it entirely.**
@@ -9,9 +9,8 @@ re-analysing a recording sidesteps it entirely.**
 ## The one-paragraph version
 
 Raw recordings are a standard format and move freely between versions. Config
-files do not error in either direction — each version ignores settings it does
-not recognise and fills in defaults for settings it expects but does not find —
-though settings unique to one version are lost if the other saves the file. The
+files do not error in either direction, each version ignores settings it does
+not recognise and fills in defaults for settings it expects but does not find, though settings unique to one version are lost if the other saves the file. The
 analysis report has a version number, and this fork writes a newer version than
 upstream; because the raw recording is portable and re-analysis is cheap, the
 safe move when switching is to **re-analyse the recording on whichever version
@@ -19,8 +18,8 @@ you are running** rather than relying on the report file to carry over.
 
 ## Recordings (raw captures)
 
-**Fully compatible both ways.** The raw capture files — the `.qmdl` diagnostic
-recording and the `.pcap` packet capture — are standard formats and are not the
+**Fully compatible both ways.** The raw capture files, the `.qmdl` diagnostic
+recording and the `.pcap` packet capture, are standard formats and are not the
 fork's invention. A recording made on either version can be opened, analysed, or
 inspected on the other, and in external tools like Wireshark. Moving the raw
 recording is always safe.
@@ -28,7 +27,7 @@ recording is always safe.
 One fork addition to note: this fork records 2G and 3G signalling into the
 capture where upstream historically dropped it. A capture made here may therefore
 contain more than an upstream one would, but nothing that makes it unreadable
-upstream — the extra messages are standard, only present.
+upstream, the extra messages are standard, only present.
 
 ## Configuration files
 
@@ -37,7 +36,7 @@ both versions read it the same forgiving way:
 
 - **Fork reading an upstream config:** any setting the upstream file does not
   mention comes up at the fork's default. Detectors absent from an older file
-  come up **on**, not off, so an upgrade never silently disables one — this is
+  come up **on**, not off, so an upgrade never silently disables one, this is
   covered by a test in the fork.
 - **Upstream reading a fork config:** settings unique to this fork (custom
   display colours, keep-screen-on, web accounts, rotation, and the rest) are not
@@ -87,9 +86,9 @@ rest is either portable or regenerable.
 
 ## Where to next
 
-- [Re-analyzing Recordings](../reanalyzing.md) — how to regenerate a report on
+- [Re-analyzing Recordings](../reanalyzing.md), how to regenerate a report on
   the current version.
-- [Configuration Reference](../configuration-reference.md) — which config keys
+- [Configuration Reference](../configuration-reference.md), which config keys
   are fork-specific.
-- [The Packet Explorer](../packet-explorer.md) — the feature behind the report
+- [The Packet Explorer](../packet-explorer.md), the feature behind the report
   format bump.

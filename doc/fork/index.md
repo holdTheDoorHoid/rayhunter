@@ -1,7 +1,7 @@
 # Why This Fork Exists
 
 Rayhunter is a project of the Electronic Frontier Foundation. This book
-documents a *fork* of it — a version that carries a set of additional features
+documents a *fork* of it, a version that carries a set of additional features
 on top of EFF's, maintained separately for now. This page explains what that
 means for you and why the fork exists, so you can decide whether it is the
 version you want.
@@ -15,8 +15,8 @@ here is a complaint about it.
 
 This fork exists because, in the course of using and developing Rayhunter, its
 maintainer built a number of features that were useful enough to want all at
-once — improvements to the web interface, the device display, the recordings,
-and the detectors — faster than any single feature could work its way through
+once, improvements to the web interface, the device display, the recordings,
+and the detectors, faster than any single feature could work its way through
 upstream review. Rather than wait, the fork carries them together, while each
 one is offered back to upstream individually on its own merits.
 
@@ -53,14 +53,14 @@ depend on this fork:
   [Differences You Will Notice](./differences.md) say so.
 - **The added detectors carry their own caveats.** The location-tracking
   detectors that are unique to this fork have not been confirmed against real
-  network traffic — a limitation documented on each detector page and in [How We
+  network traffic, a limitation documented on each detector page and in [How We
   Validate Detectors](../detectors/validation.md). They are a genuine addition,
   and an unproven-in-the-wild one, and this book will not pretend otherwise.
 
 ## Where to next
 
-- [What It Adds](./features.md) — the features, grouped by goal.
-- [Differences You Will Notice](./differences.md) — what changes if you are
+- [What It Adds](./features.md), the features, grouped by goal.
+- [Differences You Will Notice](./differences.md), what changes if you are
   coming from upstream Rayhunter.
-- [Compatibility With Upstream](./compatibility.md) — configs, recordings, and
+- [Compatibility With Upstream](./compatibility.md), configs, recordings, and
   whether you can switch back.

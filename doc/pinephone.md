@@ -49,7 +49,7 @@ adb forward tcp:8080 tcp:8080
 ```
 
 The forward belongs to the adb connection to the modem, so it is dropped whenever that connection
-is re-established — for example after the modem resets. When this happens `adb devices` still lists
+is re-established, for example after the modem resets. When this happens `adb devices` still lists
 the modem and Rayhunter keeps recording, but the web UI stops answering. Re-run the `adb forward`
 command to get it back:
 
@@ -76,7 +76,7 @@ The modem won't be able to sleep (power save) with adb enabled, even if Rayhunte
 ## Toggling adb resets the modem
 
 Both `pinephone-start-adb` and `pinephone-stop-adb` change the modem's USB composition with
-`AT+QCFG="usbcfg"`, and the modem resets whenever that value is written — even if the requested
+`AT+QCFG="usbcfg"`, and the modem resets whenever that value is written, even if the requested
 composition is the one already in use. The modem then needs roughly a minute to boot, during which
 the phone has **no cellular service**.
 

@@ -2,7 +2,7 @@
 
 Every specialised term this book uses, defined in one or two plain sentences.
 Where a term has a plain phrase and a piece of jargon, the plain phrase comes
-first and the jargon follows in parentheses — the way the rest of the book
+first and the jargon follows in parentheses, the way the rest of the book
 introduces them.
 
 Terms are alphabetical by their plain name. Acronyms are cross-referenced to the
@@ -36,8 +36,7 @@ See [tower](#tower).
 
 ### broadcast messages
 
-The announcements every [tower](#tower) transmits continuously about itself —
-which carrier it belongs to, its neighbours, and how to connect. They are
+The announcements every [tower](#tower) transmits continuously about itself, which carrier it belongs to, its neighbours, and how to connect. They are
 unencrypted and carry no signature, so anyone can listen to them and anyone with
 the right equipment can transmit imitations. Carried in numbered blocks called
 [System Information Blocks](#system-information-block-sib).
@@ -62,8 +61,8 @@ three names as the same thing.
 
 ### downgrade
 
-Being moved from a modern network onto an older, weaker one — usually
-[2G](#generations-2g-3g-4g-5g) — where protections are absent or breakable.
+Being moved from a modern network onto an older, weaker one, usually
+[2G](#generations-2g-3g-4g-5g), where protections are absent or breakable.
 Often the setup for [turning off encryption](#null-cipher) or reading traffic.
 
 ### E-CID (Enhanced Cell ID)
@@ -122,7 +121,7 @@ Equipment Identity.
 
 The permanent, globally unique number identifying your SIM card. It does not
 change, so anyone who records it can recognise you again anywhere. This is the
-number a [cell-site simulator](#cell-site-simulator) exists to collect — hence
+number a [cell-site simulator](#cell-site-simulator) exists to collect, hence
 "IMSI catcher." Full name: International Mobile Subscriber Identity.
 
 ### IMSI catcher
@@ -142,8 +141,7 @@ See [generations](#generations-2g-3g-4g-5g); LTE is 4G.
 
 ### NAS (the core-network conversation)
 
-The stream of control messages between your phone and the carrier's core network
-— attach, identity, authentication, and so on — as opposed to the messages
+The stream of control messages between your phone and the carrier's core network, attach, identity, authentication, and so on, as opposed to the messages
 between your phone and the local tower ([RRC](#rrc-the-tower-conversation)).
 Rayhunter reads both. Full name: Non-Access Stratum.
 
@@ -190,8 +188,7 @@ priorities is one form of [downgrade](#downgrade). Contrast
 
 ### RRC (the tower conversation)
 
-The stream of control messages between your phone and the local [tower](#tower) —
-setting up the radio link, security, and handovers — as opposed to the
+The stream of control messages between your phone and the local [tower](#tower), setting up the radio link, security, and handovers, as opposed to the
 conversation with the core network ([NAS](#nas-the-core-network-conversation)).
 Full name: Radio Resource Control.
 
@@ -225,7 +222,7 @@ See [cell-site simulator](#cell-site-simulator).
 ### System Information Block (SIB)
 
 One of the numbered [broadcast](#broadcast-messages) blocks a tower transmits,
-each carrying a defined slice of its announcement — identity, neighbours,
+each carrying a defined slice of its announcement, identity, neighbours,
 reselection priorities. SIB6 and SIB7 carry 3G and 2G neighbour priorities, which
 the [downgrade detector](./detectors/priority-2g-downgrade.md) reads.
 
@@ -238,7 +235,7 @@ Mobile Subscriber Identity.
 
 ### tower
 
-The carrier equipment — radios and antennas — that serves one [cell](#cell) of
+The carrier equipment, radios and antennas, that serves one [cell](#cell) of
 coverage and that your phone talks to directly. The technical term is *base
 station* (an *eNodeB* on 4G). This book says "tower" throughout.
 

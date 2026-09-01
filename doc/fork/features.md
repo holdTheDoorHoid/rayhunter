@@ -11,14 +11,13 @@ Notice](./differences.md).
 ## Detecting more
 
 - **Location-request detectors (LPP).** Warn when the network asks your device
-  to measure and report its position, and — in more depth — when it asks for
+  to measure and report its position, and, in more depth, when it asks for
   *continuous* tracking. See [Location Requested (LPP)](../detectors/lpp.md).
 - **2G location detector (RRLP).** The same for the older 2G network your phone
   can fall back to, and the first thing in Rayhunter to read 2G signalling at
   all. See [Location Requested on 2G (RRLP)](../detectors/rrlp.md).
 - **Timing-advance impersonation check.** Notices when one cell identity answers
-  from a markedly different distance, which a real (stationary) tower does not do
-  — silent on modems that do not report the measurement, the Orbic included. See
+  from a markedly different distance, which a real (stationary) tower does not do, silent on modems that do not report the measurement, the Orbic included. See
   [A Tower That Seems to Have Moved](../detectors/timing-advance.md).
 - **2G and 3G traffic recorded, not dropped.** Legacy signalling is written into
   the capture for inspection instead of discarded, and no longer counted as a
@@ -33,7 +32,7 @@ Notice](./differences.md).
   use, and detection health, shown live. See [The Web Interface, Panel by
   Panel](../web-interface.md).
 - **This device's own identity.** Optionally shows your device's own IMSI, IMEI
-  and temporary identity — off by default, because the interface has no
+  and temporary identity, off by default, because the interface has no
   password. See [The Web Interface, Panel by Panel](../web-interface.md) and
   [Securing the Web Interface](../web-authentication.md).
 - **Warning counts by severity, and system health.** Warnings broken out per
@@ -55,7 +54,7 @@ Notice](./differences.md).
   of time, so no single file grows too large to download. See
   [Recordings](../recordings.md).
 - **Auto-delete of clean recordings.** When space runs low, remove analysed
-  recordings that found nothing — never a named one. See
+  recordings that found nothing, never a named one. See
   [Recordings](../recordings.md).
 
 ## The device screen
@@ -63,8 +62,7 @@ Notice](./differences.md).
 - **Custom colours and status-line height.** Override the colour for each
   display state and how tall the status line is drawn. See [The Device
   Screen](../device-display.md).
-- **Keep the screen on.** Stop the device blanking its screen on its own timer —
-  never, always, or only while plugged in. See [The Device
+- **Keep the screen on.** Stop the device blanking its screen on its own timer, never, always, or only while plugged in. See [The Device
   Screen](../device-display.md).
 - **A button press to read the device's own screens.** Press a button and
   Rayhunter shrinks to its thin status line for twenty seconds, so the device's
@@ -75,12 +73,11 @@ Notice](./differences.md).
 
 ## Securing and controlling access
 
-- **Optional web accounts.** Put a password on the web interface — off by
+- **Optional web accounts.** Put a password on the web interface, off by
   default, so an update never locks anyone out. There is no HTTPS on these
   devices, so this is a second factor beyond the WiFi password, not a secure
   channel. See [Securing the Web Interface](../web-authentication.md).
-- **An optional web terminal.** Run a command on the device from the interface —
-  enabled only at install time, never from the interface itself. See
+- **An optional web terminal.** Run a command on the device from the interface, enabled only at install time, never from the interface itself. See
   [Configuration](../configuration.md).
 
 ## Appearance and layout
@@ -90,7 +87,7 @@ Notice](./differences.md).
 
 ## A note on status
 
-These features are at different stages of being offered to upstream — some
+These features are at different stages of being offered to upstream, some
 encouraged, some previously proposed and closed, some overlapping with another
 contributor's work. [Differences You Will Notice](./differences.md) and
 [Contributing Upstream](./upstreaming.md) record where each stands, so you know
@@ -98,7 +95,7 @@ which parts are likely to converge with upstream and which are not.
 
 ## Where to next
 
-- [Differences You Will Notice](./differences.md) — what a user of upstream
+- [Differences You Will Notice](./differences.md), what a user of upstream
   notices on switching.
-- [Compatibility With Upstream](./compatibility.md) — whether you can move
+- [Compatibility With Upstream](./compatibility.md), whether you can move
   between the two versions.

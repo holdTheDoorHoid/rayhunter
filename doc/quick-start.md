@@ -78,8 +78,7 @@ xattr -d com.apple.quarantine installer
 **Expected result:** the command prints nothing and returns to the prompt.
 (Linux and Windows users: skip this step.)
 
-*If it says "No such xattr":* the flag was already absent. That is fine —
-continue.
+*If it says "No such xattr":* the flag was already absent. That is fine, continue.
 
 ## Step 5: Run the installer
 
@@ -94,7 +93,7 @@ On Windows, run `.\installer.exe orbic --admin-password 'YOUR_PASSWORD'` in
 PowerShell (not the old Command Prompt, which treats quotes differently).
 
 Keep the quotes around the password. This step takes a couple of minutes, and
-the terminal will print several lines as it works — that is normal.
+the terminal will print several lines as it works, that is normal.
 
 **Expected result:** the installer prints progress and finishes with a message
 telling you it is done and that the device will reboot.
@@ -112,7 +111,7 @@ the unit restarts.
 ## Step 6: Wait for the reboot
 
 The Orbic restarts on its own. This takes up to a minute, during which the
-screen may go dark or show the manufacturer's startup — that is expected, not a
+screen may go dark or show the manufacturer's startup, that is expected, not a
 failure.
 
 **Expected result:** when it finishes starting up, a **green line flashes along
@@ -131,8 +130,7 @@ With your computer still on the Orbic's WiFi, open:
 http://192.168.1.1:8080
 ```
 
-Your browser will warn that the connection is not secure. That is expected —
-Rayhunter does not use HTTPS on the device — and you can safely continue past
+Your browser will warn that the connection is not secure. That is expected, Rayhunter does not use HTTPS on the device, and you can safely continue past
 the warning.
 
 **Expected result:** Rayhunter's web dashboard, showing a recording already in
@@ -140,7 +138,7 @@ progress and panels for the current status. This is the home base for everything
 else.
 
 *If the warning has no "continue anyway" option:* different browsers hide it
-differently — look for "Advanced," "Show details," or "visit this website."
+differently, look for "Advanced," "Show details," or "visit this website."
 *If the page does not load at all:* re-check that you are on the Orbic's WiFi and
 that you included `:8080` at the end of the address.
 

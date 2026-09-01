@@ -2,7 +2,7 @@
 
 When Rayhunter raises a warning, it attaches a severity: Low, Medium, or High.
 That label is the tool's own estimate of how much the finding is worth your
-attention — a first sort, so that a fleeting oddity and a serious signal do
+attention, a first sort, so that a fleeting oddity and a serious signal do
 not arrive looking identical. This page explains what each level is meant to
 convey, and one quiet design decision that changes how you should read a whole
 report.
@@ -19,19 +19,18 @@ device's status line changes colour to the most serious thing in the current
 recording. There are four levels in the underlying data, and the difference
 between the first and the rest is the important part:
 
-- **Informational** — a note, not a warning. It never raises an alert on the
+- **Informational**, a note, not a warning. It never raises an alert on the
   device.
-- **Low** — a weak signal. Worth recording, rarely worth acting on alone.
-- **Medium** — worth a closer look.
-- **High** — worth taking seriously and preserving.
+- **Low**, a weak signal. Worth recording, rarely worth acting on alone.
+- **Medium**, worth a closer look.
+- **High**, worth taking seriously and preserving.
 
 ## Why it matters
 
 Severity exists so that attention can be spent well. Most of what Rayhunter
 records is either routine or a weak signal; a smaller amount deserves real
 scrutiny. Without a grading, every entry would compete equally for your alarm,
-and the genuinely serious findings would be buried under the ordinary ones —
-the "cries wolf" failure that makes people stop reading warnings at all, which
+and the genuinely serious findings would be buried under the ordinary ones, the "cries wolf" failure that makes people stop reading warnings at all, which
 [Why Detection Is Hard](./concepts/why-detection-is-hard.md) describes.
 
 But severity is Rayhunter's guess, made from the single message or pattern in
@@ -43,7 +42,7 @@ how to raise or lower it with what you know.
 ## What each level is meant to convey
 
 - **High.** A pattern that has few innocent explanations and maps closely to a
-  known attack — an identity taken without the network proving itself,
+  known attack, an identity taken without the network proving itself,
   encryption switched off, a forced move to 2G. High is the tool saying: if
   this is what it looks like, it is serious. Preserve the recording and read it
   carefully.
@@ -51,13 +50,12 @@ how to raise or lower it with what you know.
   explanations than a High one, or that is serious only in combination. The
   continuous-location-tracking signal sits here. Medium is: look closer, gather
   context, do not yet conclude.
-- **Low.** A weak signal — something worth having in the record, that on its
+- **Low.** A weak signal, something worth having in the record, that on its
   own is more likely ordinary than not. A single low-severity event is the most
   common thing Rayhunter produces and the least likely to be an attack. Low is:
   noted; watch for it recurring or combining with something else.
-- **Informational.** Not a warning at all. Context written into the recording —
-  the [identity-exposure diary](./detectors/imsi-requested.md) entries, routine
-  positioning chatter, capability exchanges — that means little alone but helps
+- **Informational.** Not a warning at all. Context written into the recording, the [identity-exposure diary](./detectors/imsi-requested.md) entries, routine
+  positioning chatter, capability exchanges, that means little alone but helps
   explain a real warning nearby. Informational events never change the device's
   status and never sound an alert.
 
@@ -80,7 +78,7 @@ The consequence has two sides:
   like this by nature, and it is why their notes show up next to warnings and
   never by themselves.
 
-This is a deliberate choice to keep reports readable — a recording can contain
+This is a deliberate choice to keep reports readable, a recording can contain
 enormous amounts of routine signalling, and writing all of it would bury the
 findings. But it means "absence from the report" is not the same as "did not
 happen," a distinction that matters when you are trying to reconstruct what

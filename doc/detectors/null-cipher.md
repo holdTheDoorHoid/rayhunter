@@ -4,7 +4,7 @@ Watches for a tower asking your phone to communicate with no encryption at all.
 
 ## What you would see
 
-A High warning that the tower proposed a null cipher — that it asked your phone
+A High warning that the tower proposed a null cipher, that it asked your phone
 to talk to it with the encryption turned off. It appears among a recording's
 warnings and turns the device status line to the warning colour. Nothing shows
 on your phone itself: there is no open-padlock icon for an unencrypted cellular
@@ -15,7 +15,7 @@ connection the way a browser warns about an insecure page.
 Everything your phone sends over the air travels through open space where a
 listener with the right radio can pick it up; encryption is what turns that
 into noise. A tower proposing *no* encryption is asking for the noise to be
-plain speech again — for the conversation between your phone and it to be
+plain speech again, for the conversation between your phone and it to be
 readable by whoever operates it. Real networks essentially never do this
 outside a test lab. A fake tower does it as a matter of course, because it does
 not hold the cryptographic keys real encryption would require, and proposing
@@ -90,7 +90,7 @@ Enabled by default. The key is `null_cipher` under `[analyzers]`, or the
 ## Sources
 
 - **The mechanism.** EFF's white paper *Gotta Catch 'Em All*, on how catchers
-  deal with encryption — [Sources and Further Reading](../references.md).
+  deal with encryption, [Sources and Further Reading](../references.md).
 - **The protocol.** 3GPP TS 33.401 (SAE security architecture): which ciphering
   and integrity algorithms are permitted, including the null algorithm EEA0 and
   the narrow circumstances it is meant for. 3GPP TS 36.331 (E-UTRA RRC): the

@@ -5,7 +5,7 @@ has already been verified.
 
 ## What you would see
 
-A High warning that the core network requested a null cipher — that the
+A High warning that the core network requested a null cipher, that the
 operator's network, not the local tower, asked for encryption to be switched
 off. It appears among a recording's warnings and turns the device status line
 to the warning colour. As with the radio-layer check, nothing shows on your
@@ -18,7 +18,7 @@ is worth understanding. The [radio-layer null cipher](./null-cipher.md) is the
 ordinary fake-tower move: a nearby impostor with no keys proposes no encryption
 because that is the only path it has. This warning is different. It fires on
 encryption being switched off **at the core-network layer, after your phone has
-already proven its identity** — and reaching that point means whoever is doing
+already proven its identity**, and reaching that point means whoever is doing
 it holds genuine cryptographic key material for your SIM, which an ordinary
 fake tower cannot obtain.
 
@@ -39,7 +39,7 @@ Encryption](../concepts/attack-encryption.md) develops the two-layer picture.
   warning with that in mind.
 
 Both causes are rare, which is part of why this warning is weighted as
-seriously as it is — but "rare" is not "never," and this repository records no
+seriously as it is, but "rare" is not "never," and this repository records no
 measured false-positive rate for it. A warning here is a strong and unusual
 signal to preserve and, if your situation warrants, to get expert eyes on;
 [Reading Warnings Without Panicking](../concepts/interpreting-warnings.md) and
@@ -53,8 +53,8 @@ phone and the tower, and the deeper conversation between your phone and the
 carrier's core network, which passes through the tower. Each level has its own
 setup step, and each recognises a "no encryption" option.
 
-This detector reads the core-network setup step — the point where the core
-tells your phone which encryption to use for their conversation — and checks
+This detector reads the core-network setup step, the point where the core
+tells your phone which encryption to use for their conversation, and checks
 whether the method named is the null one. It exists separately from the
 radio-layer check because these are two different negotiations at two different
 layers, and null encryption at the deeper one carries the graver implication
@@ -66,8 +66,7 @@ disabled but *where*, which is most of what makes the finding readable.
 - **Code identifier:** `nas_null_cipher`.
 - **Source:** `lib/src/analysis/nas_null_cipher.rs`; analyzer version 1.
 - **Severity:** High. The greater seriousness relative to the radio-layer check
-  is in what it implies — real key material or a signalling-network attack —
-  not in a higher number; both are High.
+  is in what it implies, real key material or a signalling-network attack, not in a higher number; both are High.
 - **What it inspects:** the NAS *Security Mode Command* (the core network's
   encryption-setup message), for the null ciphering algorithm EEA0.
 - **Deduplication:** none; each qualifying message is evaluated on its own.
@@ -87,7 +86,7 @@ Enabled by default. The key is `nas_null_cipher` under `[analyzers]`, or the
 ## Sources
 
 - **The mechanism.** EFF's white paper *Gotta Catch 'Em All*, on how catchers
-  deal with encryption — [Sources and Further Reading](../references.md).
+  deal with encryption, [Sources and Further Reading](../references.md).
 - **The protocol.** 3GPP TS 33.401 (SAE security architecture): the permitted
   algorithms including the null cipher EEA0. 3GPP TS 24.301 (NAS for EPS): the
   Security Mode Command this detector reads.

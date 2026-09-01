@@ -5,7 +5,7 @@ does this mean someone is after me?
 
 The honest answer is that a single warning almost never means that on its own,
 and this page is here to help you get from the warning to a fair judgement of
-what it is worth — without talking yourself into a certainty the evidence does
+what it is worth, without talking yourself into a certainty the evidence does
 not support, and without dismissing something that deserves a second look.
 Both of those mistakes are common, and both do real harm. Someone who reads
 every warning as proof of targeting may abandon a phone they needed or make a
@@ -53,7 +53,7 @@ almost everyone the first time.
 ### A worked example
 
 Suppose you are in a city with a lot of phones and very few cell-site
-simulators. Let us put numbers on it — round ones, chosen to make the
+simulators. Let us put numbers on it, round ones, chosen to make the
 arithmetic clear, not because they are measured:
 
 - Imagine **10,000** connection sequences your device might see over some
@@ -67,7 +67,7 @@ Now suppose the detector is **good**:
 - It catches **90%** of real attacks. So of the 10 real ones, it flags
   **9**. (It misses 1.)
 - It has a **low** false-alarm rate: it wrongly flags only **1%** of ordinary
-  sequences. One percent sounds small — but 1% of 9,990 is about **100**
+  sequences. One percent sounds small, but 1% of 9,990 is about **100**
   false alarms.
 
 So the detector raises about **9 + 100 = 109** warnings. Of those, only **9**
@@ -76,7 +76,7 @@ are real. Work out the share that are true:
 > 9 real ÷ 109 total ≈ **8%.**
 
 **About 8 warnings in 100 point at a real attack, and the other 92 are
-something else — with a detector that is 90% sensitive and only 1% wrong.**
+something else, with a detector that is 90% sensitive and only 1% wrong.**
 That is the base-rate effect. When the thing you are hunting is rare, even a
 strong detector produces far more false alarms than true ones, because there
 is so much more ordinary traffic for the small error rate to act on.
@@ -87,12 +87,12 @@ point:
 - **A single warning, in a low-risk setting, is probably not an attack.** Do
   not panic at one.
 - **The warning still moved the odds.** Before it, your chance was 1 in 1,000.
-  After it, roughly 1 in 12. The warning is not nothing — it is a reason to
+  After it, roughly 1 in 12. The warning is not nothing, it is a reason to
   look closer, gather more, and raise your attention. It is not, by
   itself, a conclusion.
 
-And if you are somewhere real attacks are genuinely more likely — a targeted
-protest, a border, a place with a known history — the base rate rises and so
+And if you are somewhere real attacks are genuinely more likely (a targeted
+protest, a border, a place with a known history), the base rate rises and so
 does the share of warnings that are real. The same warning means more there
 than it does on your sofa. Context is not a detail; it is most of the answer.
 
@@ -105,13 +105,13 @@ these, when present, makes a real attack a better explanation:
   particular spot is harder to explain as random misconfiguration than a
   one-off.
 - **Several independent detectors firing together.** An identity request *and*
-  a downgrade *and* a null cipher, close together, is a coherent story — one
+  a downgrade *and* a null cipher, close together, is a coherent story, one
   technique setting up the next, as [How These Attacks Actually
   Work](./attacks.md) describes. Several unrelated detectors agreeing is much
   stronger than any one alone.
 - **Correlation with a real event.** A warning that lines up with something
-  you can point to — a specific gathering, a specific time, a place you had
-  reason to expect attention — carries more weight than one from an ordinary
+  you can point to (a specific gathering, a specific time, a place you had
+  reason to expect attention) carries more weight than one from an ordinary
   afternoon.
 - **A clean capture someone else can check.** A recording, with the messages
   intact, that another person with the skills can examine and agree on. This
@@ -128,7 +128,7 @@ the better bet:
   others by design; each detector page states its own false-positive picture,
   and the honest ones say plainly where the rate is unknown.
 - **Flying, or crossing a border.** A phone reconnecting after time out of
-  contact — coming in to land, clearing customs — reproduces some of the
+  contact (coming in to land, clearing customs) reproduces some of the
   exact patterns a catcher does. The identity detector is documented to fire
   on aircraft on approach for exactly this reason.
 - **Roaming or an unfamiliar network.** Away from your home network, on
@@ -143,7 +143,7 @@ detection apps against a real, built catcher found that apps using nominally
 the same methods disagreed with each other about whether a given tower was
 suspicious (the White-Stingray study,
 [Sources and Further Reading](../references.md)). If serious tools disagree on
-the same tower, then any one warning — including Rayhunter's — is one opinion,
+the same tower, then any one warning, including Rayhunter's, is one opinion,
 not the final word.
 
 ## What to actually do, by severity
@@ -154,7 +154,7 @@ Means](../severity.md) defines the levels precisely.
 
 - **Low.** Note it and carry on. Do not change your behaviour on one low
   warning. If low warnings recur in the same place, or start arriving
-  alongside other detectors, it graduates — keep the recording and start
+  alongside other detectors, it graduates, keep the recording and start
   paying attention to where and when.
 - **Medium.** Look closer. Open the recording, see which detector fired and
   what else happened around it ([The Packet Explorer](../packet-explorer.md)
@@ -166,7 +166,7 @@ Means](../severity.md) defines the levels precisely.
   circumstances while they are fresh. Consider whether your surroundings
   offered a plausible reason. If your situation is genuinely sensitive, this
   is the point to bring in someone who can help you read it and to think
-  about [the personal and legal side](./risk.md) — but preserve first, decide
+  about [the personal and legal side](./risk.md), but preserve first, decide
   second.
 
 At every level, the strongest move is the same: **keep the recording.** It is
@@ -175,8 +175,8 @@ verifiability is what separates a defensible finding from an anxious guess.
 
 ## How to talk about a finding without overstating it
 
-If you might repeat a finding publicly — as a journalist, an organizer, anyone
-with an audience — the words you choose matter as much as the finding, because
+If you might repeat a finding publicly (as a journalist, an organizer, anyone
+with an audience), the words you choose matter as much as the finding, because
 an overstated claim that falls apart discredits the real work and can mislead
 people who trusted you. Rayhunter gives you a pattern in traffic. Say exactly
 that, and no more.
@@ -209,7 +209,7 @@ really matters.
 
 Think of Rayhunter as a competent colleague handing you an instrument reading,
 not an oracle delivering a verdict. The instrument is honest and the reading
-is real, but what it means is a judgement — yours to make, with the context
+is real, but what it means is a judgement, yours to make, with the context
 only you have. The colleague's manner is the one to borrow: not reassuring you
 that everything is fine, not alarming you that everything is dire, only telling
 you what the instrument can and cannot support and leaving the decision where
@@ -217,7 +217,6 @@ it belongs.
 
 ## Where to next
 
-[What This Tool Cannot Tell You](./limitations.md) draws the outer boundary —
-the things no warning, however you read it, can speak to. And
+[What This Tool Cannot Tell You](./limitations.md) draws the outer boundary, the things no warning, however you read it, can speak to. And
 [Legal and Personal Risk](./risk.md) covers the human side of acting on a
 finding.

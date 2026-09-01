@@ -3,7 +3,7 @@
 Throughout the detector pages, one phrase recurs: "never confirmed against real
 traffic." This page explains what that phrase means, why several detectors carry
 it, and what would make it go away. It exists so that the honesty on those pages
-reads as a deliberate policy — a standard applied evenly — rather than as an
+reads as a deliberate policy, a standard applied evenly, rather than as an
 apology for unfinished work.
 
 The short version: a detector can be right about the bytes and still unproven in
@@ -20,7 +20,7 @@ reading those: what each level of evidence actually establishes.
 
 A detector you trust too much is more dangerous than no detector, because you
 will act on it. [Why Detection Is Hard](../concepts/why-detection-is-hard.md)
-explains that there is no ground truth for cell-site simulators — no published
+explains that there is no ground truth for cell-site simulators, no published
 list of where they operated to check warnings against. That absence has a direct
 consequence for validation: for most detectors, no one can compute a true
 false-positive rate, because doing so would require knowing which past warnings
@@ -34,8 +34,8 @@ There are three, and they establish genuinely different things.
 ### Reference-encoder vectors
 
 The detector is tested against messages produced by an independent,
-authoritative implementation of the protocol — a separate program that encodes
-the protocol correctly — and checked that it reads them the way that
+authoritative implementation of the protocol, a separate program that encodes
+the protocol correctly, and checked that it reads them the way that
 implementation wrote them.
 
 This is strong evidence of one specific thing: that the detector reads the bytes
@@ -55,7 +55,7 @@ vectors prove correctness of reading, not fitness for the wild.
 
 The detector is exercised by Rayhunter's own demonstration scenarios or
 hand-built messages, pushed through the real pipeline from raw bytes to warning.
-This confirms the whole chain works end to end — the message is parsed,
+This confirms the whole chain works end to end, the message is parsed,
 delivered to the detector, and produces the expected warning.
 
 Its limit is that the test messages were made by the same project that wrote the
@@ -84,7 +84,7 @@ of it is worth stating here:
 - **The identity detector** stands apart: EFF has validated it against a real
   cell-site simulator (a test device obtained through a university research
   group), where it fired on a genuine attack. That is real-capture validation of
-  its ability to *catch* an attack — the strongest level here. It does not, on
+  its ability to *catch* an attack, the strongest level here. It does not, on
   its own, establish a field false-positive rate, which is a separate question no
   detector here can answer precisely.
 - **The fork's newer detectors** (LPP request, LPP tracking, RRLP, timing

@@ -9,7 +9,7 @@ It does not answer them. **Nothing here is legal advice, and this page cannot
 know your situation.** Laws differ by country and change over time, and the
 same act can be unremarkable in one place and serious in another. Where the
 stakes are real for you, the move is to put these questions to someone
-qualified in your jurisdiction — not to rely on a documentation page, however
+qualified in your jurisdiction, not to rely on a documentation page, however
 carefully written. What follows is a map of what to think about, so that
 conversation is a productive one.
 
@@ -23,8 +23,8 @@ which is why it helps to have thought about them before you are in the moment.
 
 ## Why it matters
 
-The people most likely to want Rayhunter — journalists, organizers,
-researchers, people who already have reason to think about surveillance — are
+The people most likely to want Rayhunter (journalists, organizers,
+researchers, people who already have reason to think about surveillance) are
 often the people for whom a misjudgement carries the most weight. Getting the
 technical detection right and the human side wrong is a real way to end up
 worse off than before. Treating the risk questions with the same seriousness as
@@ -48,7 +48,7 @@ The questions to carry:
   equipment to do so are regulated differently across countries, and some treat
   them far more strictly than the US does. If you are outside the US, this is
   the first thing to check with local counsel, not an afterthought.
-- **What does the recording contain?** A capture can include identifiers — your
+- **What does the recording contain?** A capture can include identifiers, your
   own, and potentially fragments relating to other devices the radio saw. Think
   about what you are storing and for how long, the way you would with any
   sensitive data.
@@ -80,7 +80,7 @@ avoidable mistake does the most damage. Two distinct risks:
   can expose you to challenge when the stronger claim cannot be backed up. Say
   what the tool observed, and no more.
 - **Exposing identifiers.** A recording or screenshot can contain permanent
-  identifiers — IMSI, IMEI, temporary identities, location. Publishing those,
+  identifiers, IMSI, IMEI, temporary identities, location. Publishing those,
   yours or anyone else's, is its own harm and possibly its own legal question.
   [Sharing What You Find](../sharing-findings.md) covers how to redact before
   anything leaves your hands. Redact first; share second.
@@ -104,7 +104,7 @@ to make sure you ask them.
 
 ## The precise details
 
-- **The tool's technical posture** — passive, transmits nothing — is described
+- **The tool's technical posture**, passive, transmits nothing, is described
   in [How Cell Networks Work](./cell-networks.md) and
   [What This Tool Cannot Tell You](./limitations.md). It is relevant to the
   legal picture but does not settle it: passivity is not a universal legal
@@ -112,8 +112,8 @@ to make sure you ask them.
 - **The inherited legal statement** lives on [the disclaimer
   page](../disclaimer.md); this page is the plain-language companion to it, not
   a replacement. Where they seem to differ, the disclaimer is the formal text.
-- **Redaction mechanics** — what a recording contains and how to remove
-  identifiers before sharing — are in [Sharing What You
+- **Redaction mechanics**, what a recording contains and how to remove
+  identifiers before sharing, are in [Sharing What You
   Find](../sharing-findings.md).
 - **This page gives no legal advice and creates no reliance.** It is
   orientation. Your jurisdiction, and a professional in it, are the authority.

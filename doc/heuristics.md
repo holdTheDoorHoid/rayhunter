@@ -77,7 +77,7 @@ On its own this might just be a misconfigured base station (though we have only 
 
 This analyzer watches for LPP (*LTE Positioning Protocol*, 3GPP TS 36.355) messages, the mechanism a network uses to ask a device to measure and report its own position: GNSS/GPS readings, timing measurements of nearby cells (ECID/OTDOA), or a computed location estimate. LPP messages travel inside NAS Generic NAS Transport messages (3GPP TS 24.301, container type 1), which is where this analyzer reads them.
 
-LPP exists for emergency services and lawful location services, but the same machinery allows whoever controls the network connection — a cooperating carrier, or an IMSI catcher acting as the network — to ask a device for its precise position at any time, continuously, with nothing visible on the device. Its use in real tracking operations is what motivated this heuristic (see EFForg/rayhunter#1072).
+LPP exists for emergency services and lawful location services, but the same machinery allows whoever controls the network connection, a cooperating carrier, or an IMSI catcher acting as the network, to ask a device for its precise position at any time, continuously, with nothing visible on the device. Its use in real tracking operations is what motivated this heuristic (see EFForg/rayhunter#1072).
 
 A *request for location information* arriving from the network, and the device's *report of location information* back, each raise a **low** severity warning, once per LPP transaction: periodic reporting sessions can send a report every few seconds for hours, and repeating the warning for every report would bury the rest of the history. Repeats within the same transaction, capability exchanges, assistance data (routine GPS ephemeris help), aborts, and errors are recorded as informational events.
 
@@ -85,7 +85,7 @@ False positives: an emergency call will legitimately trigger LPP, and some carri
 
 ### LPP Location Tracking
 
-This is the in-depth companion to **LPP Location Request**. Where that analyzer reports *that* a location message was exchanged, this one decodes the request and response bodies to report *what kind*: which positioning method the network asked for (A-GNSS satellite, OTDOA tower-timing, or E-CID cell-ID), and — the point of the analyzer — whether the request is for a single fix or for **periodic (continuous) reporting**.
+This is the in-depth companion to **LPP Location Request**. Where that analyzer reports *that* a location message was exchanged, this one decodes the request and response bodies to report *what kind*: which positioning method the network asked for (A-GNSS satellite, OTDOA tower-timing, or E-CID cell-ID), and, the point of the analyzer, whether the request is for a single fix or for **periodic (continuous) reporting**.
 
 A `periodicalReporting` field in a `RequestLocationInformation` means the network asked the device to report its position repeatedly on a timer until told to stop. That is the signature of active tracking rather than a one-off locate, so it is raised to **medium** severity, versus **low** for a one-shot request or a position report. Capability and assistance messages carry no such detail and are left to the basic analyzer.
 
