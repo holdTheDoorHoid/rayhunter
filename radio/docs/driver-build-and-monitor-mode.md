@@ -234,6 +234,29 @@ All three were accepted by the host path (`ret=0`), which only means the WMI
 command was queued. The firmware ignored all of them: not one probe request
 was delivered in any stage.
 
+### OCB (802.11p)
+
+Worth trying because of what the commit history says: the monitor-mode
+commits in this driver are things like *"Add 5m/10m support for monitor
+mode"*, and 5/10 MHz channels are DSRC. This driver's monitor mode belongs to
+Qualcomm's vehicle-communications product line, and OCB — "outside the context
+of a BSS", which receives without associating — is that line's normal mode.
+
+Setting `gDot11PMode=1` in the ini does create a `wlanocb0` interface, so the
+firmware accepts the OCB adapter where it refused the monitor one. But it is
+not a capture path: the interface comes up `ARPHRD_ETHER` (1), not radiotap,
+so it would deliver ethernet-framed data rather than raw 802.11; it received
+nothing; and OCB operates on 5.9 GHz DSRC channels that need a separate vendor
+configuration command to select. Wrong framing and wrong band for finding
+2.4 GHz probe requests.
+
+**A test-harness bug worth recording**, because it produced a false negative
+first time round: the ini has an `END` marker with a trailing comment saying
+the parser reads nothing past it. A setting appended to the end of the file is
+silently ignored. The first OCB run appended `gDot11PMode=1` after `END`, saw
+no OCB interface, and would have been recorded as "OCB unsupported" — which
+was wrong. Inserting before `END` produced the interface immediately.
+
 ### A method that did not work, recorded so it is not repeated
 
 The firmware blobs were searched for `monitor`, `promisc` and `sniff` symbol
