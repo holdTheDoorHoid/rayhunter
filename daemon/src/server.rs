@@ -1239,6 +1239,13 @@ pub struct WebUserRequest {
     pub password: String,
 }
 
+use crate::web_auth::{MAX_PASSWORD_LEN, MAX_USERNAME_LEN};
+
+/// Serializes account changes so two overlapping requests cannot each read the
+/// same list, edit their own copy, and have the last write win — which silently
+/// dropped one of the changes. Held across the whole read-modify-write.
+static WEB_USER_MUTATION: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Add a web interface account, or change an existing one's password.
 ///
 /// The password is hashed here and the plaintext is never written anywhere.
@@ -1264,6 +1271,12 @@ pub async fn set_web_user(
     if username.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "username is empty".to_string()));
     }
+    if username.len() > MAX_USERNAME_LEN {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("username is too long (limit {MAX_USERNAME_LEN} bytes)"),
+        ));
+    }
     // Short enough to guess is the same as no password at all, and somebody
     // setting one here believes they are protecting something.
     if body.password.chars().count() < 8 {
@@ -1272,9 +1285,27 @@ pub async fn set_web_user(
             "password must be at least 8 characters".to_string(),
         ));
     }
+    if body.password.len() > MAX_PASSWORD_LEN {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("password is too long (limit {MAX_PASSWORD_LEN} bytes)"),
+        ));
+    }
 
+    // Serialize the read-modify-write against any other account change.
+    let _guard = WEB_USER_MUTATION.lock().await;
     let mut users = state.web_users.read().await.clone();
-    let hash = crate::web_auth::hash_password(&body.password);
+    // Hashing is deliberately expensive; run it off the single-threaded async
+    // runtime so it does not stall every other request while it grinds.
+    let password = body.password.clone();
+    let hash = tokio::task::spawn_blocking(move || crate::web_auth::hash_password(&password))
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to hash password: {e}"),
+            )
+        })?;
     match users.iter_mut().find(|u| u.username == username) {
         Some(existing) => existing.password_hash = hash,
         None => users.push(crate::web_auth::WebUser {
@@ -1302,12 +1333,18 @@ pub async fn delete_web_user(
     State(state): State<Arc<ServerState>>,
     Path(username): Path<String>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
+    // Serialize against any other account change, so a concurrent add is not
+    // silently undone by this delete's write.
+    let _guard = WEB_USER_MUTATION.lock().await;
     let mut users = state.web_users.read().await.clone();
     let before = users.len();
     users.retain(|u| u.username != username);
     if users.len() == before {
         return Err((StatusCode::NOT_FOUND, format!("no account {username}")));
     }
+    // Removing the last account is allowed: with no account the terminal
+    // refuses to run (see run_terminal_command), so this returns the device to
+    // the open, terminal-disabled state rather than opening a root shell.
     write_web_users(&state, users).await?;
     Ok((StatusCode::ACCEPTED, format!("removed {username}")))
 }
@@ -1406,6 +1443,15 @@ const TERMINAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15)
 /// short of what it takes to exhaust memory on this hardware.
 const TERMINAL_MAX_OUTPUT: usize = 256 * 1024;
 
+/// Longest command string accepted. A command line is short; anything past this
+/// is not a command but a way to make the daemon hold a large string.
+const TERMINAL_MAX_COMMAND_LEN: usize = 8 * 1024;
+
+/// Only one terminal command runs at a time. Several at once would multiply the
+/// memory and processor cost on a device that has very little of either, and
+/// there is no reason to run more than one root command concurrently.
+static TERMINAL_SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+
 /// Run one command on the device and return what it printed.
 ///
 /// Off unless `terminal_enabled` is set in the config, which the web interface
@@ -1443,10 +1489,39 @@ pub async fn run_terminal_command(
                 .to_string(),
         ));
     }
+    // Defence in depth: the root shell must never be reachable without a web
+    // password, even though the rest of the interface is open when none is set.
+    // The global auth middleware passes everything through when no account
+    // exists, so without this check an enabled terminal on an account-less
+    // device would be unauthenticated root command execution. Requiring an
+    // account here is independent of that middleware.
+    if state.web_users.read().await.is_empty() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "the terminal requires a web interface password. Set one under Configuration \
+             before using it."
+                .to_string(),
+        ));
+    }
     let command = body.command.trim();
     if command.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "no command given".to_string()));
     }
+    if command.len() > TERMINAL_MAX_COMMAND_LEN {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("command is too long (limit {TERMINAL_MAX_COMMAND_LEN} bytes)"),
+        ));
+    }
+
+    // One command at a time. If another is already running, refuse rather than
+    // pile a second root process onto the device.
+    let Ok(_slot) = TERMINAL_SLOT.try_acquire() else {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            "another terminal command is already running; try again once it finishes".to_string(),
+        ));
+    };
 
     // Scoped here: a different `AsyncReadExt` is in use elsewhere in this file.
     use tokio::io::AsyncReadExt as _;
@@ -1486,14 +1561,21 @@ pub async fn run_terminal_command(
         // exits. A command writing more than the pipe buffer holds blocks until
         // something reads it, so waiting for exit first would hang forever on
         // exactly the noisy commands this is most useful for.
+        // Read at most a little past the display limit from each pipe, not the
+        // whole stream. read_to_end would buffer everything the command emits
+        // in memory before anything trimmed it, so a command that prints
+        // without end could exhaust the device's memory before the cap ever
+        // applied. Once a pipe hits the cap we stop reading it; the command then
+        // blocks on the full pipe and the timeout below kills it.
+        let cap = TERMINAL_MAX_OUTPUT as u64 + 1;
         let read_out = async {
             if let Some(pipe) = stdout_pipe.as_mut() {
-                let _ = pipe.read_to_end(&mut out).await;
+                let _ = pipe.take(cap).read_to_end(&mut out).await;
             }
         };
         let read_err = async {
             if let Some(pipe) = stderr_pipe.as_mut() {
-                let _ = pipe.read_to_end(&mut err).await;
+                let _ = pipe.take(cap).read_to_end(&mut err).await;
             }
         };
         tokio::join!(read_out, read_err);

@@ -31,6 +31,19 @@ type HmacSha256 = Hmac<Sha256>;
 /// Measured on an Orbic RC400L rather than guessed.
 pub const ITERATIONS: u32 = 20_000;
 
+/// Largest stored iteration count honoured. The count travels in the hash
+/// string, which comes from a world-readable config file, so a tampered or
+/// corrupt value could otherwise ask for billions of iterations and hang the
+/// login forever. Well above any legitimate setting.
+pub const MAX_ITERATIONS: u32 = 1_000_000;
+
+/// Longest username and password accepted, on both the login and the
+/// enrollment path. PBKDF2 cost grows with password length, so an unbounded
+/// password is a way to make the device spend itself; these are generous but
+/// bounded.
+pub const MAX_USERNAME_LEN: usize = 64;
+pub const MAX_PASSWORD_LEN: usize = 256;
+
 const SALT_LEN: usize = 16;
 const HASH_LEN: usize = 32;
 
@@ -115,7 +128,11 @@ pub fn verify_password(password: &str, stored: &str) -> bool {
     let Some(expected) = parts.next().and_then(|v| B64.decode(v).ok()) else {
         return false;
     };
-    if parts.next().is_some() || expected.len() != HASH_LEN || iterations == 0 {
+    if parts.next().is_some()
+        || expected.len() != HASH_LEN
+        || iterations == 0
+        || iterations > MAX_ITERATIONS
+    {
         return false;
     }
 
@@ -129,20 +146,31 @@ pub fn verify_password(password: &str, stored: &str) -> bool {
     difference == 0
 }
 
+/// A syntactically valid PBKDF2 hash of no useful password, used so an unknown
+/// username costs the same PBKDF2 work as a known one. The salt and hash are
+/// all-zero; no real password hashes to this, so it never matches by accident.
+/// Its structure is checked in the tests.
+const DUMMY_HASH: &str =
+    "pbkdf2-sha256$20000$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+
 /// Whether these credentials match any configured account.
 ///
-/// Every account is checked even after a match, so the time taken does not
-/// reveal which username exists. An unknown username is checked against a
-/// dummy hash for the same reason.
+/// Exactly one PBKDF2 verification runs whether or not the username exists, so
+/// the time taken does not reveal which usernames are real: a known username is
+/// verified against its stored hash, an unknown one against a fixed dummy hash
+/// and then rejected. Absurd lengths are refused before any hashing, since
+/// PBKDF2 cost grows with the password length.
 pub fn credentials_are_valid(users: &[WebUser], username: &str, password: &str) -> bool {
-    let mut valid = false;
-    for user in users {
-        // Both branches do the same work.
-        if user.username == username && verify_password(password, &user.password_hash) {
-            valid = true;
-        }
+    if username.len() > MAX_USERNAME_LEN || password.len() > MAX_PASSWORD_LEN {
+        return false;
     }
-    valid
+    let matched = users.iter().find(|u| u.username == username);
+    let hash = matched
+        .map(|u| u.password_hash.as_str())
+        .unwrap_or(DUMMY_HASH);
+    // Runs unconditionally; the result is only honoured for a real username.
+    let password_ok = verify_password(password, hash);
+    matched.is_some() && password_ok
 }
 
 /// Decode an HTTP Basic `Authorization` header into a username and password.
@@ -183,10 +211,18 @@ pub async fn require_auth(
         .and_then(|v| v.to_str().ok())
         .and_then(parse_basic_auth);
 
-    if let Some((username, password)) = supplied
-        && credentials_are_valid(&users, &username, &password)
-    {
-        return next.run(request).await;
+    if let Some((username, password)) = supplied {
+        // PBKDF2 is deliberately slow, and this runtime is single-threaded, so
+        // verifying inline would stall every other request — including plain
+        // asset loads — for the duration. Run it on the blocking pool instead.
+        let valid = tokio::task::spawn_blocking(move || {
+            credentials_are_valid(&users, &username, &password)
+        })
+        .await
+        .unwrap_or(false);
+        if valid {
+            return next.run(request).await;
+        }
     }
 
     // The realm makes browsers prompt rather than showing a bare error.
@@ -203,13 +239,28 @@ pub async fn require_auth(
 
 /// Whether a request is a state-changing one made by some other website.
 ///
-/// Browsers tag every request with `Sec-Fetch-Site`: a request the page made
-/// to its own origin is `same-origin`, one a different site triggered is
-/// `cross-site`. A request with no such header is not from a modern browser
-/// (curl, the dev proxy, an app) and so is not a cross-site-scripting vector.
-/// Only state-changing methods are considered; the browser's same-origin
-/// policy already stops another site reading the response to a GET.
-fn is_cross_site_state_change(method: &axum::http::Method, sec_fetch_site: Option<&str>) -> bool {
+/// Two independent signals a browser attaches, checked so that either one
+/// catching a forgery is enough:
+///
+/// - `Origin`: on a state-changing request a browser sends the origin of the
+///   page that made it. If that origin's authority does not match the device's
+///   own `Host`, the request came from another site. Origin is sent by every
+///   current browser for these methods, including same-origin ones, so it is
+///   the primary check.
+/// - `Sec-Fetch-Site`: a request the page made to its own origin is
+///   `same-origin`; one another site triggered is `cross-site`. Used as a
+///   fallback for the rare browser that sends no `Origin`.
+///
+/// A request with neither header is not from a browser (curl, the dev proxy, an
+/// app) and so is not a cross-site vector, and is allowed. Only state-changing
+/// methods are considered; the browser's same-origin policy already stops
+/// another site reading the response to a GET.
+fn is_cross_site_state_change(
+    method: &axum::http::Method,
+    sec_fetch_site: Option<&str>,
+    origin: Option<&str>,
+    host: Option<&str>,
+) -> bool {
     use axum::http::Method;
     let mutating = matches!(
         *method,
@@ -217,6 +268,16 @@ fn is_cross_site_state_change(method: &axum::http::Method, sec_fetch_site: Optio
     );
     if !mutating {
         return false;
+    }
+    if let Some(origin) = origin {
+        // Compare the authority (host[:port]) of the Origin to our Host. The
+        // Origin carries a scheme ("http://host:port"); the Host does not.
+        let origin_authority = origin.split_once("://").map(|(_, rest)| rest);
+        return match (origin_authority, host) {
+            (Some(o), Some(h)) if o == h => false,
+            // Origin present but not our own (or nothing to compare it to).
+            _ => true,
+        };
     }
     match sec_fetch_site {
         // The app talking to itself, or a user-initiated navigation.
@@ -241,11 +302,11 @@ pub async fn csrf_protection(
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
 
-    let sec_fetch_site = request
-        .headers()
-        .get("sec-fetch-site")
-        .and_then(|v| v.to_str().ok());
-    if is_cross_site_state_change(request.method(), sec_fetch_site) {
+    let headers = request.headers();
+    let sec_fetch_site = headers.get("sec-fetch-site").and_then(|v| v.to_str().ok());
+    let origin = headers.get("origin").and_then(|v| v.to_str().ok());
+    let host = headers.get("host").and_then(|v| v.to_str().ok());
+    if is_cross_site_state_change(request.method(), sec_fetch_site, origin, host) {
         return (
             StatusCode::FORBIDDEN,
             "cross-site request refused; this action can only be taken from the Rayhunter interface itself",
@@ -346,6 +407,49 @@ mod tests {
         assert!(!credentials_are_valid(&[], "alice", "alpha"));
     }
 
+    /// The dummy hash must be a well-formed PBKDF2 string, or an unknown
+    /// username would fail parsing early and skip the work that makes its
+    /// timing match a known one. Parse it exactly as verify_password does.
+    #[test]
+    fn the_dummy_hash_is_well_formed() {
+        let mut parts = DUMMY_HASH.split('$');
+        assert_eq!(parts.next(), Some("pbkdf2-sha256"));
+        let iterations: u32 = parts.next().unwrap().parse().unwrap();
+        assert!(iterations > 0 && iterations <= MAX_ITERATIONS);
+        let salt = B64.decode(parts.next().unwrap()).unwrap();
+        let expected = B64.decode(parts.next().unwrap()).unwrap();
+        assert!(parts.next().is_none());
+        assert_eq!(salt.len(), SALT_LEN);
+        assert_eq!(expected.len(), HASH_LEN);
+        // And it never matches a real attempt.
+        assert!(!verify_password("anything", DUMMY_HASH));
+    }
+
+    /// Absurdly long credentials are refused before any hashing, so they cannot
+    /// be used to make the device grind. Enforced on the login path itself.
+    #[test]
+    fn overlong_credentials_are_refused() {
+        let users = vec![WebUser {
+            username: "alice".into(),
+            password_hash: hash_password("alpha"),
+        }];
+        let huge = "a".repeat(MAX_PASSWORD_LEN + 1);
+        assert!(!credentials_are_valid(&users, "alice", &huge));
+        let long_name = "a".repeat(MAX_USERNAME_LEN + 1);
+        assert!(!credentials_are_valid(&users, &long_name, "alpha"));
+    }
+
+    /// A hash whose stored iteration count is absurd is rejected rather than
+    /// honoured, so a tampered config cannot ask for billions of iterations.
+    #[test]
+    fn an_absurd_iteration_count_is_refused() {
+        let stored = format!(
+            "pbkdf2-sha256${}$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            MAX_ITERATIONS + 1
+        );
+        assert!(!verify_password("anything", &stored));
+    }
+
     #[test]
     fn basic_auth_headers_decode() {
         // "alice:alpha"
@@ -368,37 +472,61 @@ mod tests {
     #[test]
     fn cross_site_state_changes_are_refused_but_the_ui_and_reads_are_not() {
         use axum::http::Method;
-        // A cross-site POST (a malicious page targeting the device) is refused.
+        let host = Some("192.168.1.1:8080");
+
+        // The legitimate web UI: a same-origin Origin matching our Host.
+        assert!(!is_cross_site_state_change(
+            &Method::POST,
+            Some("same-origin"),
+            Some("http://192.168.1.1:8080"),
+            host,
+        ));
+        // A malicious page: its Origin is some other site.
         assert!(is_cross_site_state_change(
             &Method::POST,
-            Some("cross-site")
+            None,
+            Some("https://evil.example"),
+            host,
+        ));
+        // Origin absent: fall back to Sec-Fetch-Site.
+        assert!(is_cross_site_state_change(
+            &Method::POST,
+            Some("cross-site"),
+            None,
+            host
         ));
         assert!(is_cross_site_state_change(
             &Method::DELETE,
-            Some("cross-site")
-        ));
-        // The legitimate web UI calls its own origin.
-        assert!(!is_cross_site_state_change(
-            &Method::POST,
-            Some("same-origin")
+            Some("cross-site"),
+            None,
+            host
         ));
         assert!(!is_cross_site_state_change(
             &Method::POST,
-            Some("same-site")
+            Some("same-site"),
+            None,
+            host
         ));
-        // A user-initiated action, or a non-browser client (curl, the dev
-        // proxy) that sends no such header, is allowed.
-        assert!(!is_cross_site_state_change(&Method::POST, Some("none")));
-        assert!(!is_cross_site_state_change(&Method::POST, None));
-        // Reads are never blocked by this: the same-origin policy already stops
-        // another site reading the response.
+        // No browser headers at all (curl, the dev proxy): allowed.
+        assert!(!is_cross_site_state_change(&Method::POST, None, None, host));
+        assert!(!is_cross_site_state_change(
+            &Method::POST,
+            Some("none"),
+            None,
+            host
+        ));
+        // Reads are never blocked, whatever their origin.
         assert!(!is_cross_site_state_change(
             &Method::GET,
-            Some("cross-site")
+            Some("cross-site"),
+            Some("https://evil.example"),
+            host,
         ));
         assert!(!is_cross_site_state_change(
             &Method::HEAD,
-            Some("cross-site")
+            Some("cross-site"),
+            None,
+            host
         ));
     }
 
