@@ -210,7 +210,6 @@ impl ManifestEntry {
 }
 
 impl RecordingStore {
-
     // Loads an existing RecordingStore at the given path. Errors if no store exists,
     // or if it's malformed.
     pub async fn load<P>(path: P) -> Result<Self, RecordingStoreError>
