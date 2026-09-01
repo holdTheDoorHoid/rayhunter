@@ -229,9 +229,34 @@ reloading `wlan.ko` repeatedly during the `con_mode` sweep did not disturb
 `rayhunter-daemon`, which kept recording throughout (`1788231293-0.qmdl.gz`
 grew across the whole session).
 
-Not yet measured, and needed before shipping a continuously-running daemon:
-storage growth per day, battery runtime impact, and dropped-cellular-message
-rate under sustained scanning.
+### Sustained scanning
+
+Measured with `hardware-tests/scan_benchmark.sh`: seven minutes idle, seven
+minutes scanning continuously on a dedicated interface, seven minutes idle
+again. Cellular health is proxied by the growth rate of the active QMDL file —
+a drop while scanning would mean diag messages were being missed.
+
+| | Baseline | Scanning | Change |
+|---|---|---|---|
+| QMDL growth | 67.1 B/s | 66.8 B/s | **−0.4%** |
+| `rayhunter-daemon` CPU | 7.88% | 7.86% | none |
+| `MemAvailable` | 95604 kB | 95576 kB | ~0.5 MB held while the interface existed |
+| `hostapd` | running | running | never dropped |
+
+45 scans completed, 0 failed, one every ~9.5 s (a ~4.5 s scan plus a 5 s
+pause). Load average went *down* over the scanning window (1.40 → 1.16),
+which is measurement noise from the cellular side rather than a scanning
+effect.
+
+**The number that decides acceptability is the first row.** Cellular capture
+was statistically unchanged under continuous scanning, so the feature does not
+trade cellular reliability for wireless coverage. At this rate a recording
+grows ~5.8 MB/day before radio evidence is added.
+
+Still not measured, and needed before shipping a continuously-running daemon:
+battery runtime impact, evidence-sidecar growth per day under a realistic
+device population, and behaviour in a dense RF environment (this was a quiet
+residential setting with 14–17 visible networks).
 
 ## 7. End-to-end verification
 
