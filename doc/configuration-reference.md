@@ -83,7 +83,7 @@ not have, and **(not in template)** marks a key absent from the shipped
 |---|---|---|---|
 | `ntfy_url` | string | unset | If set, sends a push notification to this ntfy URL on a new warning. |
 | `enabled_notifications` | list | `["Warning", "LowBattery"]` | Which notification types fire (does nothing without `ntfy_url`). |
-| `auto_check_updates` | boolean | see note | Periodically check GitHub for new releases and show a notice. **Note:** the code default is `true`, but the shipped template sets `false`; a config missing the key gets update checks. Which is intended is [an open question](./INVENTORY.md). |
+| `auto_check_updates` | boolean | see note | Periodically check GitHub for new releases and show a notice. **Note:** the code default is `true`, but the shipped template sets `false`, so a config missing the key gets update checks; this discrepancy is unresolved. |
 | `clock_sync_mode` | integer | `2` | Clock-drift handling: 0 off, 1 autosync silently, 2 prompt. The offset is kept in memory only and lost on restart. |
 
 ## Network and WiFi client mode
