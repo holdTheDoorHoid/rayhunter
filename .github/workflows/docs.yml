@@ -1,0 +1,69 @@
+name: docs
+
+# Publishes the mdBook documentation to GitHub Pages from this fork's working
+# branch. Deliberately separate from main.yml: it does not run the firmware
+# build matrix or the device tests, only what is needed to build and deploy the
+# book. See doc/fork/ for why this fork publishes its own docs.
+
+on:
+  push:
+    branches: [device-display-colors]
+    paths:
+      - 'doc/**'
+      - 'book.toml'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch: {}
+
+# Least privilege: only what deploy-pages needs.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One Pages deploy at a time; do not cancel an in-progress deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    name: Build and deploy the book
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo build (keeps the optional API-docs step fast)
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install mdBook
+        run: cargo install mdbook --no-default-features --features search --vers "^0.4" --locked
+
+      - name: Build the book
+        run: mdbook build
+
+      # The REST API page links to an interactive spec generated from the Rust
+      # code. Generating it means compiling the daemon, which is the one heavy
+      # step here, so it is best-effort: if it fails, the rest of the book still
+      # deploys rather than blocking the docs on an API-spec build.
+      - name: Generate REST API docs (best effort)
+        continue-on-error: true
+        run: |
+          cargo run --bin gen_api --features apidocs -- ./rayhunter-openapi.json
+          mkdir -p book/api-docs
+          cp doc/swagger-ui.html book/api-docs/index.html
+          cp rayhunter-openapi.json book/api-docs/rayhunter-openapi.json
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload the book as a Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: book
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
