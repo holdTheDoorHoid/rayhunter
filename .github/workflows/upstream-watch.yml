@@ -1,0 +1,143 @@
+name: Upstream watch
+
+# Watches EFForg/rayhunter's main branch for new commits. When there are any,
+# Claude analyzes them against our fork and opens a triage issue recommending
+# what's worth bringing over. It NEVER merges anything — merges are done by hand
+# in a session, with the full test suite and a hardware smoke test, because our
+# fork heavily modifies the analyzer/diag/main code and merges need care.
+#
+# Cost: on the (common) days with no new upstream commits, the cheap check step
+# runs and stops, and Claude is never invoked. Claude only wakes up when there
+# is something new to review.
+#
+# One-time setup: add a repository secret named CLAUDE_CODE_OAUTH_TOKEN
+# (Settings -> Secrets and variables -> Actions). Generate its value by running
+# `claude setup-token` on a machine signed in to your Claude subscription.
+# Until that secret exists the workflow runs cleanly but skips the analysis.
+
+on:
+  schedule:
+    # Daily at 13:00 UTC (~6am PT / 9am ET). GitHub can delay scheduled runs
+    # under load, and disables schedules after 60 days with no repo activity.
+    - cron: "0 13 * * *"
+  workflow_dispatch: {} # also runnable by hand from the Actions tab
+
+permissions:
+  contents: write # to advance the reviewed-watermark file on main
+  issues: write # to open the triage issue
+
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out our fork (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Look for new upstream commits
+        id: check
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/EFForg/rayhunter.git
+          git fetch --quiet upstream main
+
+          watermark_file=".github/upstream-watch-last-reviewed"
+          if [ -f "$watermark_file" ]; then
+            watermark="$(tr -d '[:space:]' < "$watermark_file")"
+          else
+            # No watermark yet: start from the current upstream tip so we only
+            # report commits that appear from here on.
+            watermark="$(git rev-parse upstream/main)"
+          fi
+
+          # Commits on upstream/main that we have not reviewed yet.
+          count="$(git rev-list --count "${watermark}..upstream/main" 2>/dev/null || echo 0)"
+
+          {
+            echo "count=$count"
+            echo "watermark=$watermark"
+            echo "upstream_head=$(git rev-parse upstream/main)"
+            echo "has_token=${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ "$count" -gt 0 ]; then
+            echo "Found $count new upstream commit(s) to review."
+          else
+            echo "No new upstream commits. Nothing to do."
+          fi
+
+      - name: Note if the token is missing
+        if: steps.check.outputs.count != '0' && steps.check.outputs.has_token != 'true'
+        run: |
+          echo "::warning::New upstream commits were found, but CLAUDE_CODE_OAUTH_TOKEN is not set, so the analysis is skipped. Add the secret to enable it."
+
+      - name: Analyze and open a triage issue
+        id: analyze
+        if: steps.check.outputs.count != '0' && steps.check.outputs.has_token == 'true'
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are triaging new commits on the EFForg/rayhunter upstream for the
+            fork holdTheDoorHoid/rayhunter (this repository, branch `main`). The
+            `upstream` remote (EFForg/rayhunter) has already been fetched.
+
+            The new commits to review are the range:
+              ${{ steps.check.outputs.watermark }}..upstream/main
+            which is ${{ steps.check.outputs.count }} commit(s).
+
+            Steps:
+            1. Run `git log --oneline ${{ steps.check.outputs.watermark }}..upstream/main`
+               and read each commit with `git show --stat` (and the diff for the
+               substantive ones).
+            2. Group them into logical features where they belong together
+               (upstream often lands a feature as several small commits).
+            3. For each feature/commit, work out: what it does; which files it
+               touches; and whether our fork has modified those same files — check
+               with `git log --oneline main -- <path>` and, for the risky ones,
+               `git diff $(git merge-base main upstream/main) main -- <path>`. Files
+               we have changed mean higher merge/conflict risk, so call that out.
+            4. Give each a recommendation: "worth bringing over", "skip", or
+               "needs discussion", each with a one or two sentence reason grounded
+               in what you read.
+            5. Open exactly ONE GitHub issue with `gh issue create`, titled
+               "Upstream sync: ${{ steps.check.outputs.count }} new commit(s) to review (${{ steps.check.outputs.upstream_head }})".
+               Body: a readable checklist, one line per feature/commit with its
+               recommendation and reason, plus a short overall verdict. Try to add
+               the label with `gh issue create --label upstream-sync`; if that
+               fails because the label does not exist, run
+               `gh label create upstream-sync --color 1d76db --description "Upstream commits to review" || true` and create the issue again.
+            6. End the issue body with a clear note: merging is NOT automatic.
+               Anything worth taking must be merged by hand in a session, running
+               the full Rust + web test suites, the API-docs build, and a hardware
+               smoke test, because this fork heavily modifies analyzer/diag/main
+               code and past merges needed careful conflict resolution.
+
+            Constraints: do NOT modify any code, do NOT merge, do NOT push, do NOT
+            open a pull request. Read and create the single issue only.
+          claude_args: |
+            --max-turns 40
+            --allowedTools "Bash,Read,Grep,Glob"
+
+      - name: Advance the reviewed watermark
+        # Only after a successful analysis, so a failed run re-reviews the same
+        # commits next time rather than skipping them.
+        if: success() && steps.check.outputs.count != '0' && steps.check.outputs.has_token == 'true'
+        run: |
+          set -euo pipefail
+          echo "${{ steps.check.outputs.upstream_head }}" > .github/upstream-watch-last-reviewed
+          if ! git diff --quiet -- .github/upstream-watch-last-reviewed; then
+            git config user.name "upstream-watch"
+            git config user.email "upstream-watch@users.noreply.github.com"
+            git add .github/upstream-watch-last-reviewed
+            git commit -m "upstream-watch: reviewed up to ${{ steps.check.outputs.upstream_head }}"
+            git push origin HEAD:main
+          fi
