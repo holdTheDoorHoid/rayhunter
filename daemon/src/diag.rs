@@ -237,6 +237,17 @@ impl DiagTask {
             DiskSpaceCheck::Failed => {}
         }
 
+        // If a recording is somehow still running, finish it completely before
+        // opening a new one. Finalizing writes the old recording's final size
+        // and sends its RecordingFinished event while the store's current entry
+        // still points at it. Creating the new entry first (as this used to do)
+        // moved the current entry, so the old writer's final size landed on the
+        // new recording. Rotation already finishes the old entry before calling
+        // this, so there it is a no-op.
+        if matches!(self.state, DiagState::Recording { .. }) {
+            self.finish_current_entry(qmdl_store, None).await;
+        }
+
         let (qmdl_gz_file, analysis_file) = qmdl_store.new_entry(self.gps_mode).await?;
 
         // For fixed-mode sessions, write the configured coordinates to the storage
@@ -264,7 +275,6 @@ impl DiagTask {
                 .await
                 .map_err(RecordingStoreError::WriteFileError)?;
         }
-        self.stop_current_recording(qmdl_store).await;
         let qmdl_writer = Box::new(QmdlWriter::new(qmdl_gz_file));
         let analysis_writer = AnalysisWriter::new(analysis_file, &self.analyzer_config)
             .await
@@ -442,21 +452,26 @@ impl DiagTask {
             ..
         } = state
         {
-            match (qmdl_writer.close().await, analysis_writer.close().await) {
-                (Ok(size), Ok(())) => {
-                    if let Err(err) = qmdl_store.update_current_entry_qmdl_size(size).await {
+            // Failing to close a writer is exactly what a failing or full flash
+            // does, and it is not a reason to take the whole capture daemon
+            // down: log it, record what we can, and settle into the stopped
+            // state (already swapped in above) so recording can be started
+            // again. Panicking here turned a recoverable storage fault into a
+            // dead detector.
+            let (qmdl_result, analysis_result) =
+                (qmdl_writer.close().await, analysis_writer.close().await);
+            match &qmdl_result {
+                Ok(size) => {
+                    if let Err(err) = qmdl_store.update_current_entry_qmdl_size(*size).await {
                         error!("failed to update QMDL entry size while closing it: {err:?}");
                     }
                 }
-                (qmdl_result, analysis_result) => {
-                    if let Err(err) = qmdl_result {
-                        error!("failed to close QmdlWriter: {err:?}");
-                    }
-                    if let Err(err) = analysis_result {
-                        error!("failed to close AnalysisWriter: {err:?}");
-                    }
-                    panic!();
+                Err(err) => {
+                    error!("failed to close QmdlWriter, recording may be incomplete: {err:?}")
                 }
+            }
+            if let Err(err) = analysis_result {
+                error!("failed to close AnalysisWriter, analysis may be incomplete: {err:?}");
             }
         }
     }
@@ -648,25 +663,33 @@ impl DiagTask {
 
             if max_type > EventType::Informational {
                 info!("a heuristic triggered on this run!");
-                self.notification_channel
+                // The notification worker is not essential to capture. If it has
+                // gone away, log it and carry on analysing rather than panicking
+                // the DIAG task at the exact moment a warning was found.
+                if let Err(e) = self
+                    .notification_channel
                     .send(Notification::new(
                         NotificationType::Warning,
                         format!("Rayhunter has detected a {:?} severity event", max_type),
                         Some(Duration::from_secs(60 * 5)),
                     ))
                     .await
-                    .expect("Failed to send to notification channel");
+                {
+                    warn!("couldn't send notification, continuing to capture: {e}");
+                }
             }
 
             if max_type > self.max_type_seen {
                 self.max_type_seen = max_type;
-                if self.max_type_seen > EventType::Informational {
-                    self.ui_update_sender
+                if self.max_type_seen > EventType::Informational
+                    && let Err(e) = self
+                        .ui_update_sender
                         .send(display::DisplayState::WarningDetected {
                             event_type: self.max_type_seen,
                         })
                         .await
-                        .expect("couldn't send ui update message: {}");
+                {
+                    warn!("couldn't send ui update, continuing to capture: {e}");
                 }
             }
         } else {

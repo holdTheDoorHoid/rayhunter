@@ -165,14 +165,37 @@ impl DiagDevice {
     }
 
     async fn get_next_messages_container(&mut self) -> Result<MessagesContainer, DiagDeviceError> {
-        let mut bytes_read = 0;
         // TP-Link M7350 sometimes sends too small messages, we need to be able to deal with short reads.
+        //
+        // A read of zero bytes is different from a short read: on a healthy
+        // character device a read blocks until data arrives, so an immediate
+        // `Ok(0)` means the device has closed or a driver is misbehaving.
+        // Looping on that without pause would peg a core forever and never
+        // recover, so we back off briefly and, after enough consecutive empty
+        // reads, treat the device as disconnected and surface an error the
+        // caller can act on.
+        const MAX_EMPTY_READS: u32 = 16;
+        let mut empty_reads = 0u32;
+        let mut bytes_read = 0;
         while bytes_read <= 8 {
-            bytes_read = self
+            let n = self
                 .file
                 .read(&mut self.read_buf)
                 .await
                 .map_err(DiagDeviceError::DeviceReadFailed)?;
+            if n == 0 {
+                empty_reads += 1;
+                if empty_reads >= MAX_EMPTY_READS {
+                    return Err(DiagDeviceError::DeviceReadFailed(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "diag device returned no data repeatedly; assuming it disconnected",
+                    )));
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                continue;
+            }
+            empty_reads = 0;
+            bytes_read = n;
         }
 
         debug!(
