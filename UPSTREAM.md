@@ -201,25 +201,44 @@ under `cell-site-panel`. The parts it asks for that we do **not** have are an
 OpenCellID lookup or map link, and showing IMSI, TMSI and IMEI.
 
 ### layer-2-mac (#457)
-A maintainer has a work in progress branch, `fix-457`, and laid out a three
-step plan on the issue. Step one, enabling LTE MAC logging, was already in this
-fork. **Step three is now done for the RACH path**: random access responses
-reach the analysis pipeline as `LteInformationElement::MacRar`, read back out
-of the GSMTAP MAC-LTE frame `lib/src/gsmtap/mac.rs` already built. Before this
-nothing MAC ever reached an analyzer, which is why `timing-advance-check` could
-not be written.
+**Now complete.** All three steps of the maintainer's plan are done, so this
+is no longer a claimed-and-unstarted item: check with them before proposing,
+since they have a work in progress branch, `fix-457`.
+
+Step one, enabling LTE MAC logging, was already here. Step two, writing MAC
+downlink and uplink to the PCAP, and step three, parsing MAC for analyzers,
+are both done.
 **Commits:** see `git log --grep="^Feature: layer-2-mac"`.
-**Files:** `lib/src/analysis/information_element.rs` (`MacRandomAccessResponse`,
-`parse_mac_rar`, the `LteMacFramed` arm), `lib/src/gsmtap/mod.rs` (making `mac`
-public so the round-trip test can build what it reads).
-**Still missing:** writing MAC **DL and UL** to the PCAP. They parse into
-`LogBody::LteMacDl` / `LteMacUl` but `lib/src/gsmtap/parser.rs` has no arm for
-them, so they are dropped. That needs the subpacket layouts from SCAT and real
-captures to check against.
-**Note:** the offsets are verified by running the whole chain on SCAT's own
-captured fixture and asserting values decoded by hand (timing advance 4,
-TC-RNTI 0x1a23, preamble 27). Hand-derived offsets that quietly read a
-neighbouring field are the failure to guard against here.
+**Files:** `lib/src/diag/diaglog/mac.rs` (the `transport` module),
+`lib/src/gsmtap/mac.rs` (`mac_transport_to_gsmtap`, the RNTI translation),
+`lib/src/gsmtap/parser.rs` (`parse_all` and the two log arms),
+`daemon/src/pcap.rs` (using it), `lib/src/analysis/information_element.rs`
+(`MacRandomAccessResponse` reaching the analyzers), `lib/src/gsmtap/mod.rs`.
+**Depends on:** nothing. `timing-advance-check` depends on **this**.
+**Notes worth keeping.**
+
+- A record holds **several transport blocks**, not one. Measured on an Orbic,
+  downlink averages two and reaches ten, uplink reaches twenty three, so a
+  parser returning one frame per record throws most of the traffic away. That
+  is why `parse_all` exists alongside `parse`.
+- The analysis side deliberately stays on `parse`. It counts one row per diag
+  message, nothing analyses transport blocks, and the capture was never one
+  frame per diag message anyway. Keeping them separate leaves analysis, the
+  packet explorer and their packet numbering untouched.
+- **Qualcomm and Wireshark number RNTI types differently.** Qualcomm's 0 is a
+  C-RNTI, which is 3 to Wireshark. Copying the value through mislabels every
+  ordinary transmission in a way no capture reader can spot.
+- Transport blocks must not be read as random access responses. Both are
+  MAC-LTE frames and a transport block is long enough to parse as a response
+  full of plausible nonsense, which would feed invented timing advances to
+  `timing-advance-check`. They are told apart by the tag after the context
+  and the identity the frame is addressed to.
+- Fixtures are real records captured off an Orbic and decoded by hand,
+  including a multi-sample one: get one block's length wrong and every block
+  after it reads from the wrong offset.
+
+**Verified:** a capture that held no MAC at all now carries 406 MAC frames,
+404 transport blocks split 209 downlink and 197 uplink.
 
 ### lpp-heuristic (#1072)
 Two analyzers for LPP, the LTE Positioning Protocol (the network asking the

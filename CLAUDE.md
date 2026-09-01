@@ -391,6 +391,38 @@ parsing the result, not by reading the file:
 import tomllib; tomllib.loads(text)["terminal_enabled"]
 ```
 
+## One diag record can be several GSMTAP frames
+
+A MAC transport block record holds a list of blocks, not one. Measured on an
+Orbic: downlink records average two and reach ten, uplink reach twenty three.
+A parser that returns one frame per record silently drops most of that
+traffic, and the capture still looks plausible.
+
+`gsmtap::parser::parse_all` returns all of them and is what writes the PCAP.
+`parse` returns the first and is what the **analysis** side uses, deliberately:
+analysis counts one row per diag message, and `packet_num` in both the
+analyzer and the packet explorer means "the Nth diag message". Moving analysis
+to `parse_all` would renumber packets and break jump-to-packet. The capture has
+never been one frame per diag message anyway, since records that produce
+nothing are skipped entirely.
+
+`log_to_gsmtap` still has no arm for MAC DL/UL, so `parse` returns None for
+them and the analysis side is untouched by their arrival.
+
+## Qualcomm and Wireshark number RNTI types differently
+
+Qualcomm's 0 is a C-RNTI, which is **3** to Wireshark. Copying the byte
+through labels every ordinary transmission as something else, and nobody
+reading the capture can tell. See `wireshark_rnti_type` in
+`lib/src/gsmtap/mac.rs`. The constants are in SCAT's `util.py`, not guessed.
+
+**Transport blocks and random access responses are both MAC-LTE frames**, and
+a transport block is long enough to parse as a response full of plausible
+nonsense. That would feed invented timing advances to the detector that reads
+timing advance. They are told apart by the tag after the three context bytes
+(0x01 payload tag means a response, 0x04 frame/subframe tag means a transport
+block) and by the RNTI type.
+
 ## Check the API docs build before tagging a release
 
 The release pipeline builds the OpenAPI spec with a feature nothing else uses,
