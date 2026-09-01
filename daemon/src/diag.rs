@@ -192,7 +192,36 @@ impl DiagTask {
     }
 
     /// Start recording, returning an error if disk space is too low.
+    /// Start recording, and make sure the display agrees with the outcome.
+    ///
+    /// The display task starts life holding `DisplayState::Recording` and only
+    /// ever changes it when a message arrives. `start_inner` sends that message
+    /// as its last step, so every early return out of it — a disk too full to
+    /// begin with, a failure creating the entry — used to leave the device
+    /// showing a green "recording" line over a daemon that was recording
+    /// nothing. Worst at boot, where nothing had ever set the state.
+    ///
+    /// The mid-recording case was already right: running out of space while
+    /// recording calls `stop`, which sends `Paused`. This makes the "never
+    /// started" case behave the same way, for every error path including ones
+    /// added later.
     async fn start(&mut self, qmdl_store: &mut RecordingStore) -> Result<(), RecordingStoreError> {
+        let result = self.start_inner(qmdl_store).await;
+        if result.is_err()
+            && let Err(e) = self
+                .ui_update_sender
+                .send(display::DisplayState::Paused)
+                .await
+        {
+            warn!("couldn't send ui update message: {e}");
+        }
+        result
+    }
+
+    async fn start_inner(
+        &mut self,
+        qmdl_store: &mut RecordingStore,
+    ) -> Result<(), RecordingStoreError> {
         self.max_type_seen = EventType::Informational;
         self.bytes_since_space_check = 0;
         self.low_space_warned = false;
