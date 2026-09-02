@@ -15,6 +15,7 @@ pub mod http_client;
 pub mod key_input;
 pub mod notifications;
 pub mod packet_explorer;
+pub mod pairing;
 pub mod pcap;
 pub mod qmdl_store;
 pub mod redact;
@@ -37,7 +38,7 @@ use utoipa::OpenApi;
 #[derive(OpenApi)]
 #[openapi(
     info(
-        description = "OpenAPI documentation for Rayhunter daemon\n\n**Note:** API endpoints are subject to change as needs arise, though we will try to keep them as stable as possible and notify about breaking changes in the changelogs for new versions.\n\nBy default no endpoint requires authentication. If any accounts are configured under `web_users`, every endpoint requires HTTP Basic credentials. To use the in-browser execution on this page, you may need to disable CORS temporarily for your browser.",
+        description = "OpenAPI documentation for Rayhunter daemon\n\n**Note:** API endpoints are subject to change as needs arise, though we will try to keep them as stable as possible and notify about breaking changes in the changelogs for new versions.\n\nEvery endpoint except the pairing ones requires a paired browser (the `rh_device` cookie issued by `/api/setup/complete` or `/api/pair/*`), or a loopback connection such as an adb port-forward. Accounts configured under `web_users` are still accepted as HTTP Basic credentials until they have been migrated. To use the in-browser execution on this page, you may need to disable CORS temporarily for your browser.",
         license(
             name = "GNU General Public License v3.0",
             url = "https://github.com/EFForg/rayhunter/blob/main/LICENSE"
@@ -68,6 +69,13 @@ use utoipa::OpenApi;
         server::debug_show_qr,
         server::debug_clear_qr,
         server::get_tls_info,
+        server::get_setup_status,
+        server::complete_setup,
+        server::pair_with_passphrase,
+        server::pair_with_account,
+        server::list_devices,
+        server::rename_device,
+        server::revoke_device,
         server::get_cell_info,
         server::annotate_recording,
         server::set_display_gif,

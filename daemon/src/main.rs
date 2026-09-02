@@ -15,6 +15,7 @@ mod http_client;
 mod key_input;
 mod notifications;
 mod packet_explorer;
+mod pairing;
 mod pcap;
 mod qmdl_store;
 mod redact;
@@ -43,7 +44,7 @@ use crate::packet_explorer::{get_packet, list_packets};
 use crate::pcap::get_pcap;
 use crate::qmdl_store::RecordingStore;
 use crate::server::{
-    MAX_GIF_BYTES, ServerState, annotate_recording, debug_clear_qr, debug_keypress,
+    MAX_GIF_BYTES, ServerState, annotate_recording, complete_setup, debug_clear_qr, debug_keypress,
     debug_set_display_state, debug_show_qr, delete_display_gif, delete_web_user, get_cell_info,
     get_config, get_display_gif, get_qmdl, get_time, get_tls_info, get_wifi_status, get_zip,
     run_terminal_command, scan_wifi, serve_static, set_config, set_display_gif, set_time_offset,
@@ -117,6 +118,16 @@ fn get_router() -> AppRouter {
         .route("/api/time", get(get_time))
         .route("/api/time-offset", post(set_time_offset))
         .route("/api/tls-info", get(get_tls_info))
+        .route("/api/setup/status", get(server::get_setup_status))
+        .route("/api/setup/complete", post(complete_setup))
+        .route("/api/pair/passphrase", post(server::pair_with_passphrase))
+        .route("/api/pair/account", post(server::pair_with_account))
+        .route("/api/devices", get(server::list_devices))
+        .route("/api/devices/{id}/rename", post(server::rename_device))
+        .route("/api/devices/{id}/revoke", post(server::revoke_device))
+        .route("/pair", get(server::serve_pair_page))
+        .route("/s/{token}", get(server::serve_pair_page))
+        .route("/S/{token}", get(server::serve_pair_page))
         .route("/api/debug/display-state", post(debug_set_display_state))
         .route("/api/debug/keypress", post(debug_keypress))
         .route("/api/debug/qr", post(debug_show_qr))
@@ -200,18 +211,37 @@ async fn run_server(
     let port = state.config.port;
     let tls_port = state.config.tls_port;
     let tls_identity = state.tls.clone();
-    // Wrapped around every route. When no accounts are configured the layer
-    // passes everything through, so this changes nothing until somebody adds
-    // one.
-    let app = get_router()
+    // Wrapped around every route. Innermost decides who may pass; then a
+    // cross-site state-changing request is refused before anything else
+    // looks at it; outermost, the plain hotspot port is sent to TLS. Each
+    // listener stamps the requests it accepts with what kind of listener it
+    // is, which is what the redirect and the loopback exemption go by.
+    let base = get_router()
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             web_auth::require_auth,
         ))
-        // Outermost, so a cross-site state-changing request is refused before
-        // anything else looks at it. Independent of whether a password is set.
         .layer(axum::middleware::from_fn(web_auth::csrf_protection))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            web_auth::redirect_to_tls,
+        ))
         .with_state(state);
+    let app_for = |kind: web_auth::ListenerKind| base.clone().layer(axum::Extension(kind));
+    let plain_kind = |ip: &IpAddr| {
+        if ip.is_loopback() {
+            web_auth::ListenerKind::Loopback
+        } else {
+            web_auth::ListenerKind::Plain
+        }
+    };
+    let tls_kind = |ip: &IpAddr| {
+        if ip.is_loopback() {
+            web_auth::ListenerKind::Loopback
+        } else {
+            web_auth::ListenerKind::Tls
+        }
+    };
 
     info!("serving the web interface on port {port}, addresses {addrs:?}");
 
@@ -232,7 +262,7 @@ async fn run_server(
                             continue;
                         }
                     };
-                    let app = app.clone();
+                    let app = app_for(tls_kind(ip));
                     let shutdown = shutdown_token.clone();
                     task_tracker.spawn(async move {
                         info!("The orca is hunting for stingrays... ({sock}, TLS)");
@@ -263,7 +293,7 @@ async fn run_server(
                 continue;
             }
         };
-        let app = app.clone();
+        let app = app_for(plain_kind(&ip));
         let shutdown = shutdown_token.clone();
         last_handle = Some(task_tracker.spawn(async move {
             info!("The orca is hunting for stingrays... ({sock})");
@@ -281,6 +311,7 @@ async fn run_server(
         None => {
             let sock = SocketAddr::from(([0, 0, 0, 0], port));
             let listener = TcpListener::bind(&sock).await.unwrap();
+            let app = app_for(web_auth::ListenerKind::Plain);
             task_tracker.spawn(async move {
                 info!("The orca is hunting for stingrays... ({sock}, fallback)");
                 axum::serve(listener, app)
@@ -433,6 +464,82 @@ async fn run_with_config(
     let notification_service = NotificationService::new(config.ntfy_url.clone());
     let update_status_lock = Arc::new(RwLock::new(UpdateStatus::default()));
 
+    // Where the web interface will listen decides what the certificate is
+    // for, so the addresses are settled before the identity is loaded. The
+    // identity is only ever made once there is a hotspot address to put in
+    // it; a start that finds none waits for the next one rather than making
+    // a certificate that names nothing.
+    let listen_addrs = web_listen_addrs().await;
+    let hotspot_addrs: Vec<IpAddr> = listen_addrs
+        .iter()
+        .copied()
+        .filter(|ip| !ip.is_loopback() && !ip.is_unspecified())
+        .collect();
+    let tls_identity = if config.tls_port == 0 {
+        info!("TLS is switched off (tls_port = 0)");
+        None
+    } else if hotspot_addrs.is_empty()
+        && !tokio::fs::try_exists(Path::new(&config.auth_store_path).join(tls::CERT_FILE))
+            .await
+            .unwrap_or(false)
+    {
+        warn!("no hotspot address yet and no certificate on file; TLS waits for the next start");
+        None
+    } else {
+        match tls::load_or_generate(Path::new(&config.auth_store_path), &hotspot_addrs).await {
+            Ok(identity) => Some(Arc::new(identity)),
+            Err(e) => {
+                error!("TLS is unavailable this run: {e}");
+                None
+            }
+        }
+    };
+
+    // Who this unit trusts. The setup code goes on the screen when there is
+    // one and there is a hotspot address for the link to point at.
+    let setup_display = match (
+        hotspot_addrs.first(),
+        display::qr::screen_geometry(&config.device),
+    ) {
+        (Some(ip), Some(screen)) => Some(pairing::SetupDisplay {
+            override_: display_override.clone(),
+            screen,
+            host: format!("{ip}:{}", config.tls_port),
+        }),
+        _ => None,
+    };
+    let pairing =
+        match pairing::Pairing::load(Path::new(&config.auth_store_path), setup_display.clone())
+            .await
+        {
+            Ok(pairing) => Arc::new(pairing),
+            Err(e) => {
+                // Not overwritten and not fatal: the unit runs, pairs only for
+                // this session, and the file is left for somebody to look at.
+                error!("the pairing store is unusable ({e}); pairing will not persist this run");
+                Arc::new(pairing::Pairing::ephemeral(
+                    pairing::AuthState::default(),
+                    setup_display,
+                ))
+            }
+        };
+    if tls_identity.is_some()
+        && !pairing.setup_complete().await
+        && pairing.device_count().await == 0
+    {
+        match pairing.open_setup_window().await {
+            Ok(token) => info!(
+                "this unit has no owner yet; setup token {}",
+                pairing::display_token(&token)
+            ),
+            Err(e) => warn!("could not open the setup window: {e}"),
+        }
+    } else if tls_identity.is_none() && !pairing.setup_complete().await {
+        warn!(
+            "this unit has no owner yet, but without TLS nobody can pair; the interface is open as before"
+        );
+    }
+
     if !config.debug_mode {
         // Reconcile ADB with what the settings ask for, before anything else
         // starts. It only takes effect at the next restart, since the USB
@@ -503,6 +610,7 @@ async fn run_with_config(
             &config,
             diag_tx.clone(),
             suppression.clone(),
+            Some(pairing.clone()),
             shutdown_token.clone(),
         );
 
@@ -586,40 +694,10 @@ async fn run_with_config(
         None
     };
 
-    // Where the web interface will listen decides what the certificate is
-    // for, so the addresses are settled before the identity is loaded. The
-    // identity is only ever made once there is a hotspot address to put in
-    // it; a start that finds none waits for the next one rather than making
-    // a certificate that names nothing.
-    let listen_addrs = web_listen_addrs().await;
-    let hotspot_addrs: Vec<IpAddr> = listen_addrs
-        .iter()
-        .copied()
-        .filter(|ip| !ip.is_loopback() && !ip.is_unspecified())
-        .collect();
-    let tls_identity = if config.tls_port == 0 {
-        info!("TLS is switched off (tls_port = 0)");
-        None
-    } else if hotspot_addrs.is_empty()
-        && !tokio::fs::try_exists(Path::new(&config.auth_store_path).join(tls::CERT_FILE))
-            .await
-            .unwrap_or(false)
-    {
-        warn!("no hotspot address yet and no certificate on file; TLS waits for the next start");
-        None
-    } else {
-        match tls::load_or_generate(Path::new(&config.auth_store_path), &hotspot_addrs).await {
-            Ok(identity) => Some(Arc::new(identity)),
-            Err(e) => {
-                error!("TLS is unavailable this run: {e}");
-                None
-            }
-        }
-    };
-
     let state = Arc::new(ServerState {
         config_path: args.config_path.clone(),
         tls: tls_identity,
+        pairing,
         web_users: Arc::new(tokio::sync::RwLock::new(config.web_users.clone())),
         config,
         qmdl_store_lock: qmdl_store_lock.clone(),

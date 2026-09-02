@@ -42,6 +42,8 @@ pub struct ServerState {
     /// This unit's certificate, when TLS is up. `None` means the plain port
     /// is all there is this run.
     pub tls: Option<Arc<crate::tls::TlsIdentity>>,
+    /// Which browsers are trusted, and the setup window.
+    pub pairing: Arc<crate::pairing::Pairing>,
     pub config: Config,
     /// The accounts as they stand now, rather than as they were at startup.
     ///
@@ -149,11 +151,331 @@ pub async fn serve_static(
             include_bytes!("../web/build/index.html.gz"),
         )
             .into_response(),
+        "pair.html" => pair_page(),
         path => {
             warn!("404 on path: {path}");
             StatusCode::NOT_FOUND.into_response()
         }
     }
+}
+
+fn pair_page() -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, HeaderValue::from_static("text/html")),
+            (header::CONTENT_ENCODING, HeaderValue::from_static("gzip")),
+            // Never cached: it decides what to show from the unit's state.
+            (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
+        ],
+        include_bytes!("../web/build/pair.html.gz"),
+    )
+        .into_response()
+}
+
+/// The pairing page, at `/pair` and at the setup link `/s/<token>`.
+///
+/// The same page either way; it reads the token, if any, from its own
+/// address. The token is deliberately not looked at here: a browser that
+/// followed a stale link gets the page and a clear message, not a bare
+/// error.
+pub async fn serve_pair_page() -> Response {
+    pair_page()
+}
+
+fn pair_error(e: crate::pairing::PairError) -> (StatusCode, String) {
+    use crate::pairing::PairError::*;
+    let status = match e {
+        AlreadyComplete | NoPassphrase => StatusCode::CONFLICT,
+        WindowClosed => StatusCode::GONE,
+        WrongToken { .. } | WrongPassphrase => StatusCode::FORBIDDEN,
+        PassphraseTooShort => StatusCode::UNPROCESSABLE_ENTITY,
+        Backoff(_) => StatusCode::TOO_MANY_REQUESTS,
+        NoSuchDevice => StatusCode::NOT_FOUND,
+        Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    (status, e.to_string())
+}
+
+fn user_agent(headers: &axum::http::HeaderMap) -> String {
+    headers
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Where a unit is in its life: fresh, mid-setup, or owned.
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct SetupStatus {
+    /// Somebody owns this unit.
+    pub setup_complete: bool,
+    /// The code is on the screen and a token will be accepted.
+    pub window_open: bool,
+    pub seconds_left: u64,
+    pub paired_devices: usize,
+    /// Whether "pair with the passphrase" can work.
+    pub has_passphrase: bool,
+    /// Whether "sign in with an existing account" can work.
+    pub has_accounts: bool,
+    pub tls_port: u16,
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    get,
+    path = "/api/setup/status",
+    tag = "Pairing",
+    responses((status = StatusCode::OK, description = "Where setup stands", body = SetupStatus)),
+    summary = "Where this unit is in its setup",
+))]
+pub async fn get_setup_status(State(state): State<Arc<ServerState>>) -> Json<SetupStatus> {
+    let window = state.pairing.setup_window();
+    Json(SetupStatus {
+        setup_complete: state.pairing.setup_complete().await,
+        window_open: window.is_some(),
+        seconds_left: window.map(|(_, left)| left.as_secs()).unwrap_or(0),
+        paired_devices: state.pairing.device_count().await,
+        has_passphrase: state.pairing.has_passphrase().await,
+        has_accounts: !state.web_users.read().await.is_empty(),
+        tls_port: state.config.tls_port,
+    })
+}
+
+/// First contact with a new unit.
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct SetupCompleteRequest {
+    /// The token from the screen, as scanned or as typed.
+    pub token: String,
+    /// The owner passphrase to set. At least eight characters.
+    pub passphrase: String,
+    /// What to call this browser. Made up from the user agent if absent.
+    #[serde(default)]
+    pub device_name: Option<String>,
+    /// The browser's clock, so the unit can set its own from it.
+    #[serde(default)]
+    pub browser_unix_ms: Option<i64>,
+}
+
+/// What a browser gets back once it is trusted. The cookie travels in the
+/// `Set-Cookie` header, not here.
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct PairedResponse {
+    pub device_id: String,
+    pub name: String,
+}
+
+fn paired(issued: crate::pairing::IssuedDevice) -> Response {
+    (
+        StatusCode::OK,
+        [(header::SET_COOKIE, issued.set_cookie_header())],
+        Json(PairedResponse {
+            device_id: issued.id,
+            name: issued.name,
+        }),
+    )
+        .into_response()
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/setup/complete",
+    tag = "Pairing",
+    request_body(content = SetupCompleteRequest, content_type = "application/json"),
+    responses(
+        (status = StatusCode::OK, description = "This browser is now the first trusted device; the cookie is in Set-Cookie", body = PairedResponse),
+        (status = StatusCode::FORBIDDEN, description = "Wrong token"),
+        (status = StatusCode::GONE, description = "The setup window is closed"),
+        (status = StatusCode::CONFLICT, description = "Setup is already complete"),
+        (status = StatusCode::UNPROCESSABLE_ENTITY, description = "The passphrase is too short"),
+    ),
+    summary = "Complete first-time setup",
+))]
+pub async fn complete_setup(
+    State(state): State<Arc<ServerState>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<SetupCompleteRequest>,
+) -> Result<Response, (StatusCode, String)> {
+    let issued = state
+        .pairing
+        .complete_setup(
+            &req.token,
+            &req.passphrase,
+            req.device_name.as_deref(),
+            &user_agent(&headers),
+        )
+        .await
+        .map_err(pair_error)?;
+    // The phone knows what time it is and the unit very likely does not.
+    if let Some(browser_ms) = req.browser_unix_ms {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let offset = chrono::TimeDelta::milliseconds(browser_ms - now_ms);
+        rayhunter::clock::set_offset(offset);
+        log::info!(
+            "clock offset set from the setup browser: {}s",
+            offset.num_seconds()
+        );
+    }
+    Ok(paired(issued))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct PairPassphraseRequest {
+    pub passphrase: String,
+    #[serde(default)]
+    pub device_name: Option<String>,
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/pair/passphrase",
+    tag = "Pairing",
+    request_body(content = PairPassphraseRequest, content_type = "application/json"),
+    responses(
+        (status = StatusCode::OK, description = "This browser is now trusted; the cookie is in Set-Cookie", body = PairedResponse),
+        (status = StatusCode::FORBIDDEN, description = "Wrong passphrase"),
+        (status = StatusCode::TOO_MANY_REQUESTS, description = "Too many wrong attempts; wait"),
+        (status = StatusCode::CONFLICT, description = "No passphrase has been set"),
+    ),
+    summary = "Pair this browser with the owner passphrase",
+))]
+pub async fn pair_with_passphrase(
+    State(state): State<Arc<ServerState>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<PairPassphraseRequest>,
+) -> Result<Response, (StatusCode, String)> {
+    let issued = state
+        .pairing
+        .pair_with_passphrase(
+            &req.passphrase,
+            req.device_name.as_deref(),
+            &user_agent(&headers),
+        )
+        .await
+        .map_err(pair_error)?;
+    Ok(paired(issued))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct PairAccountRequest {
+    pub username: String,
+    pub password: String,
+    #[serde(default)]
+    pub device_name: Option<String>,
+}
+
+/// For units that had web accounts before pairing existed.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/pair/account",
+    tag = "Pairing",
+    request_body(content = PairAccountRequest, content_type = "application/json"),
+    responses(
+        (status = StatusCode::OK, description = "This browser is now trusted; the cookie is in Set-Cookie", body = PairedResponse),
+        (status = StatusCode::FORBIDDEN, description = "Wrong username or password"),
+        (status = StatusCode::TOO_MANY_REQUESTS, description = "Too many wrong attempts; wait"),
+    ),
+    summary = "Pair this browser with a web account from before pairing",
+))]
+pub async fn pair_with_account(
+    State(state): State<Arc<ServerState>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<PairAccountRequest>,
+) -> Result<Response, (StatusCode, String)> {
+    let users = state.web_users.read().await.clone();
+    let issued = state
+        .pairing
+        .pair_with_account(
+            &users,
+            &req.username,
+            &req.password,
+            req.device_name.as_deref(),
+            &user_agent(&headers),
+        )
+        .await
+        .map_err(pair_error)?;
+    Ok(paired(issued))
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    get,
+    path = "/api/devices",
+    tag = "Pairing",
+    responses((status = StatusCode::OK, description = "Every trusted browser", body = Vec<crate::pairing::DeviceInfo>)),
+    summary = "List trusted devices",
+))]
+pub async fn list_devices(
+    State(state): State<Arc<ServerState>>,
+    current: Option<axum::Extension<crate::web_auth::CurrentDevice>>,
+) -> Json<Vec<crate::pairing::DeviceInfo>> {
+    let current_id = current.as_ref().map(|c| c.0.0.as_str());
+    Json(state.pairing.devices(current_id).await)
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct RenameDeviceRequest {
+    pub name: String,
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/devices/{id}/rename",
+    tag = "Pairing",
+    request_body(content = RenameDeviceRequest, content_type = "application/json"),
+    params(("id" = String, Path, description = "Device id")),
+    responses(
+        (status = StatusCode::OK, description = "Renamed"),
+        (status = StatusCode::NOT_FOUND, description = "No such device, or an empty name"),
+    ),
+    summary = "Rename a trusted device",
+))]
+pub async fn rename_device(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<String>,
+    Json(req): Json<RenameDeviceRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    state
+        .pairing
+        .rename_device(&id, &req.name)
+        .await
+        .map_err(pair_error)?;
+    Ok(StatusCode::OK)
+}
+
+/// Forget a trusted device. Its cookie stops working at once; revoking the
+/// browser making the request also clears its cookie, so it lands on the
+/// pairing page rather than on a wall of errors.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/devices/{id}/revoke",
+    tag = "Pairing",
+    params(("id" = String, Path, description = "Device id")),
+    responses(
+        (status = StatusCode::OK, description = "Revoked"),
+        (status = StatusCode::NOT_FOUND, description = "No such device"),
+    ),
+    summary = "Revoke a trusted device",
+))]
+pub async fn revoke_device(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<String>,
+    current: Option<axum::Extension<crate::web_auth::CurrentDevice>>,
+) -> Result<Response, (StatusCode, String)> {
+    state.pairing.revoke_device(&id).await.map_err(pair_error)?;
+    let is_current = current.map(|c| c.0.0 == id).unwrap_or(false);
+    if is_current {
+        return Ok((
+            StatusCode::OK,
+            [(header::SET_COOKIE, crate::pairing::clear_cookie_header())],
+            "revoked this browser",
+        )
+            .into_response());
+    }
+    Ok((StatusCode::OK, "revoked").into_response())
 }
 
 /// Inject a synthetic, clearly labelled warning, for demonstrating Rayhunter.
@@ -1110,6 +1432,10 @@ mod tests {
 
         Arc::new(ServerState {
             tls: None,
+            pairing: Arc::new(crate::pairing::Pairing::ephemeral(
+                crate::pairing::AuthState::default(),
+                None,
+            )),
             config_path: "/tmp/test_config.toml".to_string(),
             config: Config::default(),
             web_users: Arc::new(RwLock::new(Vec::new())),

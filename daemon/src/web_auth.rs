@@ -183,38 +183,123 @@ pub fn parse_basic_auth(header: &str) -> Option<(String, String)> {
     Some((user.to_string(), pass.to_string()))
 }
 
-/// Axum middleware requiring a valid account when any is configured.
+/// Which listener a request arrived on. Stamped onto every request as an
+/// extension by the listener that accepted it, so the rules below can tell
+/// a USB port-forward from the hotspot without asking the socket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListenerKind {
+    /// 127.0.0.1: an adb port-forward, or the unit talking to itself. USB
+    /// is physical possession, which is already the reset path, so nothing
+    /// is required here.
+    Loopback,
+    /// The plain port on the hotspot. Redirected to TLS while TLS is up.
+    Plain,
+    /// The TLS port on the hotspot.
+    Tls,
+}
+
+/// The trusted device a request was made from, once the cookie has checked
+/// out. Handlers that need to know which browser is asking read this.
+#[derive(Debug, Clone)]
+pub struct CurrentDevice(pub String);
+
+/// Paths a browser that is not yet trusted may reach: the pairing page and
+/// what it needs, and nothing that reads or changes anything.
+pub fn is_exempt_from_pairing(path: &str) -> bool {
+    matches!(
+        path,
+        "/pair"
+            | "/api/setup/status"
+            | "/api/setup/complete"
+            | "/api/pair/passphrase"
+            | "/api/pair/account"
+            | "/api/tls-info"
+            | "/favicon.png"
+            | "/rayhunter_orca_only.png"
+            | "/rayhunter_text.png"
+    ) || path.starts_with("/s/")
+        || path.starts_with("/S/")
+}
+
+fn basic_challenge() -> axum::response::Response {
+    use axum::http::{StatusCode, header};
+    use axum::response::IntoResponse;
+    // The realm makes browsers prompt rather than showing a bare error.
+    (
+        StatusCode::UNAUTHORIZED,
+        [(
+            header::WWW_AUTHENTICATE,
+            "Basic realm=\"Rayhunter\", charset=\"UTF-8\"",
+        )],
+        "authentication required",
+    )
+        .into_response()
+}
+
+/// Axum middleware that lets in trusted browsers and nobody else.
+///
+/// In order: the pairing page and its API are open to all, since they are
+/// how a browser becomes trusted; loopback is trusted outright; a valid
+/// device cookie passes; a web account from before pairing existed still
+/// passes, until every fielded unit has migrated. Anything else is sent to
+/// the pairing page, or told so in JSON if it is an API call.
+///
+/// If TLS is not up there is no way to pair, so nothing can be required:
+/// the unit falls back to exactly what it did before pairing existed, open
+/// unless accounts are configured. A unit whose TLS broke stays usable.
 ///
 /// Applied to every route rather than a chosen list. Guessing which endpoints
 /// are sensitive is how one gets forgotten, and the interesting data here is
 /// spread across most of them.
 pub async fn require_auth(
     axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::server::ServerState>>,
-    request: axum::extract::Request,
+    mut request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     use axum::http::{StatusCode, header};
-    use axum::response::IntoResponse;
+    use axum::response::{IntoResponse, Redirect};
+
+    let path = request.uri().path().to_string();
+    if is_exempt_from_pairing(&path) {
+        return next.run(request).await;
+    }
+    let kind = request
+        .extensions()
+        .get::<ListenerKind>()
+        .copied()
+        .unwrap_or(ListenerKind::Plain);
+    if kind == ListenerKind::Loopback {
+        return next.run(request).await;
+    }
+
+    let cookie = request
+        .headers()
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|h| crate::pairing::cookie_value(h, crate::pairing::COOKIE_NAME))
+        .map(str::to_string);
+    if let Some(token) = cookie
+        && let Some(device) = state.pairing.authenticate(&token).await
+    {
+        request.extensions_mut().insert(CurrentDevice(device.id));
+        return next.run(request).await;
+    }
 
     // The live list, so an account set a moment ago is already in force and one
     // just deleted has already stopped working.
     let users = state.web_users.read().await.clone();
-    // No accounts configured means Rayhunter's long standing behaviour: open.
-    // An update must not lock somebody out of their own device.
-    if users.is_empty() {
-        return next.run(request).await;
-    }
-
     let supplied = request
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(parse_basic_auth);
-
-    if let Some((username, password)) = supplied {
+    if !users.is_empty()
+        && let Some((username, password)) = supplied
+    {
         // PBKDF2 is deliberately slow, and this runtime is single-threaded, so
         // verifying inline would stall every other request — including plain
         // asset loads — for the duration. Run it on the blocking pool instead.
+        let users = users.clone();
         let valid = tokio::task::spawn_blocking(move || {
             credentials_are_valid(&users, &username, &password)
         })
@@ -225,14 +310,80 @@ pub async fn require_auth(
         }
     }
 
-    // The realm makes browsers prompt rather than showing a bare error.
+    if state.tls.is_none() {
+        if users.is_empty() {
+            return next.run(request).await;
+        }
+        return basic_challenge();
+    }
+
+    if path.starts_with("/api/") {
+        (
+            StatusCode::UNAUTHORIZED,
+            [(header::CONTENT_TYPE, "application/json")],
+            r#"{"error":"this browser is not paired with the unit","pair":"/pair"}"#,
+        )
+            .into_response()
+    } else {
+        Redirect::to("/pair").into_response()
+    }
+}
+
+/// The host part of a `Host` header, without the port.
+fn host_without_port(host: &str) -> &str {
+    if let Some(rest) = host.strip_prefix('[') {
+        // An IPv6 literal: everything up to the closing bracket.
+        return rest.split_once(']').map(|(h, _)| h).unwrap_or(rest);
+    }
+    host.split_once(':').map(|(h, _)| h).unwrap_or(host)
+}
+
+/// Axum middleware sending the plain hotspot port to the TLS one.
+///
+/// Only the plain listener on the hotspot, and only while TLS is up. The
+/// loopback port keeps serving as it always has, and a unit whose TLS is
+/// down keeps its plain port rather than pointing at nothing. One line of
+/// text goes with the redirect for a client that cannot follow it.
+pub async fn redirect_to_tls(
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::server::ServerState>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::{StatusCode, header};
+    use axum::response::IntoResponse;
+
+    let kind = request
+        .extensions()
+        .get::<ListenerKind>()
+        .copied()
+        .unwrap_or(ListenerKind::Plain);
+    if kind != ListenerKind::Plain || state.tls.is_none() {
+        return next.run(request).await;
+    }
+    let Some(host) = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .map(host_without_port)
+        .filter(|h| !h.is_empty())
+    else {
+        return next.run(request).await;
+    };
+    let host = if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    };
+    let rest = request
+        .uri()
+        .path_and_query()
+        .map(|p| p.as_str())
+        .unwrap_or("/");
+    let target = format!("https://{host}:{}{rest}", state.config.tls_port);
     (
-        StatusCode::UNAUTHORIZED,
-        [(
-            header::WWW_AUTHENTICATE,
-            "Basic realm=\"Rayhunter\", charset=\"UTF-8\"",
-        )],
-        "authentication required",
+        StatusCode::MOVED_PERMANENTLY,
+        [(header::LOCATION, target.clone())],
+        format!("Rayhunter is served over HTTPS now: {target}\n"),
     )
         .into_response()
 }
@@ -528,6 +679,45 @@ mod tests {
             None,
             host
         ));
+    }
+
+    #[test]
+    fn the_pairing_page_and_its_api_are_open_and_nothing_else_is() {
+        for open in [
+            "/pair",
+            "/s/7K3M9XWQ",
+            "/S/7K3M9XWQ",
+            "/api/setup/status",
+            "/api/setup/complete",
+            "/api/pair/passphrase",
+            "/api/tls-info",
+            "/favicon.png",
+        ] {
+            assert!(is_exempt_from_pairing(open), "{open} should be open");
+        }
+        for closed in [
+            "/",
+            "/index.html",
+            "/api/config",
+            "/api/qmdl-manifest",
+            "/api/devices",
+            "/api/terminal",
+            "/api/setup",
+            "/spair",
+        ] {
+            assert!(
+                !is_exempt_from_pairing(closed),
+                "{closed} should need pairing"
+            );
+        }
+    }
+
+    #[test]
+    fn the_host_loses_its_port_and_keeps_its_brackets() {
+        assert_eq!(host_without_port("192.168.1.1:8080"), "192.168.1.1");
+        assert_eq!(host_without_port("192.168.1.1"), "192.168.1.1");
+        assert_eq!(host_without_port("rayhunter.local:8080"), "rayhunter.local");
+        assert_eq!(host_without_port("[::1]:8080"), "::1");
     }
 
     #[test]

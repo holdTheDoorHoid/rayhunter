@@ -256,9 +256,14 @@ export async function req(method: string, url: string, json_body?: unknown): Pro
     const responseBody = await response.text();
     if (response.status >= 200 && response.status < 300) {
         return responseBody;
-    } else {
-        throw new Error(responseBody);
     }
+    if (response.status === 401 && !location.pathname.startsWith('/pair')) {
+        // This browser is not paired with the unit, or its cookie was
+        // revoked. Every request from here on would fail the same way, so
+        // go to the pairing page rather than fill the screen with errors.
+        location.assign('/pair');
+    }
+    throw new Error(responseBody);
 }
 
 // A wrapper around req that reports errors to the UI
