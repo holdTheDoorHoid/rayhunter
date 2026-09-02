@@ -477,17 +477,22 @@ pub async fn candidates(config: &StorageConfig) -> Vec<StorageCandidate> {
         .unwrap_or_default();
     let mut list = vec![describe(&config.internal, "internal", &mounts, false)];
     let mut seen: Vec<String> = vec![normalise(&config.internal)];
-    let mut push = |path: &Path, kind: &str, configured: bool, list: &mut Vec<StorageCandidate>| {
+    // The configured path counts as choosing the mount it sits on, so a
+    // recordings directory inside the card does not list the card twice.
+    let configured_within = |path: &Path| {
+        config
+            .removable
+            .as_ref()
+            .is_some_and(|removable| path_is_within(removable, path))
+    };
+    let mut push = |path: &Path, kind: &str, list: &mut Vec<StorageCandidate>| {
         let key = normalise(path);
         if seen.contains(&key) {
             return;
         }
         seen.push(key);
-        list.push(describe(path, kind, &mounts, configured));
+        list.push(describe(path, kind, &mounts, configured_within(path)));
     };
-    if let Some(removable) = &config.removable {
-        push(removable, "card", true, &mut list);
-    }
     for entry in mounts.iter().filter(|m| looks_removable(m)) {
         let path = Path::new(&entry.mountpoint);
         let kind = if KNOWN_CARD_DIRS
@@ -498,17 +503,31 @@ pub async fn candidates(config: &StorageConfig) -> Vec<StorageCandidate> {
         } else {
             "other"
         };
-        push(path, kind, false, &mut list);
+        push(path, kind, &mut list);
     }
     if card_device(config.device.as_deref()).await.is_some() {
         for dir in KNOWN_CARD_DIRS {
             let path = Path::new(dir);
             if fs::metadata(path).await.is_ok() {
-                push(path, "card", false, &mut list);
+                push(path, "card", &mut list);
             }
         }
     }
+    // The configured card, when nothing above covered it: absent, or on a
+    // path of the user's own.
+    if let Some(removable) = &config.removable
+        && !list.iter().any(|c| c.configured)
+    {
+        push(removable, "card", &mut list);
+    }
     list
+}
+
+/// Whether `path` is `root` itself or a directory inside it.
+fn path_is_within(path: &Path, root: &Path) -> bool {
+    let wanted = normalise(path);
+    let here = normalise(root);
+    wanted == here || wanted.starts_with(&format!("{here}/"))
 }
 
 fn describe(path: &Path, kind: &str, mounts: &[MountEntry], configured: bool) -> StorageCandidate {
@@ -846,5 +865,20 @@ mod tests {
         paths.sort();
         paths.dedup();
         assert_eq!(paths.len(), list.len());
+    }
+
+    #[test]
+    fn a_configured_directory_inside_a_mount_belongs_to_it() {
+        let inside = Path::new("/media/card/qmdl");
+        assert!(path_is_within(inside, Path::new("/media/card")));
+        assert!(path_is_within(inside, Path::new("/media/card/qmdl")));
+        // Inside /media too, as far as the path goes; that /media is not a
+        // card is a question for the mount list, not for this.
+        assert!(path_is_within(inside, Path::new("/media")));
+        assert!(!path_is_within(inside, Path::new("/mnt/sdcard")));
+        assert!(!path_is_within(
+            Path::new("/media/cardx"),
+            Path::new("/media/card")
+        ));
     }
 }
