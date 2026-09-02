@@ -4,6 +4,7 @@
         set_config,
         test_notification,
         get_wifi_status,
+        get_system_stats,
         scan_wifi_networks,
         GpsMode,
         ClockSyncMode,
@@ -43,6 +44,15 @@
     let testMessage = $state('');
     let testMessageType = $state<'success' | 'error' | null>(null);
     let wifiStatus = $state<WifiStatus | null>(null);
+    /**
+     * Whether this device lets ADB be changed from here at all.
+     *
+     * Read from the device rather than inferred from the configured device
+     * type: the type in the config is not always right (a Moxee installed by
+     * the shared path calls itself an Orbic), and guessing wrong here would
+     * offer a switch that writes a value nobody has checked.
+     */
+    let adbState = $state<'enabled' | 'disabled' | 'not_adjustable' | null>(null);
     let wifiStatusTimer = $state<ReturnType<typeof setInterval> | null>(null);
     let scanning = $state(false);
     let scanResults = $state<WifiNetwork[]>([]);
@@ -205,6 +215,17 @@
         lowPowerApplied = true;
     }
 
+    async function load_adb_state() {
+        try {
+            const stats = await get_system_stats();
+            adbState = stats.adb?.state ?? null;
+        } catch {
+            // Not worth failing the settings page over. The control simply
+            // does not appear.
+            adbState = null;
+        }
+    }
+
     async function save_config() {
         if (!config) return;
 
@@ -293,6 +314,7 @@
     $effect(() => {
         if (shown && !config) {
             load_config();
+            load_adb_state();
         }
         if (!shown && wifiStatusTimer) {
             clearInterval(wifiStatusTimer);
@@ -1681,6 +1703,72 @@
                                 </Explainer>
                             {/if}
                         </div>
+
+                        {#if adbState && adbState !== 'not_adjustable'}
+                            <div
+                                class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3"
+                            >
+                                <h3
+                                    class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4"
+                                >
+                                    USB debugging (ADB)
+                                </h3>
+
+                                <div class="flex items-center">
+                                    <input
+                                        id="adb_enabled"
+                                        type="checkbox"
+                                        checked={config.adb_enabled ?? adbState === 'enabled'}
+                                        onchange={(e) => {
+                                            if (config)
+                                                config.adb_enabled = e.currentTarget.checked;
+                                        }}
+                                        class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
+                                    />
+                                    <label
+                                        for="adb_enabled"
+                                        class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                                    >
+                                        Enable ADB over USB
+                                    </label>
+                                </div>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">
+                                    Currently <strong
+                                        >{adbState === 'enabled' ? 'on' : 'off'}</strong
+                                    >. Changing this takes effect at the next restart, because the
+                                    USB mode is chosen when the device boots.
+                                </p>
+
+                                <div
+                                    class="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+                                >
+                                    ADB on this device runs as <strong>root</strong>. Anyone who can
+                                    plug a cable into it gets complete control of it, without
+                                    needing this page, the WiFi password or anything else. Worth
+                                    having on if you are installing over USB or debugging; worth
+                                    turning off before carrying the device somewhere.
+                                </div>
+
+                                <Explainer summary="Why this only appears on some devices.">
+                                    <p>
+                                        Devices pick their USB mode at boot from a number in a file,
+                                        and the numbers mean different things on different hardware.
+                                        A Moxee uses one value for the mode that includes ADB; an
+                                        Orbic has a different value in the same file for a mode that
+                                        also includes ADB.
+                                    </p>
+                                    <p>
+                                        So this only offers to change a value that has been checked
+                                        on real hardware. On anything else it does not appear, and
+                                        whatever ADB the device already has is left exactly as it
+                                        is. Writing the wrong number would select a USB mode nobody
+                                        has tried, and getting that wrong takes the device off USB
+                                        entirely, which is the one problem that needs a cable to
+                                        fix.
+                                    </p>
+                                </Explainer>
+                            </div>
+                        {/if}
 
                         {#if config.device === 'orbic' || config.device === 'moxee' || config.device === 'tmobile' || config.device === 'wingtech'}
                             <div

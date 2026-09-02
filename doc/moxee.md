@@ -79,6 +79,15 @@ straightforward, and it is also the reason `--persist-adb` is opt-in rather than
 the default: root ADB over USB is a real change to what physical access to the
 device gets somebody.
 
+## Turning ADB on from the web interface
+
+Once Rayhunter is installed, the *Network* tab of the configuration page has a
+**USB debugging (ADB)** switch. It writes the same value as the command below
+and takes effect at the next restart.
+
+That switch does not appear on every device: see
+[Configuration](./configuration.md) for why.
+
 ## Keeping ADB across reboots
 
 Enabling ADB on a Moxee normally lasts only until the device restarts: the boot

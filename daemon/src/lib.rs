@@ -1,3 +1,4 @@
+pub mod adb_control;
 pub mod analysis;
 pub mod battery;
 pub mod cell_info;

@@ -28,11 +28,19 @@ pub struct SystemStats {
     /// platforms that do not expose these, rather than reported as zero.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health: Option<HealthStats>,
+    /// Whether ADB is on, and whether it can be changed from here at all.
+    ///
+    /// Reported alongside the other read-only facts about the device rather
+    /// than in the configuration, because it describes what the device is
+    /// currently doing. The setting that asks for a change is separate, and
+    /// only takes effect at the next restart.
+    pub adb: crate::adb_control::AdbState,
 }
 
 impl SystemStats {
     pub async fn new(qmdl_path: &str, device: &Device) -> Result<Self, String> {
         Ok(Self {
+            adb: crate::adb_control::current_state(),
             disk_stats: DiskStats::new(qmdl_path)?,
             memory_stats: MemoryStats::new(device).await?,
             runtime_metadata: RuntimeMetadata::new(),

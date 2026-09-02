@@ -242,6 +242,14 @@ pub struct Config {
     /// hotspot. A button press is how a person navigates that interface, so it
     /// is a good signal that they want to see it.
     pub pause_display_on_keypress: bool,
+    /// Whether ADB should be on after the next restart.
+    ///
+    /// `None`, the default, leaves the device exactly as its installer left
+    /// it: devices that already have ADB keep it. Only devices whose USB
+    /// composition is chosen by a value this recognises can be changed at all;
+    /// see `crate::adb_control`.
+    #[serde(default)]
+    pub adb_enabled: Option<bool>,
     /// Let a burst of button presses switch the device's own WiFi access
     /// point off.
     ///
@@ -424,6 +432,8 @@ impl Default for Config {
             // On by default. It costs a thin status line for twenty seconds
             // and it prevents somebody being locked out of their own hotspot.
             pause_display_on_keypress: true,
+            // None by default: leave ADB exactly as the installer left it.
+            adb_enabled: None,
             // Off by default: switching off the access point is switching off
             // the way most people reach this device, which nobody should get
             // by accident.

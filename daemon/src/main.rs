@@ -1,3 +1,4 @@
+mod adb_control;
 mod analysis;
 mod battery;
 mod cell_info;
@@ -384,6 +385,24 @@ async fn run_with_config(
     let update_status_lock = Arc::new(RwLock::new(UpdateStatus::default()));
 
     if !config.debug_mode {
+        // Reconcile ADB with what the settings ask for, before anything else
+        // starts. It only takes effect at the next restart, since the USB
+        // composition is chosen at boot, so doing it early costs nothing and
+        // means a change made in the settings is already in place by the time
+        // the device next comes up.
+        if let Some(wanted) = config.adb_enabled {
+            match adb_control::apply(wanted) {
+                Ok(true) => info!(
+                    "ADB will be {} after the next restart",
+                    if wanted { "enabled" } else { "disabled" }
+                ),
+                Ok(false) => {}
+                // Not an error worth stopping for: the device keeps whatever
+                // ADB it already had, which is the safe outcome.
+                Err(err) => warn!("leaving ADB as it is: {err}"),
+            }
+        }
+
         info!("Starting Diag Thread");
         let gps_fixed_coords = match (config.gps_fixed_latitude, config.gps_fixed_longitude) {
             (Some(lat), Some(lon)) => Some((lat, lon)),

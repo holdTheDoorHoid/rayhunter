@@ -1,4 +1,8 @@
+/** Whether ADB is on, and whether this device lets it be changed from here. */
+export type AdbState = { state: 'enabled' } | { state: 'disabled' } | { state: 'not_adjustable' };
+
 export interface SystemStats {
+    adb: AdbState;
     disk_stats: DiskStats;
     memory_stats: MemoryStats;
     runtime_metadata: RuntimeMetadata;

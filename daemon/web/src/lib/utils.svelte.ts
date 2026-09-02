@@ -145,6 +145,8 @@ export interface Config {
     terminal_enabled: boolean;
     /** Shrink to the thin status line briefly after a button press. */
     pause_display_on_keypress: boolean;
+    /** Whether ADB should be on after the next restart. Null leaves it alone. */
+    adb_enabled: boolean | null;
     /** Let a burst of button presses switch the device's own WiFi off. */
     wifi_ap_button_toggle: boolean;
     wifi_ap_toggle_presses: number;
