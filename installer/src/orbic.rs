@@ -279,6 +279,40 @@ pub(crate) fn adb_command(adb_device: &mut ADBUSBDevice, command: &[&str]) -> Re
 /// Creates an ADB interface instance.
 ///
 /// This function waits for the ADB device then checks that an ADB shell command runs.
+/// Forget every paired browser and the owner passphrase, keep the
+/// certificate, and restart the unit so it comes up in setup mode.
+///
+/// Works over ADB on an Orbic, where commands go through `rootshell`, and
+/// on a Moxee with ADB on, where ADB is already root. This is the recovery
+/// path when every paired device and the passphrase are gone; it needs the
+/// unit on a USB cable, which is to say, in hand.
+pub async fn reset_auth() -> Result<()> {
+    println!("Looking for a unit over ADB...");
+    let mut adb_device = get_adb().await?;
+    // The pairing records only; the TLS key and certificate stay.
+    let script = "if [ -x /bin/rootshell ]; then \
+        /bin/rootshell -c 'rm -f /data/rayhunter/auth/auth.toml; sync; ls /data/rayhunter/auth'; \
+        else rm -f /data/rayhunter/auth/auth.toml; sync; ls /data/rayhunter/auth; fi";
+    let mut buf = Vec::<u8>::new();
+    adb_device
+        .shell_command(&["sh", "-c", script], &mut buf)
+        .context("could not remove the pairing records")?;
+    let listing = String::from_utf8_lossy(&buf);
+    if listing.contains("auth.toml") {
+        bail!("auth.toml is still there after removal: {listing}");
+    }
+    println!("Pairing records removed. Restarting the unit...");
+    let reboot = "if [ -x /bin/rootshell ]; then \
+        /bin/rootshell -c 'sync; echo b > /proc/sysrq-trigger'; \
+        else sync; echo b > /proc/sysrq-trigger; fi";
+    let mut buf = Vec::<u8>::new();
+    // The reset cuts the connection mid-command; that is success.
+    let _ = adb_device.shell_command(&["sh", "-c", reboot], &mut buf);
+    println!("Done. When it is back up, the setup code is on its screen for ten minutes;");
+    println!("press its button to show the code again later.");
+    Ok(())
+}
+
 async fn get_adb() -> Result<ADBUSBDevice> {
     const MAX_FAILURES: u32 = 10;
     let mut failures = 0;

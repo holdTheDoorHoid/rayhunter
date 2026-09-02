@@ -257,6 +257,12 @@ struct Util {
 
 #[derive(Subcommand, Debug)]
 enum UtilSubCommand {
+    /// Forget every paired browser and the owner passphrase on a unit
+    /// reached over ADB (Orbic, or a Moxee with ADB on), then restart it
+    /// into setup mode. The TLS certificate is kept, so browsers that
+    /// accepted it need not accept it again.
+    #[cfg(not(target_os = "android"))]
+    ResetAuth,
     /// Send a serial command to the Orbic.
     #[cfg(not(target_os = "android"))]
     Serial(Serial),
@@ -411,6 +417,8 @@ async fn run(args: Args) -> Result<(), Error> {
             }
             #[cfg(not(target_os = "android"))]
             UtilSubCommand::Shell => orbic::shell().await.context("\nFailed to open shell on Orbic RC400L")?,
+            #[cfg(not(target_os = "android"))]
+            UtilSubCommand::ResetAuth => orbic::reset_auth().await.context("\nFailed to reset pairing over ADB")?,
             UtilSubCommand::TmobileStartTelnet(args) => wingtech::start_telnet(&args.admin_ip, &args.admin_password).await.context("\nFailed to start telnet on the Tmobile TMOHS1")?,
             #[cfg(not(target_os = "android"))]
             UtilSubCommand::TmobileStartAdb(args) => wingtech::start_adb(&args.admin_ip, &args.admin_password).await.context("\nFailed to start adb on the Tmobile TMOHS1")?,
