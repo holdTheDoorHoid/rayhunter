@@ -267,6 +267,39 @@ the file is owned by uid 2000. That is harmless: `cat >` truncates in place and
 keeps the existing 0777 mode. Check the mode and `sync` separately rather than
 chaining, then verify md5 before rebooting.
 
+Since the daemon handles SIGTERM (closing the recording, finishing its
+sidecar), `stop` returns before the process has exited. Wait for the pid in
+`/tmp/rayhunter.pid` to go away before overwriting the binary, or the `cat >`
+hits "Text file busy" and the md5 check fails:
+
+```
+P=$(cat /tmp/rayhunter.pid); for i in $(seq 1 100); do kill -0 $P 2>/dev/null || break; sleep 0.2; done
+```
+
+Do not use `pgrep -f rayhunter-daemon` for this from a shell: it matches the
+shell running the loop, and the loop never ends.
+
+## Simulating a memory card on the Orbic
+
+`removable_store_path` can point at any directory; the storage monitor treats
+a mount exactly at that path as the card whatever its filesystem. A tmpfs is
+a fine stand-in. `mount`/`umount` need `CAP_SYS_ADMIN`, which anything
+spawned from adb lacks (even under `rootshell`), so run them through
+`AT+SYSCMD`, executed by an init-started daemon with full capabilities:
+
+```
+./target/debug/installer util serial 'AT+SYSCMD=mount -t tmpfs -o size=8m tmpfs /data/fakecard'
+./target/debug/installer util serial 'AT+SYSCMD=umount -l /data/fakecard'
+```
+
+`umount -l` (lazy) stands in for a pulled card: the mount vanishes from
+`/proc/mounts` while the daemon's open files keep working, so the switch
+comes from the monitor noticing, not from a write error. A real card yank
+also makes writes fail, which only the TP-Link with a card can exercise.
+Watch `storage` in `/api/system-stats` and the log lines
+`recordings now go to ...`. With two devices attached, check which one
+answers the serial command first (`AT+SYSCMD=touch /tmp/probe`).
+
 ## The framebuffer is shared, so anything drawn once gets half erased
 
 Rayhunter does not own `/dev/fb0`. The device's own interface keeps redrawing
