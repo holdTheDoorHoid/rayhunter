@@ -452,3 +452,27 @@ A new endpoint also has to be listed in the `paths(...)` block of `ApiDocs` in
 `daemon/src/lib.rs`, and its request and response types declared with
 `request_body(content = ...)` and `body = ...`, or it compiles fine and is
 silently missing from the published docs.
+
+## Pairing, TLS, and the auth store (web-auth branch)
+
+- Everything secret lives in `/data/rayhunter/auth/` (0700): `tls.key`,
+  `tls.crt`, `auth.toml` (pairing records, hashes only). Deleting `auth.toml`
+  and rebooting puts a unit back in setup mode; keep the TLS pair so paired
+  browsers do not get a new certificate warning. `installer util reset-auth`
+  does exactly this over ADB.
+- **Loopback is exempt from pairing and never redirected**, so every
+  `adb forward` path (`http://localhost:909x`) keeps working with no cookie.
+  To test enforcement you must arrive as a hotspot client: the Moxee's USB
+  network interface (`ip -br addr | grep enx`, **renamed on every reboot**)
+  routes to it at `192.168.1.1`; the laptop WiFi at `192.168.1.1` is the home
+  router, not a unit. The Orbic has no such path here.
+- The setup token is readable from the framebuffer: `readfb.sh` + `qrcheck`
+  decode the QR to `HTTPS://192.168.1.1:8443/S/<token>`. The step-up code can
+  be read the same way with `readcode.py` (matches the daemon's own 5x7 font).
+- `POST /api/debug/qr` shows any text as a code; `/api/debug/qr/clear` takes
+  it down. `DisplayOverride` (in `display/mod.rs`) is the full-screen slot and
+  also carries the "TERMINAL ACTIVE" banner drawn under the status line.
+- `terminal_enabled` is a top-level key: put it above the first `[table]` in
+  `config.toml` or it lands in `[analyzers]` and does nothing.
+- `POST /api/config` restarts the daemon; an unpaired unit re-arms its setup
+  window on every start, a paired one never does.
