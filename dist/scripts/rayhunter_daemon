@@ -8,7 +8,9 @@ start)
     # start-stop-daemon's own check looks for /bin/sh, which the daemon stops
     # being once it execs, so check the pidfile ourselves: a second instance
     # would only fight the first for the diag device and the web ports.
-    RUNNING=$(cat /tmp/rayhunter.pid 2>/dev/null)
+    # `|| true`: the script runs under `set -e`, and a missing pidfile is the
+    # normal case at boot, not a reason to give up.
+    RUNNING=$(cat /tmp/rayhunter.pid 2>/dev/null || true)
     if [ -n "$RUNNING" ] && kill -0 "$RUNNING" 2>/dev/null; then
         echo "already running (pid $RUNNING)"
         exit 0
@@ -21,7 +23,7 @@ start)
     ;;
   stop)
     echo -n "Stopping rayhunter: "
-    STOPPING=$(cat /tmp/rayhunter.pid 2>/dev/null)
+    STOPPING=$(cat /tmp/rayhunter.pid 2>/dev/null || true)
     start-stop-daemon -K -p /tmp/rayhunter.pid || true
     # The daemon closes its recording before it exits. Give it a moment, so a
     # restart does not start the next one on top of it, then insist.
