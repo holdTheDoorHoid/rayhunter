@@ -2,6 +2,7 @@
     import {
         get_config,
         set_config,
+        StepUpRequired,
         test_notification,
         get_wifi_status,
         get_system_stats,
@@ -9,17 +10,29 @@
         GpsMode,
         ClockSyncMode,
         enabled_notifications,
-        set_web_user,
+        get_devices,
+        rename_device,
+        revoke_device,
+        mint_pair_code,
+        change_passphrase,
+        get_tls_info,
+        short_date,
+        type DeviceInfo,
+        type PairCode,
+        type TlsInfo,
         delete_web_user,
         type Config,
         type WifiStatus,
         type WifiNetwork,
     } from '../utils.svelte';
+    import { onMount } from 'svelte';
     import Modal from './Modal.svelte';
     import ExpandableInput from './ExpandableInput.svelte';
     import DeviceColorSettings from './DeviceColorSettings.svelte';
     import DeviceGifSettings from './DeviceGifSettings.svelte';
     import Explainer from './Explainer.svelte';
+    import CertificateTrust from './CertificateTrust.svelte';
+    import StepUpPrompt from './StepUpPrompt.svelte';
     import { HEURISTICS } from '../heuristics';
     import { theme, type ThemePreference } from '../theme.svelte';
     import { help } from '../helpVisibility.svelte';
@@ -66,31 +79,9 @@
     // Accounts are managed by their own endpoints rather than the settings
     // save, because the hashes are redacted on the way out and posting the
     // whole config back would otherwise blank them and lock everyone out.
-    let newUsername = $state('');
-    let newPassword = $state('');
     let userMessage = $state('');
     let userError = $state('');
     let savingUser = $state(false);
-
-    async function save_user() {
-        if (!config) return;
-        savingUser = true;
-        userMessage = '';
-        userError = '';
-        try {
-            userMessage = await set_web_user(newUsername, newPassword);
-            config.web_users = [
-                ...config.web_users.filter((u) => u.username !== newUsername.trim()),
-                { username: newUsername.trim(), password_hash: '' },
-            ];
-            newUsername = '';
-            newPassword = '';
-        } catch (e) {
-            userError = `${e}`;
-        } finally {
-            savingUser = false;
-        }
-    }
 
     async function remove_user(username: string) {
         if (!config) return;
@@ -104,6 +95,106 @@
             userError = `${e}`;
         } finally {
             savingUser = false;
+        }
+    }
+
+    // Pairing: the browsers this unit trusts, and the ways to add one. Read
+    // from their own endpoints rather than the config, which never holds them.
+    let devices = $state<DeviceInfo[]>([]);
+    let pairCode = $state<PairCode | null>(null);
+    let tlsInfo = $state<TlsInfo | null>(null);
+    let renaming = $state<string | null>(null);
+    let renameValue = $state('');
+    let pairMessage = $state('');
+    let pairError = $state('');
+    let currentPassphrase = $state('');
+    let newPassphrase = $state('');
+    let newPassphraseAgain = $state('');
+    let savingPassphrase = $state(false);
+
+    onMount(async () => {
+        try {
+            devices = await get_devices();
+        } catch (e) {
+            pairError = `${e}`;
+        }
+        try {
+            tlsInfo = await get_tls_info();
+        } catch {
+            tlsInfo = null;
+        }
+    });
+
+    async function refresh_devices() {
+        try {
+            devices = await get_devices();
+        } catch (e) {
+            pairError = `${e}`;
+        }
+    }
+
+    async function make_pair_code() {
+        pairMessage = '';
+        pairError = '';
+        try {
+            pairCode = await mint_pair_code();
+        } catch (e) {
+            pairError = `${e}`;
+        }
+    }
+
+    function start_rename(d: DeviceInfo) {
+        renaming = d.id;
+        renameValue = d.name;
+    }
+
+    async function commit_rename(id: string) {
+        pairError = '';
+        try {
+            await rename_device(id, renameValue);
+            renaming = null;
+            await refresh_devices();
+        } catch (e) {
+            pairError = `${e}`;
+        }
+    }
+
+    async function revoke(d: DeviceInfo) {
+        const what = d.current
+            ? 'Remove this browser? You will have to pair it again to get back in.'
+            : `Remove "${d.name}"? It will have to be paired again.`;
+        if (!confirm(what)) return;
+        pairError = '';
+        try {
+            await revoke_device(d.id);
+            if (d.current) {
+                location.assign('/pair');
+                return;
+            }
+            await refresh_devices();
+        } catch (e) {
+            pairError = `${e}`;
+        }
+    }
+
+    async function save_passphrase() {
+        pairMessage = '';
+        pairError = '';
+        if (newPassphrase !== newPassphraseAgain) {
+            pairError = 'The two new passphrases do not match.';
+            return;
+        }
+        savingPassphrase = true;
+        try {
+            await change_passphrase(currentPassphrase, newPassphrase);
+            pairMessage = 'Passphrase changed.';
+            currentPassphrase = '';
+            newPassphrase = '';
+            newPassphraseAgain = '';
+        } catch (e) {
+            pairError = `${e}`;
+        } finally {
+            savingPassphrase = false;
         }
     }
 
@@ -245,12 +336,21 @@
                 'Config saved successfully! Rayhunter is restarting now. Reload the page in a few seconds.';
             messageType = 'success';
         } catch (error) {
+            if (error instanceof StepUpRequired) {
+                // Turning ADB on wants proof of holding the unit first. Ask,
+                // then save again once the unit has agreed.
+                needStepUp = true;
+                message = '';
+                return;
+            }
             message = `Failed to save config: ${error}`;
             messageType = 'error';
         } finally {
             saving = false;
         }
     }
+
+    let needStepUp = $state(false);
 
     async function poll_wifi_status() {
         if (wifiStatusTimer) clearInterval(wifiStatusTimer);
@@ -570,14 +670,230 @@
                                 <h4 class="text-sm font-medium text-gray-700 dark:text-gray-200">
                                     Who can use this interface
                                 </h4>
-                                {#if config.web_users.length === 0}
-                                    <p class="mt-1 text-xs text-amber-600 dark:text-amber-400">
-                                        Anyone who can reach this page can use it, which on a
-                                        hotspot means anyone on its WiFi. Add an account to require
-                                        a password.
+                                <p class="mt-1 text-xs text-gray-600 dark:text-gray-300">
+                                    Only phones and computers paired with this unit. Add one with a
+                                    code from here, or with the owner passphrase on the pairing
+                                    page.
+                                </p>
+
+                                <h5
+                                    class="mt-3 text-sm font-medium text-gray-700 dark:text-gray-200"
+                                >
+                                    Trusted devices
+                                </h5>
+                                {#if devices.length === 0}
+                                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                        None paired yet.
                                     </p>
                                 {:else}
-                                    <ul class="mt-2 space-y-1">
+                                    <ul class="mt-1 space-y-1">
+                                        {#each devices as d (d.id)}
+                                            <li
+                                                class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm"
+                                            >
+                                                {#if renaming === d.id}
+                                                    <input
+                                                        type="text"
+                                                        bind:value={renameValue}
+                                                        maxlength="64"
+                                                        class="w-44 rounded-md border border-gray-300 px-2 py-0.5 text-sm dark:border-gray-600"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onclick={() => commit_rename(d.id)}
+                                                        class="text-xs underline"
+                                                    >
+                                                        save
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onclick={() => (renaming = null)}
+                                                        class="text-xs underline"
+                                                    >
+                                                        cancel
+                                                    </button>
+                                                {:else}
+                                                    <span>{d.name}</span>
+                                                    {#if d.current}
+                                                        <span
+                                                            class="rounded bg-blue-100 px-1 text-xs text-blue-800 dark:bg-blue-900 dark:text-blue-100"
+                                                        >
+                                                            this browser
+                                                        </span>
+                                                    {/if}
+                                                    <span
+                                                        class="text-xs text-gray-500 dark:text-gray-400"
+                                                    >
+                                                        added {short_date(d.created)}, last seen {short_date(
+                                                            d.last_seen
+                                                        )}
+                                                    </span>
+                                                    <button
+                                                        type="button"
+                                                        onclick={() => start_rename(d)}
+                                                        class="text-xs underline"
+                                                    >
+                                                        rename
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onclick={() => revoke(d)}
+                                                        class="text-xs text-red-600 underline dark:text-red-400"
+                                                    >
+                                                        remove
+                                                    </button>
+                                                {/if}
+                                            </li>
+                                        {/each}
+                                    </ul>
+                                {/if}
+
+                                <button
+                                    type="button"
+                                    onclick={make_pair_code}
+                                    class="mt-2 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
+                                >
+                                    Add a phone or computer
+                                </button>
+                                {#if pairCode}
+                                    <div class="mt-2 flex items-start gap-3">
+                                        <div class="w-32 shrink-0 rounded bg-white p-1">
+                                            <!-- The SVG comes from the unit itself, not from anything typed. -->
+                                            <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                                            {@html pairCode.svg}
+                                        </div>
+                                        <div class="text-sm">
+                                            <p>
+                                                On the new device, join this unit's WiFi and scan
+                                                this, or open the pairing page and type
+                                                <code class="font-mono text-base tracking-widest"
+                                                    >{pairCode.code.slice(0, 3)}
+                                                    {pairCode.code.slice(3)}</code
+                                                >.
+                                            </p>
+                                            <p
+                                                class="mt-1 text-xs text-gray-500 dark:text-gray-400"
+                                            >
+                                                Good for {Math.round(pairCode.expires_in_secs / 60)} minutes
+                                                and one device. Making another replaces it.
+                                            </p>
+                                            <p
+                                                class="mt-1 font-mono text-xs break-all text-gray-500 dark:text-gray-400"
+                                            >
+                                                {pairCode.url.toLowerCase()}
+                                            </p>
+                                        </div>
+                                    </div>
+                                {/if}
+
+                                <h5
+                                    class="mt-4 text-sm font-medium text-gray-700 dark:text-gray-200"
+                                >
+                                    Owner passphrase
+                                </h5>
+                                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                    Adds a device from the pairing page, and opens the terminal.
+                                    Changing it does not sign anything out.
+                                </p>
+                                <div class="mt-2 flex flex-wrap items-end gap-2">
+                                    <div>
+                                        <label
+                                            for="current_passphrase"
+                                            class="block text-xs text-gray-600 dark:text-gray-300"
+                                            >Current</label
+                                        >
+                                        <input
+                                            id="current_passphrase"
+                                            type="password"
+                                            bind:value={currentPassphrase}
+                                            autocomplete="current-password"
+                                            class="w-36 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label
+                                            for="new_passphrase"
+                                            class="block text-xs text-gray-600 dark:text-gray-300"
+                                            >New</label
+                                        >
+                                        <input
+                                            id="new_passphrase"
+                                            type="password"
+                                            bind:value={newPassphrase}
+                                            autocomplete="new-password"
+                                            class="w-36 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label
+                                            for="new_passphrase_again"
+                                            class="block text-xs text-gray-600 dark:text-gray-300"
+                                            >New again</label
+                                        >
+                                        <input
+                                            id="new_passphrase_again"
+                                            type="password"
+                                            bind:value={newPassphraseAgain}
+                                            autocomplete="new-password"
+                                            class="w-36 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
+                                        />
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onclick={save_passphrase}
+                                        disabled={savingPassphrase ||
+                                            !currentPassphrase ||
+                                            newPassphrase.length < 8}
+                                        class="rounded-md border border-gray-300 px-2 py-1 text-sm disabled:opacity-40 dark:border-gray-600"
+                                    >
+                                        {savingPassphrase ? 'Saving…' : 'Change'}
+                                    </button>
+                                </div>
+                                {#if pairMessage}
+                                    <p class="mt-1 text-xs text-green-700 dark:text-green-300">
+                                        {pairMessage}
+                                    </p>
+                                {/if}
+                                {#if pairError}
+                                    <p class="mt-1 text-xs text-red-600 dark:text-red-400">
+                                        {pairError}
+                                    </p>
+                                {/if}
+
+                                {#if tlsInfo}
+                                    <h5
+                                        class="mt-4 text-sm font-medium text-gray-700 dark:text-gray-200"
+                                    >
+                                        This unit's certificate
+                                    </h5>
+                                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                        Made by the unit itself, which is why browsers warn about it
+                                        once. Its fingerprint, to compare with what your browser
+                                        shows:
+                                    </p>
+                                    <code class="block font-mono text-xs break-all"
+                                        >authority {tlsInfo.ca_fingerprint_sha256}</code
+                                    >
+                                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                        The server certificate under it runs until
+                                        {short_date(tlsInfo.leaf_not_after ?? '')} and is renewed by the
+                                        unit itself.
+                                    </p>
+                                    <CertificateTrust tls={tlsInfo} />
+                                {/if}
+
+                                {#if config.web_users.length > 0}
+                                    <h5
+                                        class="mt-4 text-sm font-medium text-gray-700 dark:text-gray-200"
+                                    >
+                                        Accounts from before pairing
+                                    </h5>
+                                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                        These no longer open the interface on their own. Signing in
+                                        with one on the pairing page pairs that browser, once.
+                                        Remove them when every device has been paired.
+                                    </p>
+                                    <ul class="mt-1 space-y-1">
                                         {#each config.web_users as user (user.username)}
                                             <li class="flex items-center gap-2 text-sm">
                                                 <span class="font-mono">{user.username}</span>
@@ -592,88 +908,41 @@
                                             </li>
                                         {/each}
                                     </ul>
-                                {/if}
-
-                                <div class="mt-2 flex flex-wrap items-end gap-2">
-                                    <div>
-                                        <label
-                                            for="new_web_username"
-                                            class="block text-xs text-gray-600 dark:text-gray-300"
-                                            >Username</label
-                                        >
-                                        <input
-                                            id="new_web_username"
-                                            type="text"
-                                            bind:value={newUsername}
-                                            autocomplete="off"
-                                            class="w-36 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label
-                                            for="new_web_password"
-                                            class="block text-xs text-gray-600 dark:text-gray-300"
-                                            >Password</label
-                                        >
-                                        <input
-                                            id="new_web_password"
-                                            type="password"
-                                            bind:value={newPassword}
-                                            autocomplete="new-password"
-                                            class="w-44 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
-                                        />
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onclick={save_user}
-                                        disabled={savingUser ||
-                                            !newUsername.trim() ||
-                                            newPassword.length < 8}
-                                        class="rounded-md border border-gray-300 px-2 py-1 text-sm disabled:opacity-40 dark:border-gray-600"
-                                    >
-                                        {savingUser ? 'Saving…' : 'Add or update'}
-                                    </button>
-                                </div>
-                                {#if newPassword.length > 0 && newPassword.length < 8}
-                                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                        At least 8 characters.
-                                    </p>
-                                {/if}
-                                {#if userMessage}
-                                    <p class="mt-1 text-xs text-green-700 dark:text-green-300">
-                                        {userMessage}
-                                    </p>
-                                {/if}
-                                {#if userError}
-                                    <p class="mt-1 text-xs text-red-600 dark:text-red-400">
-                                        {userError}
-                                    </p>
+                                    {#if userMessage}
+                                        <p class="mt-1 text-xs text-green-700 dark:text-green-300">
+                                            {userMessage}
+                                        </p>
+                                    {/if}
+                                    {#if userError}
+                                        <p class="mt-1 text-xs text-red-600 dark:text-red-400">
+                                            {userError}
+                                        </p>
+                                    {/if}
                                 {/if}
 
                                 <Explainer
-                                    summary="What a password here protects against, and what it does not."
+                                    summary="How pairing protects this unit, and what it does not."
                                 >
                                     <p>
-                                        Accounts are saved as soon as you add them, separately from
-                                        the rest of this page, and take effect when Rayhunter next
-                                        restarts. Passwords are stored hashed, so a copy of the
-                                        configuration file does not hand them over.
+                                        Every request to this interface travels over an encrypted
+                                        connection to the unit, and only a browser the unit has
+                                        paired with is answered. Pairing happens once per browser:
+                                        by scanning the code on the unit's screen when it is new,
+                                        with a code made here, or with the owner passphrase.
                                     </p>
                                     <p>
-                                        What this protects against is someone who has the WiFi
-                                        password but should not have your recordings: a guest, or
-                                        anyone who was given the network for another reason.
+                                        What this protects against is anyone else on the WiFi: a
+                                        guest, a family member, whoever was given the hotspot
+                                        password for another reason. They can no longer read the
+                                        recordings or change anything, even if they can capture the
+                                        traffic.
                                     </p>
                                     <p>
-                                        What it does not protect against is someone able to capture
-                                        the WiFi traffic itself. There is no encryption between this
-                                        browser and the device, so the password crosses the air
-                                        readable to anyone already in that position. Treat it as a
-                                        second lock on the same door, not as a secure channel.
-                                    </p>
-                                    <p>
-                                        Removing every account returns the interface to being open
-                                        to anyone who can reach it.
+                                        What it does not protect against is someone holding the
+                                        unit. The USB cable is root, and a button press on a unit
+                                        that nobody has paired with yet lets its holder pair. If
+                                        every paired device and the passphrase are lost, the pairing
+                                        records are removed over USB and the unit starts over.
                                     </p>
                                 </Explainer>
                             </div>
@@ -1977,6 +2246,16 @@
                     </p>
                 </div>
             </form>
+            {#if needStepUp}
+                <StepUpPrompt
+                    reason="Turning ADB on opens a root shell on the USB port, so the unit wants proof you are holding it."
+                    onopened={() => {
+                        needStepUp = false;
+                        save_config();
+                    }}
+                    oncancel={() => (needStepUp = false)}
+                />
+            {/if}
             {#if message}
                 <div
                     class="mt-4 p-3 rounded-sm {messageType === 'error'

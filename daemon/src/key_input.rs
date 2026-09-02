@@ -23,6 +23,13 @@ pub fn run_key_input_thread(
     config: &config::Config,
     diag_tx: Sender<DiagDeviceCtrlMessage>,
     suppression: SharedSuppression,
+    // A button press on a unit nobody has paired with yet opens the setup
+    // window again. Somebody pressing buttons on an unpaired unit is
+    // somebody holding it, which is the whole basis for trusting the code
+    // on its screen.
+    pairing: Option<std::sync::Arc<crate::pairing::Pairing>>,
+    // A press also confirms a waiting terminal step-up, on any unit.
+    stepup: Option<std::sync::Arc<crate::stepup::StepUp>>,
     cancellation_token: CancellationToken,
 ) {
     let restart_on_double_tap = config.key_input_mode != KeyInputMode::Disabled;
@@ -47,7 +54,7 @@ pub fn run_key_input_thread(
     // runs if either wants it. Previously it started only for the double tap
     // gesture, which would have left the pause feature dead for anyone who had
     // button control switched off.
-    if !restart_on_double_tap && !pause_on_keypress && !ap_toggle {
+    if !restart_on_double_tap && !pause_on_keypress && !ap_toggle && pairing.is_none() {
         return;
     }
 
@@ -103,6 +110,20 @@ pub fn run_key_input_thread(
 
             match event {
                 Event::KeyUp => {
+                    // Refused, cheaply, once the unit has an owner; until
+                    // then every press re-arms the window. In the
+                    // background so a slow flash write never delays the
+                    // gestures below.
+                    if let Some(stepup) = &stepup
+                        && stepup.button_pressed()
+                    {
+                        info!("button press confirmed a terminal step-up");
+                    }
+                    if let Some(pairing) = &pairing {
+                        let pairing = pairing.clone();
+                        tokio::spawn(async move { pairing.button_pressed().await });
+                    }
+
                     // Checked before the double tap below, and on its own
                     // timer, so the two gestures do not have to agree about
                     // what counts as a press.

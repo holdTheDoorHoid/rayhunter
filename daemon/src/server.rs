@@ -39,6 +39,19 @@ use crate::update::UpdateStatus;
 
 pub struct ServerState {
     pub config_path: String,
+    /// This unit's certificates, when TLS is up. `None` means the plain
+    /// port is all there is this run.
+    pub tls: Option<Arc<crate::tls::TlsRenewer>>,
+    /// Which browsers are trusted, and the setup window.
+    pub pairing: Arc<crate::pairing::Pairing>,
+    /// The terminal's second gate.
+    pub stepup: Arc<crate::stepup::StepUp>,
+    /// Every address the unit serves the interface on, including loopback
+    /// and the front-door alias. What a `Host` header is checked against.
+    pub own_addresses: Vec<std::net::IpAddr>,
+    /// The front-door alias, when there is one: the one address, besides
+    /// `rayhunter.local`, that reaches Rayhunter without a port.
+    pub front_door_alias: Option<std::net::Ipv4Addr>,
     pub config: Config,
     /// The accounts as they stand now, rather than as they were at startup.
     ///
@@ -59,6 +72,9 @@ pub struct ServerState {
     pub ui_update_sender: Option<Sender<DisplayState>>,
     /// Shared with the display, so a keypress can be simulated for testing.
     pub suppression: Option<crate::display::SharedSuppression>,
+    /// Shared with the display: a full-screen picture, such as a pairing
+    /// code, that the server can put up.
+    pub display_override: Option<crate::display::SharedOverride>,
     pub cell_tracker: Arc<RwLock<CellTracker>>,
     pub wifi_status: Arc<RwLock<wifi_station::WifiStatus>>,
     pub wifi_scan_lock: tokio::sync::Mutex<()>,
@@ -143,11 +159,701 @@ pub async fn serve_static(
             include_bytes!("../web/build/index.html.gz"),
         )
             .into_response(),
+        "pair.html" => pair_page(),
         path => {
             warn!("404 on path: {path}");
             StatusCode::NOT_FOUND.into_response()
         }
     }
+}
+
+fn pair_page() -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, HeaderValue::from_static("text/html")),
+            (header::CONTENT_ENCODING, HeaderValue::from_static("gzip")),
+            // Never cached: it decides what to show from the unit's state.
+            (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
+        ],
+        include_bytes!("../web/build/pair.html.gz"),
+    )
+        .into_response()
+}
+
+/// The pairing page, at `/pair` and at the setup link `/s/<token>`.
+///
+/// The same page either way; it reads the token, if any, from its own
+/// address. The token is deliberately not looked at here: a browser that
+/// followed a stale link gets the page and a clear message, not a bare
+/// error.
+pub async fn serve_pair_page() -> Response {
+    pair_page()
+}
+
+fn pair_error(e: crate::pairing::PairError) -> (StatusCode, String) {
+    use crate::pairing::PairError::*;
+    let status = match e {
+        AlreadyComplete | NoPassphrase => StatusCode::CONFLICT,
+        WindowClosed => StatusCode::GONE,
+        WrongToken { .. } | WrongPassphrase => StatusCode::FORBIDDEN,
+        PassphraseTooShort => StatusCode::UNPROCESSABLE_ENTITY,
+        Backoff(_) => StatusCode::TOO_MANY_REQUESTS,
+        NoSuchDevice => StatusCode::NOT_FOUND,
+        NoCode | NotPressed => StatusCode::GONE,
+        PressPending(_) => StatusCode::TOO_MANY_REQUESTS,
+        TooManyDevices => StatusCode::CONFLICT,
+        Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    (status, e.to_string())
+}
+
+fn stepup_error(e: crate::stepup::StepUpError) -> (StatusCode, String) {
+    use crate::stepup::StepUpError::*;
+    let status = match e {
+        NoPending | Expired | TooManyWrong => StatusCode::GONE,
+        WrongCode { .. } | NotYours => StatusCode::FORBIDDEN,
+    };
+    (status, e.to_string())
+}
+
+/// Which browser is asking, for things kept per browser. Loopback has no
+/// cookie and gets a fixed name: it is one place, the USB cable.
+fn device_id_of(current: &Option<axum::Extension<crate::web_auth::CurrentDevice>>) -> String {
+    current
+        .as_ref()
+        .map(|c| c.0.0.clone())
+        .unwrap_or_else(|| "loopback".to_string())
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct ChangePassphraseRequest {
+    pub current_passphrase: String,
+    pub new_passphrase: String,
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/passphrase",
+    tag = "Pairing",
+    request_body(content = ChangePassphraseRequest, content_type = "application/json"),
+    responses(
+        (status = StatusCode::OK, description = "Changed"),
+        (status = StatusCode::FORBIDDEN, description = "The current passphrase is wrong"),
+        (status = StatusCode::UNPROCESSABLE_ENTITY, description = "The new passphrase is too short"),
+        (status = StatusCode::TOO_MANY_REQUESTS, description = "Too many wrong attempts; wait"),
+    ),
+    summary = "Change the owner passphrase",
+))]
+pub async fn change_passphrase(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<ChangePassphraseRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    state
+        .pairing
+        .change_passphrase(&req.current_passphrase, &req.new_passphrase)
+        .await
+        .map_err(pair_error)?;
+    Ok(StatusCode::OK)
+}
+
+/// A code for adding another browser, and the same as a link and a QR.
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct PairCodeResponse {
+    pub code: String,
+    /// `HTTPS://<the host this browser used>/P/<code>`.
+    pub url: String,
+    pub expires_in_secs: u64,
+    /// The link as a QR code, SVG, for the page to show.
+    pub svg: String,
+}
+
+/// Mint an add-a-device code from a trusted browser.
+///
+/// The link uses whatever host this browser reached the unit by, so it
+/// resolves for the new device on the same network, hotspot or home LAN.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/devices/code",
+    tag = "Pairing",
+    responses((status = StatusCode::OK, description = "A fresh code", body = PairCodeResponse)),
+    summary = "Make a code for adding a device",
+))]
+pub async fn mint_pair_code(
+    State(state): State<Arc<ServerState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<PairCodeResponse>, (StatusCode, String)> {
+    let (code, ttl) = state.pairing.mint_code().map_err(pair_error)?;
+    // Only one of the unit's own names goes into a link shown on its screen.
+    let host = crate::web_auth::canonical_host(
+        &state,
+        headers.get(header::HOST).and_then(|v| v.to_str().ok()),
+    )
+    .await;
+    // Through the front door the link needs no port.
+    let authority = if crate::web_auth::is_front_door_host(&state, &host) {
+        host
+    } else {
+        format!("{host}:{}", state.config.tls_port)
+    };
+    let url = state.pairing.code_url(&authority, &code);
+    let svg = crate::display::qr::encode(&url)
+        .map(|c| crate::display::qr::svg(&c, 2))
+        .unwrap_or_default();
+    Ok(Json(PairCodeResponse {
+        code,
+        url,
+        expires_in_secs: ttl.as_secs(),
+        svg,
+    }))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct PairCodeRequest {
+    pub code: String,
+    #[serde(default)]
+    pub device_name: Option<String>,
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/pair/code",
+    tag = "Pairing",
+    request_body(content = PairCodeRequest, content_type = "application/json"),
+    responses(
+        (status = StatusCode::OK, description = "This browser is now trusted; the cookie is in Set-Cookie", body = PairedResponse),
+        (status = StatusCode::FORBIDDEN, description = "Wrong code"),
+        (status = StatusCode::GONE, description = "No code is active"),
+    ),
+    summary = "Pair this browser with a code from a trusted one",
+))]
+pub async fn pair_with_code(
+    State(state): State<Arc<ServerState>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<PairCodeRequest>,
+) -> Result<Response, (StatusCode, String)> {
+    let issued = state
+        .pairing
+        .pair_with_code(&req.code, req.device_name.as_deref(), &user_agent(&headers))
+        .await
+        .map_err(pair_error)?;
+    Ok(paired(issued))
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct PressRequestResponse {
+    pub id: String,
+    pub seconds: u64,
+}
+
+/// Ask to pair by pressing the unit's button: for units with no screen,
+/// and for anyone who cannot scan.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/setup/press-request",
+    tag = "Pairing",
+    responses(
+        (status = StatusCode::OK, description = "Waiting for the button", body = PressRequestResponse),
+        (status = StatusCode::CONFLICT, description = "This unit already has an owner"),
+    ),
+    summary = "Pair by button press: start waiting",
+))]
+pub async fn request_press(
+    State(state): State<Arc<ServerState>>,
+) -> Result<Json<PressRequestResponse>, (StatusCode, String)> {
+    let id = state.pairing.request_press().await.map_err(pair_error)?;
+    Ok(Json(PressRequestResponse {
+        id,
+        seconds: crate::pairing::PRESS_WINDOW.as_secs(),
+    }))
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct PressStatusResponse {
+    pub approved: bool,
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    get,
+    path = "/api/setup/press-status/{id}",
+    tag = "Pairing",
+    params(("id" = String, Path, description = "The id from press-request")),
+    responses(
+        (status = StatusCode::OK, description = "Whether the button has been pressed", body = PressStatusResponse),
+        (status = StatusCode::GONE, description = "That request has lapsed"),
+    ),
+    summary = "Pair by button press: has it been pressed?",
+))]
+pub async fn press_status(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<String>,
+) -> Result<Json<PressStatusResponse>, (StatusCode, String)> {
+    match state.pairing.press_status(&id) {
+        Some(approved) => Ok(Json(PressStatusResponse { approved })),
+        None => Err(pair_error(crate::pairing::PairError::NotPressed)),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct CompleteByPressRequest {
+    pub id: String,
+    pub passphrase: String,
+    #[serde(default)]
+    pub device_name: Option<String>,
+    #[serde(default)]
+    pub browser_unix_ms: Option<i64>,
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/setup/complete-press",
+    tag = "Pairing",
+    request_body(content = CompleteByPressRequest, content_type = "application/json"),
+    responses(
+        (status = StatusCode::OK, description = "Set up; the cookie is in Set-Cookie", body = PairedResponse),
+        (status = StatusCode::GONE, description = "The button was not pressed in time"),
+    ),
+    summary = "Pair by button press: finish setup",
+))]
+pub async fn complete_setup_by_press(
+    State(state): State<Arc<ServerState>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<CompleteByPressRequest>,
+) -> Result<Response, (StatusCode, String)> {
+    let issued = state
+        .pairing
+        .complete_setup_by_press(
+            &req.id,
+            &req.passphrase,
+            req.device_name.as_deref(),
+            &user_agent(&headers),
+        )
+        .await
+        .map_err(pair_error)?;
+    // A time that is not believable is ignored rather than applied.
+    if let Some(offset) = req.browser_unix_ms.and_then(offset_from_browser) {
+        rayhunter::clock::set_offset(offset);
+        log::info!(
+            "clock offset set from a pairing browser: {}s",
+            offset.num_seconds()
+        );
+        clock_changed(&state);
+    }
+    Ok(paired(issued))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct StepUpStartRequest {
+    pub passphrase: String,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct StepUpResponse {
+    /// Whether the unit has a screen to show the code on. Without one, a
+    /// button press on the unit confirms instead.
+    pub has_screen: bool,
+    pub seconds: u64,
+}
+
+/// Start a terminal step-up: the passphrase, then a code on the unit.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/stepup/start",
+    tag = "Terminal",
+    request_body(content = StepUpStartRequest, content_type = "application/json"),
+    responses(
+        (status = StatusCode::OK, description = "A code is on the unit's screen, or it awaits a button press", body = StepUpResponse),
+        (status = StatusCode::FORBIDDEN, description = "Wrong passphrase"),
+        (status = StatusCode::TOO_MANY_REQUESTS, description = "Too many wrong attempts; wait"),
+    ),
+    summary = "Terminal step-up: start",
+))]
+pub async fn stepup_start(
+    State(state): State<Arc<ServerState>>,
+    current: Option<axum::Extension<crate::web_auth::CurrentDevice>>,
+    Json(req): Json<StepUpStartRequest>,
+) -> Result<Json<StepUpResponse>, (StatusCode, String)> {
+    state
+        .pairing
+        .verify_passphrase(&req.passphrase)
+        .await
+        .map_err(pair_error)?;
+    let ttl = state
+        .stepup
+        .start(&device_id_of(&current))
+        .map_err(stepup_error)?;
+    Ok(Json(StepUpResponse {
+        has_screen: state.stepup.has_screen(),
+        seconds: ttl.as_secs(),
+    }))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct StepUpConfirmRequest {
+    pub code: String,
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/stepup/confirm",
+    tag = "Terminal",
+    request_body(content = StepUpConfirmRequest, content_type = "application/json"),
+    responses(
+        (status = StatusCode::OK, description = "The terminal is open for a while", body = StepUpResponse),
+        (status = StatusCode::FORBIDDEN, description = "Wrong code"),
+        (status = StatusCode::GONE, description = "No code is waiting, or too many wrong ones"),
+    ),
+    summary = "Terminal step-up: confirm the code",
+))]
+pub async fn stepup_confirm(
+    State(state): State<Arc<ServerState>>,
+    current: Option<axum::Extension<crate::web_auth::CurrentDevice>>,
+    Json(req): Json<StepUpConfirmRequest>,
+) -> Result<Json<StepUpResponse>, (StatusCode, String)> {
+    let window = state
+        .stepup
+        .confirm(&device_id_of(&current), &req.code)
+        .map_err(stepup_error)?;
+    Ok(Json(StepUpResponse {
+        has_screen: state.stepup.has_screen(),
+        seconds: window.as_secs(),
+    }))
+}
+
+/// Close this browser's terminal window now rather than letting it lapse.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/stepup/end",
+    tag = "Terminal",
+    responses((status = StatusCode::OK, description = "Closed")),
+    summary = "Terminal step-up: end",
+))]
+pub async fn stepup_end(
+    State(state): State<Arc<ServerState>>,
+    current: Option<axum::Extension<crate::web_auth::CurrentDevice>>,
+) -> StatusCode {
+    state.stepup.end(&device_id_of(&current));
+    StatusCode::OK
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct StepUpStatus {
+    pub active: bool,
+    pub seconds_left: u64,
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    get,
+    path = "/api/stepup/status",
+    tag = "Terminal",
+    responses((status = StatusCode::OK, description = "Whether this browser's terminal window is open", body = StepUpStatus)),
+    summary = "Terminal step-up: status",
+))]
+pub async fn stepup_status(
+    State(state): State<Arc<ServerState>>,
+    current: Option<axum::Extension<crate::web_auth::CurrentDevice>>,
+) -> Json<StepUpStatus> {
+    let id = device_id_of(&current);
+    let active = state.stepup.active(&id);
+    Json(StepUpStatus {
+        active,
+        seconds_left: state
+            .stepup
+            .remaining(&id)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    })
+}
+
+fn user_agent(headers: &axum::http::HeaderMap) -> String {
+    headers
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Where a unit is in its life: fresh, mid-setup, or owned.
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct SetupStatus {
+    /// Somebody owns this unit.
+    pub setup_complete: bool,
+    /// The code is on the screen and a token will be accepted.
+    pub window_open: bool,
+    pub seconds_left: u64,
+    pub paired_devices: usize,
+    /// Whether "pair with the passphrase" can work.
+    pub has_passphrase: bool,
+    /// Whether "sign in with an existing account" can work.
+    pub has_accounts: bool,
+    pub tls_port: u16,
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    get,
+    path = "/api/setup/status",
+    tag = "Pairing",
+    responses((status = StatusCode::OK, description = "Where setup stands", body = SetupStatus)),
+    summary = "Where this unit is in its setup",
+))]
+pub async fn get_setup_status(State(state): State<Arc<ServerState>>) -> Json<SetupStatus> {
+    let window = state.pairing.setup_window();
+    Json(SetupStatus {
+        setup_complete: state.pairing.setup_complete().await,
+        window_open: window.is_some(),
+        seconds_left: window.map(|(_, left)| left.as_secs()).unwrap_or(0),
+        paired_devices: state.pairing.device_count().await,
+        has_passphrase: state.pairing.has_passphrase().await,
+        has_accounts: !state.web_users.read().await.is_empty(),
+        tls_port: state.config.tls_port,
+    })
+}
+
+/// First contact with a new unit.
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct SetupCompleteRequest {
+    /// The token from the screen, as scanned or as typed.
+    pub token: String,
+    /// The owner passphrase to set. At least eight characters.
+    pub passphrase: String,
+    /// What to call this browser. Made up from the user agent if absent.
+    #[serde(default)]
+    pub device_name: Option<String>,
+    /// The browser's clock, so the unit can set its own from it.
+    #[serde(default)]
+    pub browser_unix_ms: Option<i64>,
+}
+
+/// What a browser gets back once it is trusted. The cookie travels in the
+/// `Set-Cookie` header, not here.
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct PairedResponse {
+    pub device_id: String,
+    pub name: String,
+}
+
+fn paired(issued: crate::pairing::IssuedDevice) -> Response {
+    (
+        StatusCode::OK,
+        [(header::SET_COOKIE, issued.set_cookie_header())],
+        Json(PairedResponse {
+            device_id: issued.id,
+            name: issued.name,
+        }),
+    )
+        .into_response()
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/setup/complete",
+    tag = "Pairing",
+    request_body(content = SetupCompleteRequest, content_type = "application/json"),
+    responses(
+        (status = StatusCode::OK, description = "This browser is now the first trusted device; the cookie is in Set-Cookie", body = PairedResponse),
+        (status = StatusCode::FORBIDDEN, description = "Wrong token"),
+        (status = StatusCode::GONE, description = "The setup window is closed"),
+        (status = StatusCode::CONFLICT, description = "Setup is already complete"),
+        (status = StatusCode::UNPROCESSABLE_ENTITY, description = "The passphrase is too short"),
+    ),
+    summary = "Complete first-time setup",
+))]
+pub async fn complete_setup(
+    State(state): State<Arc<ServerState>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<SetupCompleteRequest>,
+) -> Result<Response, (StatusCode, String)> {
+    let issued = state
+        .pairing
+        .complete_setup(
+            &req.token,
+            &req.passphrase,
+            req.device_name.as_deref(),
+            &user_agent(&headers),
+        )
+        .await
+        .map_err(pair_error)?;
+    // The phone knows what time it is and the unit very likely does not.
+    // A time that is not believable is ignored rather than applied.
+    if let Some(offset) = req.browser_unix_ms.and_then(offset_from_browser) {
+        rayhunter::clock::set_offset(offset);
+        log::info!(
+            "clock offset set from a pairing browser: {}s",
+            offset.num_seconds()
+        );
+        clock_changed(&state);
+    }
+    Ok(paired(issued))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct PairPassphraseRequest {
+    pub passphrase: String,
+    #[serde(default)]
+    pub device_name: Option<String>,
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/pair/passphrase",
+    tag = "Pairing",
+    request_body(content = PairPassphraseRequest, content_type = "application/json"),
+    responses(
+        (status = StatusCode::OK, description = "This browser is now trusted; the cookie is in Set-Cookie", body = PairedResponse),
+        (status = StatusCode::FORBIDDEN, description = "Wrong passphrase"),
+        (status = StatusCode::TOO_MANY_REQUESTS, description = "Too many wrong attempts; wait"),
+        (status = StatusCode::CONFLICT, description = "No passphrase has been set"),
+    ),
+    summary = "Pair this browser with the owner passphrase",
+))]
+pub async fn pair_with_passphrase(
+    State(state): State<Arc<ServerState>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<PairPassphraseRequest>,
+) -> Result<Response, (StatusCode, String)> {
+    let issued = state
+        .pairing
+        .pair_with_passphrase(
+            &req.passphrase,
+            req.device_name.as_deref(),
+            &user_agent(&headers),
+        )
+        .await
+        .map_err(pair_error)?;
+    Ok(paired(issued))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct PairAccountRequest {
+    pub username: String,
+    pub password: String,
+    #[serde(default)]
+    pub device_name: Option<String>,
+}
+
+/// For units that had web accounts before pairing existed.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/pair/account",
+    tag = "Pairing",
+    request_body(content = PairAccountRequest, content_type = "application/json"),
+    responses(
+        (status = StatusCode::OK, description = "This browser is now trusted; the cookie is in Set-Cookie", body = PairedResponse),
+        (status = StatusCode::FORBIDDEN, description = "Wrong username or password"),
+        (status = StatusCode::TOO_MANY_REQUESTS, description = "Too many wrong attempts; wait"),
+    ),
+    summary = "Pair this browser with a web account from before pairing",
+))]
+pub async fn pair_with_account(
+    State(state): State<Arc<ServerState>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<PairAccountRequest>,
+) -> Result<Response, (StatusCode, String)> {
+    let users = state.web_users.read().await.clone();
+    let issued = state
+        .pairing
+        .pair_with_account(
+            &users,
+            &req.username,
+            &req.password,
+            req.device_name.as_deref(),
+            &user_agent(&headers),
+        )
+        .await
+        .map_err(pair_error)?;
+    Ok(paired(issued))
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    get,
+    path = "/api/devices",
+    tag = "Pairing",
+    responses((status = StatusCode::OK, description = "Every trusted browser", body = Vec<crate::pairing::DeviceInfo>)),
+    summary = "List trusted devices",
+))]
+pub async fn list_devices(
+    State(state): State<Arc<ServerState>>,
+    current: Option<axum::Extension<crate::web_auth::CurrentDevice>>,
+) -> Json<Vec<crate::pairing::DeviceInfo>> {
+    let current_id = current.as_ref().map(|c| c.0.0.as_str());
+    Json(state.pairing.devices(current_id).await)
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct RenameDeviceRequest {
+    pub name: String,
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/devices/{id}/rename",
+    tag = "Pairing",
+    request_body(content = RenameDeviceRequest, content_type = "application/json"),
+    params(("id" = String, Path, description = "Device id")),
+    responses(
+        (status = StatusCode::OK, description = "Renamed"),
+        (status = StatusCode::NOT_FOUND, description = "No such device, or an empty name"),
+    ),
+    summary = "Rename a trusted device",
+))]
+pub async fn rename_device(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<String>,
+    Json(req): Json<RenameDeviceRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    state
+        .pairing
+        .rename_device(&id, &req.name)
+        .await
+        .map_err(pair_error)?;
+    Ok(StatusCode::OK)
+}
+
+/// Forget a trusted device. Its cookie stops working at once; revoking the
+/// browser making the request also clears its cookie, so it lands on the
+/// pairing page rather than on a wall of errors.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/devices/{id}/revoke",
+    tag = "Pairing",
+    params(("id" = String, Path, description = "Device id")),
+    responses(
+        (status = StatusCode::OK, description = "Revoked"),
+        (status = StatusCode::NOT_FOUND, description = "No such device"),
+    ),
+    summary = "Revoke a trusted device",
+))]
+pub async fn revoke_device(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<String>,
+    current: Option<axum::Extension<crate::web_auth::CurrentDevice>>,
+) -> Result<Response, (StatusCode, String)> {
+    state.pairing.revoke_device(&id).await.map_err(pair_error)?;
+    let is_current = current.map(|c| c.0.0 == id).unwrap_or(false);
+    if is_current {
+        return Ok((
+            StatusCode::OK,
+            [(header::SET_COOKIE, crate::pairing::clear_cookie_header())],
+            "revoked this browser",
+        )
+            .into_response());
+    }
+    Ok((StatusCode::OK, "revoked").into_response())
 }
 
 /// Inject a synthetic, clearly labelled warning, for demonstrating Rayhunter.
@@ -291,8 +997,19 @@ pub async fn get_config(
 ))]
 pub async fn set_config(
     State(state): State<Arc<ServerState>>,
+    current: Option<axum::Extension<crate::web_auth::CurrentDevice>>,
     Json(mut config): Json<Config>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
+    // Turning ADB on opens a root shell on the USB port, which is a bigger
+    // change than any other setting on this page. It takes the same proof
+    // of holding the unit as the terminal does: a step-up first.
+    let turning_adb_on = config.adb_enabled == Some(true) && state.config.adb_enabled != Some(true);
+    if turning_adb_on && !state.stepup.active(&device_id_of(&current)) {
+        return Err((
+            StatusCode::PRECONDITION_REQUIRED,
+            r#"{"stepup":"required","for":"adb_enabled"}"#.to_string(),
+        ));
+    }
     if config.gps_mode != GpsMode::Fixed {
         config.gps_fixed_latitude = None;
         config.gps_fixed_longitude = None;
@@ -686,8 +1403,20 @@ pub async fn get_time() -> Json<TimeResponse> {
     summary = "Set time offset",
     description = "Set the difference (in seconds) between the system time and the adjusted time for Rayhunter."
 ))]
-pub async fn set_time_offset(Json(req): Json<SetTimeOffsetRequest>) -> StatusCode {
-    rayhunter::clock::set_offset(chrono::TimeDelta::seconds(req.offset_seconds));
+pub async fn set_time_offset(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<SetTimeOffsetRequest>,
+) -> StatusCode {
+    // Bounded, and built with a checked constructor, so an absurd value is
+    // refused rather than applied or allowed to overflow.
+    if req.offset_seconds.abs() > MAX_CLOCK_OFFSET_SECS {
+        return StatusCode::BAD_REQUEST;
+    }
+    let Some(offset) = chrono::TimeDelta::try_seconds(req.offset_seconds) else {
+        return StatusCode::BAD_REQUEST;
+    };
+    rayhunter::clock::set_offset(offset);
+    clock_changed(&state);
     StatusCode::OK
 }
 
@@ -1103,6 +1832,14 @@ mod tests {
         };
 
         Arc::new(ServerState {
+            tls: None,
+            pairing: Arc::new(crate::pairing::Pairing::ephemeral(
+                crate::pairing::AuthState::default(),
+                None,
+            )),
+            stepup: Arc::new(crate::stepup::StepUp::new(None)),
+            own_addresses: vec![std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)],
+            front_door_alias: None,
             config_path: "/tmp/test_config.toml".to_string(),
             config: Config::default(),
             web_users: Arc::new(RwLock::new(Vec::new())),
@@ -1113,6 +1850,7 @@ mod tests {
             daemon_restart_token: CancellationToken::new(),
             ui_update_sender: None,
             suppression: None,
+            display_override: None,
             cell_tracker: Arc::new(RwLock::new(CellTracker::new())),
             wifi_status: Arc::new(RwLock::new(wifi_station::WifiStatus::default())),
             wifi_scan_lock: tokio::sync::Mutex::new(()),
@@ -1425,6 +2163,361 @@ pub async fn debug_keypress(
         ),
     ))
 }
+/// What a person needs to check they are talking to their own unit.
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct TlsInfo {
+    /// The port the interface is served on over TLS.
+    pub port: u16,
+    /// SHA-256 of the certificate, `AB:CD:…`, as browsers show it.
+    pub fingerprint_sha256: String,
+    /// The names and addresses the certificate is for.
+    pub subject_alt_names: Vec<String>,
+    /// The server certificate itself, PEM.
+    pub certificate_pem: String,
+    /// The unit's certificate authority: what a person installs to stop
+    /// the browser warning for good. Its fingerprint, its name as a phone
+    /// lists it, and the certificate as PEM.
+    pub ca_fingerprint_sha256: String,
+    pub ca_name: String,
+    pub ca_pem: String,
+    /// When the server certificate runs out, RFC 3339. It is reissued
+    /// before then; a browser that trusts the authority never notices.
+    pub leaf_not_after: Option<String>,
+}
+
+/// Describe this unit's TLS certificate.
+///
+/// The fingerprint is the one thing a person can compare between what the
+/// browser shows and what the unit itself says, so it is available to
+/// anyone who can reach the interface at all.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    get,
+    path = "/api/tls-info",
+    tag = "Configuration",
+    responses(
+        (status = StatusCode::OK, description = "The unit's certificate", body = TlsInfo),
+        (status = StatusCode::NOT_FOUND, description = "TLS is not available on this unit"),
+    ),
+    summary = "Describe the TLS certificate",
+))]
+pub async fn get_tls_info(
+    State(state): State<Arc<ServerState>>,
+) -> Result<Json<TlsInfo>, (StatusCode, String)> {
+    let Some(tls) = &state.tls else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            "TLS is not available on this unit".to_string(),
+        ));
+    };
+    let identity = tls.identity().await;
+    Ok(Json(TlsInfo {
+        port: state.config.tls_port,
+        fingerprint_sha256: identity.fingerprint_hex(),
+        subject_alt_names: identity.subject_alt_names(),
+        certificate_pem: identity.certificate_pem(),
+        ca_fingerprint_sha256: identity.ca_fingerprint_hex(),
+        ca_name: identity.ca_name(),
+        ca_pem: identity.ca_pem(),
+        leaf_not_after: identity.leaf_not_after(),
+    }))
+}
+
+async fn ca_file(
+    state: &ServerState,
+    content_type: &'static str,
+    filename: &str,
+    body: impl FnOnce(&crate::tls::TlsIdentity) -> Vec<u8>,
+) -> Result<Response, (StatusCode, String)> {
+    let Some(tls) = &state.tls else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            "TLS is not available on this unit".to_string(),
+        ));
+    };
+    let identity = tls.identity().await;
+    let disposition = format!("attachment; filename=\"{filename}\"");
+    Ok((
+        [
+            (header::CONTENT_TYPE, content_type.to_string()),
+            (header::CONTENT_DISPOSITION, disposition),
+            (header::CACHE_CONTROL, "no-store".to_string()),
+        ],
+        body(&identity),
+    )
+        .into_response())
+}
+
+/// The authority as PEM: what Android, Windows, Linux and Firefox import.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    get,
+    path = "/api/ca.pem",
+    tag = "Configuration",
+    responses(
+        (status = StatusCode::OK, description = "The unit's certificate authority, PEM", content_type = "application/x-pem-file"),
+        (status = StatusCode::NOT_FOUND, description = "TLS is not available on this unit"),
+    ),
+    summary = "Download the certificate authority (PEM)",
+))]
+pub async fn get_ca_pem(
+    State(state): State<Arc<ServerState>>,
+) -> Result<Response, (StatusCode, String)> {
+    ca_file(&state, "application/x-pem-file", "rayhunter-ca.pem", |id| {
+        id.ca_pem().into_bytes()
+    })
+    .await
+}
+
+/// The authority as DER, for the installers that want that.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    get,
+    path = "/api/ca.crt",
+    tag = "Configuration",
+    responses(
+        (status = StatusCode::OK, description = "The unit's certificate authority, DER", content_type = "application/x-x509-ca-cert"),
+        (status = StatusCode::NOT_FOUND, description = "TLS is not available on this unit"),
+    ),
+    summary = "Download the certificate authority (DER)",
+))]
+pub async fn get_ca_der(
+    State(state): State<Arc<ServerState>>,
+) -> Result<Response, (StatusCode, String)> {
+    ca_file(
+        &state,
+        "application/x-x509-ca-cert",
+        "rayhunter-ca.crt",
+        |id| id.ca_der().to_vec(),
+    )
+    .await
+}
+
+/// The authority as an Apple configuration profile: one tap on an iPhone,
+/// iPad or Mac, then a confirmation in Settings.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    get,
+    path = "/api/ca.mobileconfig",
+    tag = "Configuration",
+    responses(
+        (status = StatusCode::OK, description = "An Apple configuration profile installing the authority", content_type = "application/x-apple-aspen-config"),
+        (status = StatusCode::NOT_FOUND, description = "TLS is not available on this unit"),
+    ),
+    summary = "Download the certificate authority (Apple profile)",
+))]
+pub async fn get_ca_mobileconfig(
+    State(state): State<Arc<ServerState>>,
+) -> Result<Response, (StatusCode, String)> {
+    ca_file(
+        &state,
+        "application/x-apple-aspen-config",
+        "rayhunter.mobileconfig",
+        |id| id.mobileconfig().into_bytes(),
+    )
+    .await
+}
+
+/// The most the clock may be moved in one request, either way: twenty
+/// years, which covers a unit that booted thinking it is 2020, without
+/// letting a value overflow the arithmetic behind it.
+const MAX_CLOCK_OFFSET_SECS: i64 = 20 * 365 * 24 * 3600;
+
+/// The offset that makes the unit's clock read `browser_ms`, if that is a
+/// time worth believing: between 2024 and 2100, and within reach.
+fn offset_from_browser(browser_ms: i64) -> Option<chrono::TimeDelta> {
+    use chrono::Datelike;
+    let browser = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(browser_ms)?;
+    if browser.year() < 2024 || browser.year() > 2100 {
+        return None;
+    }
+    let offset = browser - chrono::Utc::now();
+    (offset.num_seconds().abs() <= MAX_CLOCK_OFFSET_SECS).then_some(offset)
+}
+
+/// The unit has just learnt the time; a server certificate issued without
+/// it may be due for replacement. Done in the background so the request
+/// that brought the time is not held up.
+fn clock_changed(state: &Arc<ServerState>) {
+    if let Some(tls) = state.tls.clone() {
+        tokio::spawn(async move {
+            tls.check().await;
+        });
+    }
+}
+
+fn default_qr_module_px() -> u32 {
+    4
+}
+
+fn default_qr_seconds() -> u64 {
+    600
+}
+
+/// Longest a picture may be asked to stay up. Long enough for any test,
+/// short enough that a forgotten request does not hide the status line for
+/// the rest of the day.
+const MAX_QR_SECONDS: u64 = 3600;
+
+/// Longest text a code is made from. The screen limits this far more
+/// tightly; this only stops a request from asking for a great deal of work
+/// that could never be drawn.
+const MAX_QR_TEXT_LEN: usize = 512;
+
+/// A QR code to show on the device's own screen.
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct DebugQrRequest {
+    /// What the code says. Uppercase keeps a URL in the compact
+    /// alphanumeric mode; the text is encoded exactly as given.
+    pub text: String,
+    /// Pixels per module. Reduced automatically if the code will not fit.
+    #[serde(default = "default_qr_module_px")]
+    pub module_px: u32,
+    /// A line of text under the code, for anyone who cannot scan it.
+    #[serde(default)]
+    pub caption: Option<String>,
+    /// How many times larger than the five by seven font to draw the caption.
+    #[serde(default)]
+    pub caption_scale: Option<u32>,
+    /// How long to leave it up.
+    #[serde(default = "default_qr_seconds")]
+    pub seconds: u64,
+}
+
+/// Where the code ended up, so a test can read the screen back and check.
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct DebugQrResponse {
+    /// QR version: 1 is 21 modules a side, each version adds four.
+    pub version: u8,
+    /// Modules a side.
+    pub size: u32,
+    /// Pixels per module actually drawn.
+    pub module_px: u32,
+    /// White margin around the code, in pixels.
+    pub quiet_px: u32,
+    /// Top left pixel of the first module.
+    pub code_x: u32,
+    pub code_y: u32,
+    /// Top row of the caption, if one was drawn.
+    pub caption_y: Option<u32>,
+    pub seconds: u64,
+}
+
+/// Show a QR code on the device's own screen for a while.
+///
+/// This is the drawing half of setup mode, exposed on its own so the thing
+/// the whole pairing design rests on, whether a phone can read a code off a
+/// screen this small, can be tested before anything is built on top of it.
+/// The code replaces everything else on the screen, status line included,
+/// and the panel is held awake while it is up.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/debug/qr",
+    tag = "Debug",
+    request_body(content = DebugQrRequest, content_type = "application/json"),
+    responses(
+        (status = StatusCode::OK, description = "Code is on the screen", body = DebugQrResponse),
+        (status = StatusCode::UNPROCESSABLE_ENTITY, description = "The text cannot be encoded, or the code does not fit the screen"),
+        (status = StatusCode::SERVICE_UNAVAILABLE, description = "This device has no screen to draw on"),
+    ),
+    summary = "Show a QR code on the device screen",
+))]
+pub async fn debug_show_qr(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<DebugQrRequest>,
+) -> Result<Json<DebugQrResponse>, (StatusCode, String)> {
+    use crate::display::qr;
+
+    let Some(override_) = &state.display_override else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "display system not available".to_string(),
+        ));
+    };
+    let Some(geo) = qr::screen_geometry(&state.config.device) else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "this device has no screen a code can be drawn on".to_string(),
+        ));
+    };
+    if req.text.is_empty() || req.text.len() > MAX_QR_TEXT_LEN {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("text must be between 1 and {MAX_QR_TEXT_LEN} bytes"),
+        ));
+    }
+    let Some(code) = qr::encode(&req.text) else {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "that text cannot be encoded as a QR code".to_string(),
+        ));
+    };
+    let size = code.size() as u32;
+    let caption = req.caption.as_deref().filter(|c| !c.is_empty());
+    let Some(layout) = qr::layout(
+        size,
+        req.module_px,
+        caption.is_some(),
+        req.caption_scale.unwrap_or(1),
+        geo,
+    ) else {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "a {size} by {size} module code does not fit a {} by {} screen even at {} pixels per module",
+                geo.width,
+                geo.height,
+                qr::MIN_MODULE_PX
+            ),
+        ));
+    };
+    let pixels = qr::render(&code, layout, caption, geo);
+    let seconds = req.seconds.clamp(1, MAX_QR_SECONDS);
+    override_.show(pixels, std::time::Duration::from_secs(seconds));
+    log::info!(
+        "showing a version {} QR code at {} px per module for {seconds}s",
+        code.version().value(),
+        layout.module_px
+    );
+    Ok(Json(DebugQrResponse {
+        version: code.version().value(),
+        size,
+        module_px: layout.module_px,
+        quiet_px: layout.quiet_px,
+        code_x: layout.code_x,
+        code_y: layout.code_y,
+        caption_y: layout.caption_y,
+        seconds,
+    }))
+}
+
+/// Take a picture put up by `debug_show_qr` down early.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/debug/qr/clear",
+    tag = "Debug",
+    responses(
+        (status = StatusCode::OK, description = "Nothing is showing any more"),
+        (status = StatusCode::SERVICE_UNAVAILABLE, description = "This device has no screen"),
+    ),
+    summary = "Clear a QR code from the device screen",
+))]
+pub async fn debug_clear_qr(
+    State(state): State<Arc<ServerState>>,
+) -> Result<(StatusCode, String), (StatusCode, String)> {
+    let Some(override_) = &state.display_override else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "display system not available".to_string(),
+        ));
+    };
+    let message = match override_.remaining() {
+        Some(left) => format!("cleared, with {}s left to run", left.as_secs()),
+        None => "nothing was showing".to_string(),
+    };
+    override_.clear();
+    Ok((StatusCode::OK, message))
+}
+
 /// One account to add or replace.
 #[derive(Debug, serde::Deserialize)]
 #[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
@@ -1673,6 +2766,7 @@ static TERMINAL_SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new
 ))]
 pub async fn run_terminal_command(
     State(state): State<Arc<ServerState>>,
+    current: Option<axum::Extension<crate::web_auth::CurrentDevice>>,
     Json(body): Json<TerminalRequest>,
 ) -> Result<Json<TerminalResponse>, (StatusCode, String)> {
     if !state.config.terminal_enabled {
@@ -1689,14 +2783,17 @@ pub async fn run_terminal_command(
     // exists, so without this check an enabled terminal on an account-less
     // device would be unauthenticated root command execution. Requiring an
     // account here is independent of that middleware.
-    if state.web_users.read().await.is_empty() {
+    // The second gate: a step-up confirmed on the unit itself, per browser,
+    // and each command keeps it open a little longer. 428 tells the
+    // interface to ask for one rather than showing a bare failure.
+    let device_id = device_id_of(&current);
+    if !state.stepup.active(&device_id) {
         return Err((
-            StatusCode::FORBIDDEN,
-            "the terminal requires a web interface password. Set one under Configuration \
-             before using it."
-                .to_string(),
+            StatusCode::PRECONDITION_REQUIRED,
+            r#"{"stepup":"required"}"#.to_string(),
         ));
     }
+    state.stepup.extend(&device_id);
     let command = body.command.trim();
     if command.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "no command given".to_string()));

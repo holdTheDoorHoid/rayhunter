@@ -1,4 +1,4 @@
-use crate::display::SharedSuppression;
+use crate::display::{SharedOverride, SharedSuppression};
 use log::info;
 use tokio::sync::mpsc::Receiver;
 use tokio_util::sync::CancellationToken;
@@ -13,6 +13,7 @@ pub fn update_ui(
     task_tracker: &TaskTracker,
     config: &config::Config,
     suppression: SharedSuppression,
+    override_: SharedOverride,
     shutdown_token: CancellationToken,
     ui_update_rx: Receiver<DisplayState>,
 ) {
@@ -29,6 +30,7 @@ pub fn update_ui(
             task_tracker,
             config,
             suppression,
+            override_,
             shutdown_token,
             ui_update_rx,
         )
@@ -38,6 +40,7 @@ pub fn update_ui(
             task_tracker,
             config,
             suppression,
+            override_,
             shutdown_token,
             ui_update_rx,
         )

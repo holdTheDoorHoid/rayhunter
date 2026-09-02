@@ -6,7 +6,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config;
 use crate::display::generic_framebuffer::{self, Dimensions, GenericFramebuffer};
-use crate::display::{DisplayState, SharedSuppression};
+use crate::display::{DisplayState, SharedOverride, SharedSuppression};
 
 use tokio::sync::mpsc::Receiver;
 use tokio_util::task::TaskTracker;
@@ -81,6 +81,7 @@ pub fn update_ui(
     task_tracker: &TaskTracker,
     config: &config::Config,
     suppression: SharedSuppression,
+    override_: SharedOverride,
     shutdown_token: CancellationToken,
     ui_update_rx: Receiver<DisplayState>,
 ) {
@@ -89,6 +90,7 @@ pub fn update_ui(
         config,
         Framebuffer,
         suppression,
+        override_,
         shutdown_token,
         ui_update_rx,
     )

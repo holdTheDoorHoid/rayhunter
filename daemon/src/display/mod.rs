@@ -1,13 +1,14 @@
 use rayhunter::analysis::analyzer::EventType;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub mod generic_framebuffer;
 
 pub mod headless;
 pub mod orbic;
+pub mod qr;
 pub mod tmobile;
 pub mod tplink;
 pub mod tplink_framebuffer;
@@ -91,6 +92,110 @@ impl Default for DisplaySuppression {
 /// Shared handle to the suppression state.
 pub type SharedSuppression = Arc<DisplaySuppression>;
 
+/// A picture that takes the whole screen for a while.
+///
+/// Used for the pairing code a new unit shows on first boot, and for anything
+/// else that has to be on screen regardless of what Rayhunter would normally
+/// be drawing: the picture replaces the status line, the logo, the custom
+/// image, all of it, until its time is up or it is cleared. The display loop
+/// asks for it on every pass and paints it fresh each time, since the
+/// device's own interface keeps writing over parts of the framebuffer.
+///
+/// A button press still hands the screen back for a moment, exactly as it
+/// does for a custom image. The person pressing buttons on the device is
+/// usually trying to read the WiFi password off it, and during setup that
+/// is precisely what they need to be able to do.
+#[derive(Debug, Default)]
+pub struct DisplayOverride {
+    inner: Mutex<Option<OverrideFrame>>,
+    /// A short line of text drawn under the status line for a while,
+    /// without taking the screen: "TERMINAL ACTIVE" is the one use so far.
+    banner: Mutex<Option<(String, Instant)>>,
+}
+
+#[derive(Debug)]
+struct OverrideFrame {
+    pixels: Arc<Vec<(u8, u8, u8)>>,
+    until: Instant,
+}
+
+impl DisplayOverride {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Show `pixels`, a full screen's worth, for `period` from now.
+    ///
+    /// Replaces whatever was showing before; the newest request wins.
+    pub fn show(&self, pixels: Vec<(u8, u8, u8)>, period: Duration) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        *inner = Some(OverrideFrame {
+            pixels: Arc::new(pixels),
+            until: Instant::now() + period,
+        });
+    }
+
+    /// Take the picture down early.
+    pub fn clear(&self) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        *inner = None;
+    }
+
+    /// The picture to paint right now, or `None` if there is none or it has
+    /// expired. An expired one is dropped on the way out so its pixels are
+    /// not held for nothing.
+    pub fn current(&self) -> Option<Arc<Vec<(u8, u8, u8)>>> {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        match inner.as_ref() {
+            Some(frame) if Instant::now() < frame.until => Some(frame.pixels.clone()),
+            Some(_) => {
+                *inner = None;
+                None
+            }
+            None => None,
+        }
+    }
+
+    /// Whether a picture is up.
+    pub fn active(&self) -> bool {
+        self.current().is_some()
+    }
+
+    pub fn show_banner(&self, text: &str, period: Duration) {
+        let mut b = self.banner.lock().unwrap_or_else(|e| e.into_inner());
+        *b = Some((text.to_string(), Instant::now() + period));
+    }
+
+    pub fn clear_banner(&self) {
+        let mut b = self.banner.lock().unwrap_or_else(|e| e.into_inner());
+        *b = None;
+    }
+
+    /// The banner text to draw now, if any; an expired one is dropped.
+    pub fn current_banner(&self) -> Option<String> {
+        let mut b = self.banner.lock().unwrap_or_else(|e| e.into_inner());
+        match b.as_ref() {
+            Some((text, until)) if Instant::now() < *until => Some(text.clone()),
+            Some(_) => {
+                *b = None;
+                None
+            }
+            None => None,
+        }
+    }
+
+    /// How much longer the current picture has, if there is one.
+    pub fn remaining(&self) -> Option<Duration> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner
+            .as_ref()
+            .and_then(|f| f.until.checked_duration_since(Instant::now()))
+    }
+}
+
+/// Shared handle to the override.
+pub type SharedOverride = Arc<DisplayOverride>;
+
 #[cfg(test)]
 mod suppression_tests {
     use super::*;
@@ -127,5 +232,62 @@ mod suppression_tests {
         s.suppress_for(Duration::from_millis(0));
         std::thread::sleep(Duration::from_millis(5));
         assert!(!s.active());
+    }
+}
+
+#[cfg(test)]
+mod override_tests {
+    use super::*;
+
+    #[test]
+    fn nothing_is_showing_to_begin_with() {
+        let o = DisplayOverride::new();
+        assert!(!o.active());
+        assert!(o.current().is_none());
+        assert!(o.remaining().is_none());
+    }
+
+    #[test]
+    fn a_picture_shows_until_cleared() {
+        let o = DisplayOverride::new();
+        o.show(vec![(1, 2, 3); 4], Duration::from_secs(60));
+        assert!(o.active());
+        assert_eq!(o.current().unwrap().len(), 4);
+        assert!(o.remaining().unwrap() > Duration::from_secs(50));
+        o.clear();
+        assert!(!o.active());
+    }
+
+    /// An expired picture must come down on its own. Setup mode is a window,
+    /// not a permanent state, and nobody is around to clear it.
+    #[test]
+    fn a_picture_comes_down_when_its_time_is_up() {
+        let o = DisplayOverride::new();
+        o.show(vec![(0, 0, 0); 4], Duration::from_millis(0));
+        std::thread::sleep(Duration::from_millis(5));
+        assert!(o.current().is_none());
+        assert!(!o.active());
+    }
+
+    #[test]
+    fn a_banner_shows_and_lapses_on_its_own() {
+        let o = DisplayOverride::new();
+        assert!(o.current_banner().is_none());
+        o.show_banner("TERMINAL ACTIVE", Duration::from_secs(60));
+        assert_eq!(o.current_banner().as_deref(), Some("TERMINAL ACTIVE"));
+        o.show_banner("GONE", Duration::from_millis(0));
+        std::thread::sleep(Duration::from_millis(5));
+        assert!(o.current_banner().is_none());
+        o.show_banner("X", Duration::from_secs(60));
+        o.clear_banner();
+        assert!(o.current_banner().is_none());
+    }
+
+    #[test]
+    fn the_newest_picture_wins() {
+        let o = DisplayOverride::new();
+        o.show(vec![(1, 1, 1); 4], Duration::from_secs(60));
+        o.show(vec![(2, 2, 2); 9], Duration::from_secs(60));
+        assert_eq!(o.current().unwrap().len(), 9);
     }
 }

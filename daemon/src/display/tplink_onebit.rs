@@ -2,7 +2,7 @@
 ///
 /// https://github.com/m0veax/tplink_m7350/tree/main/oled
 use crate::config::{self, UiLevel};
-use crate::display::{DisplayState, SharedSuppression};
+use crate::display::{DisplayState, SharedOverride, SharedSuppression};
 
 use log::{error, info};
 use tokio::sync::mpsc::Receiver;
@@ -115,6 +115,10 @@ pub fn update_ui(
     // nothing for a button press to step aside for. Taken anyway to keep
     // one signature across every device.
     _suppression: SharedSuppression,
+    // A one-bit panel could show a code, but this driver draws faces from
+    // fixed pictures; until it can take arbitrary pixels, these units pair
+    // by button press.
+    _override: SharedOverride,
     shutdown_token: CancellationToken,
     mut ui_update_rx: Receiver<DisplayState>,
 ) {

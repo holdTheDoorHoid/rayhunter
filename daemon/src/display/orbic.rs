@@ -1,7 +1,7 @@
 use crate::config;
 use crate::config::KeepScreenOn;
 use crate::display::generic_framebuffer::{self, Dimensions, GenericFramebuffer};
-use crate::display::{DisplayState, SharedSuppression};
+use crate::display::{DisplayState, SharedOverride, SharedSuppression};
 use async_trait::async_trait;
 use log::{debug, info, warn};
 use std::time::Duration;
@@ -61,7 +61,8 @@ async fn write_sysfs(path: &str, value: &str) {
     }
 }
 
-/// Hold the panel awake for as long as the setting says to.
+/// Hold the panel awake for as long as the setting says to, and for as long
+/// as a full-screen override is up.
 ///
 /// Improves on the upstream attempt (EFForg/rayhunter#919, closed) in three
 /// ways. It can be limited to while external power is connected, which was the
@@ -69,14 +70,23 @@ async fn write_sysfs(path: &str, value: &str) {
 /// as it stops holding the screen rather than only at shutdown, so unplugging
 /// a device set to `WhenPluggedIn` gives its battery life straight back. And
 /// it shuts down promptly instead of after up to a full poll interval.
+///
+/// The override is the pairing code. A code on a screen that has blanked
+/// itself is no use to anybody, and the stock firmware blanks the panel on
+/// its own timer with no regard for what is drawn on it, so while a code is
+/// up the panel is held awake whatever the setting says. The moment it comes
+/// down the setting is back in charge.
 fn spawn_keep_screen_on(
     task_tracker: &TaskTracker,
     mode: KeepScreenOn,
+    override_: SharedOverride,
     shutdown_token: CancellationToken,
 ) {
     task_tracker.spawn(async move {
         if tokio::fs::metadata(PANEL_DIR).await.is_err() {
-            warn!("keep_screen_on is set, but this device has no {PANEL_DIR}; doing nothing");
+            if mode != KeepScreenOn::Never {
+                warn!("keep_screen_on is set, but this device has no {PANEL_DIR}; doing nothing");
+            }
             return;
         }
         let can_autosleep = tokio::fs::metadata(AUTOSLEEP).await.is_ok();
@@ -90,13 +100,15 @@ fn spawn_keep_screen_on(
         let mut suspended_autosleep = false;
 
         loop {
-            let holding = match mode {
-                KeepScreenOn::Never => false,
-                KeepScreenOn::Always => true,
-                // An unreadable flag is treated as unplugged. Failing towards
-                // letting the screen sleep spends nobody's battery.
-                KeepScreenOn::WhenPluggedIn => read_flag(USB_ONLINE).await.unwrap_or(false),
-            };
+            let holding = override_.active()
+                || match mode {
+                    KeepScreenOn::Never => false,
+                    KeepScreenOn::Always => true,
+                    // An unreadable flag is treated as unplugged. Failing
+                    // towards letting the screen sleep spends nobody's
+                    // battery.
+                    KeepScreenOn::WhenPluggedIn => read_flag(USB_ONLINE).await.unwrap_or(false),
+                };
 
             if holding {
                 if can_autosleep && !suspended_autosleep {
@@ -164,18 +176,25 @@ pub fn update_ui(
     task_tracker: &TaskTracker,
     config: &config::Config,
     suppression: SharedSuppression,
+    override_: SharedOverride,
     shutdown_token: CancellationToken,
     ui_update_rx: Receiver<DisplayState>,
 ) {
-    if config.keep_screen_on != KeepScreenOn::Never {
-        spawn_keep_screen_on(task_tracker, config.keep_screen_on, shutdown_token.clone());
-    }
+    // Always, not only when the setting asks for it: the panel also has to
+    // be held awake while a pairing code is up, whatever the setting.
+    spawn_keep_screen_on(
+        task_tracker,
+        config.keep_screen_on,
+        override_.clone(),
+        shutdown_token.clone(),
+    );
 
     generic_framebuffer::update_ui(
         task_tracker,
         config,
         Framebuffer,
         suppression,
+        override_,
         shutdown_token,
         ui_update_rx,
     )

@@ -10,7 +10,7 @@ use tokio_util::task::TaskTracker;
 use std::time::Duration;
 
 use crate::config::{self, UiLevel};
-use crate::display::{DisplayState, SharedSuppression};
+use crate::display::{DisplayState, SharedOverride, SharedSuppression};
 
 macro_rules! led {
     ($l:expr) => {{ format!("/sys/class/leds/led:{}/blink", $l) }};
@@ -31,6 +31,8 @@ pub fn update_ui(
     // nothing for a button press to step aside for. Taken anyway to keep
     // one signature across every device.
     _suppression: SharedSuppression,
+    // No screen to put a pairing code on; these units pair by button press.
+    _override: SharedOverride,
     shutdown_token: CancellationToken,
     mut ui_update_rx: mpsc::Receiver<DisplayState>,
 ) {
