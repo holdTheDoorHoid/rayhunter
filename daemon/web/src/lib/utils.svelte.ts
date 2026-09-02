@@ -14,6 +14,7 @@ export interface AnalyzerConfig {
     rrlp_location_request: boolean;
     /** Silent on modems that do not report timing advance, such as the Orbic. */
     timing_advance: boolean;
+    flash_catch: boolean;
     test_analyzer: boolean;
     diagnostic_analyzer: boolean;
 }
