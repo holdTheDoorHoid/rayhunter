@@ -189,9 +189,14 @@ async fn tplink_run_install(
     };
 
     let mut conn = TelnetConnection::new(addr, true);
-    if let Some(card_store) = &card_store {
-        migrate_card_layout(&mut conn, card_store, &data_dir).await?;
-    }
+    // Whether or not a card is used now, an install that lived on the card
+    // must not be "migrated" by moving the card's mount directory around.
+    let old_card_mount = if sdcard_path.is_empty() {
+        "/media/card".to_owned()
+    } else {
+        sdcard_path.clone()
+    };
+    migrate_card_layout(&mut conn, &old_card_mount, &data_dir).await?;
     setup_data_directory(&mut conn, &data_dir).await?;
 
     install_config(
@@ -396,19 +401,17 @@ async fn tplink_launch_telnet_v5(admin_ip: &str) -> Result<(), Error> {
 ///
 /// Earlier installers symlinked `/data/rayhunter` at the card's mount point,
 /// so the binary, the config and the recordings all sat on the card. The
-/// recordings stay where they are (`<card>/qmdl` becomes the card store);
-/// the config and any custom GIFs are copied to internal flash, the old
-/// binary on the card is removed, and the symlink is dropped so
-/// `setup_data_directory` creates the internal directory afresh instead of
-/// trying to move a mount point.
+/// recordings stay where they are (`<card>/qmdl` becomes the card store when
+/// a card is used); the config and any custom GIFs are copied to internal
+/// flash if the card is mounted, the old binary on the card is removed, and
+/// the symlink is dropped so `setup_data_directory` creates the internal
+/// directory afresh instead of moving a mount point, or an empty mount
+/// directory, around.
 async fn migrate_card_layout(
     conn: &mut TelnetConnection,
-    card_store: &str,
+    card_mount: &str,
     data_dir: &str,
 ) -> Result<(), Error> {
-    let Some(card_mount) = card_store.strip_suffix("/qmdl") else {
-        return Ok(());
-    };
     if !is_symlink(conn, "/data/rayhunter").await {
         return Ok(());
     }
@@ -416,24 +419,39 @@ async fn migrate_card_layout(
     if target.trim_end_matches('/') != card_mount.trim_end_matches('/') {
         return Ok(());
     }
-    println!(
-        "Moving Rayhunter from the card to internal flash; recordings stay on the card at {card_store}"
-    );
+    let mounted = conn
+        .run_command(&format!(
+            "grep -q ' {card_mount} ' /proc/mounts && echo MOUNTED"
+        ))
+        .await
+        .map(|out| out.contains("MOUNTED"))
+        .unwrap_or(false);
+    if mounted {
+        println!(
+            "Moving Rayhunter from the card to internal flash; recordings stay on the card at {card_mount}/qmdl"
+        );
+    } else {
+        println!(
+            "Earlier install pointed at the card, which is not mounted; setting up internal flash afresh"
+        );
+    }
     let _ = conn
         .run_command("/etc/init.d/rayhunter_daemon stop 2>/dev/null; true")
         .await;
     conn.run_command(&format!("mkdir -p '{data_dir}'")).await?;
-    for name in ["config.toml", "gifs"] {
-        let _ = conn
-            .run_command(&format!(
-                "[ -e '{card_mount}/{name}' ] && cp -r '{card_mount}/{name}' '{data_dir}/' ; true"
-            ))
-            .await;
+    if mounted {
+        for name in ["config.toml", "gifs"] {
+            let _ = conn
+                .run_command(&format!(
+                    "[ -e '{card_mount}/{name}' ] && cp -r '{card_mount}/{name}' '{data_dir}/' ; true"
+                ))
+                .await;
+        }
+        conn.run_command(&format!(
+            "rm -f '{card_mount}/rayhunter-daemon' '{card_mount}/rayhunter-daemon.new'"
+        ))
+        .await?;
     }
-    conn.run_command(&format!(
-        "rm -f '{card_mount}/rayhunter-daemon' '{card_mount}/rayhunter-daemon.new'"
-    ))
-    .await?;
     conn.run_command("rm -f /data/rayhunter").await?;
     Ok(())
 }
