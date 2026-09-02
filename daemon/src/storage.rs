@@ -595,7 +595,14 @@ pub fn run_storage_monitor(
                 )
             };
             let want_card = state == RemovableState::Present;
-            if want_card == active_is_card {
+            let returned = want_card && previous_state != RemovableState::Present;
+            // Already where it should be, and nothing came back: note any
+            // change of condition and carry on. A card that went away and
+            // came back between two checks, or was unmounted and remounted
+            // under a store that never moved, still goes through the switch
+            // below, which restarts a recording the interruption may have
+            // stopped.
+            if want_card == active_is_card && !returned {
                 if state != previous_state {
                     let mut status = status.write().await;
                     status.removable = state;
