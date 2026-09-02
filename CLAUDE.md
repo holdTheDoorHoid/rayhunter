@@ -291,6 +291,39 @@ before any filesystem is involved; formatting cannot help, and
 initialised. Reseat the card or try a different one, ideally a non-UHS
 (class 4/10 SDHC) card.
 
+## One daemon at a time
+
+The daemon holds `flock` on `/tmp/rayhunter-daemon.lock` and exits with
+"another rayhunter-daemon is already running (pid N)" if a second copy is
+started. Before this, three instances were once found on the TP-Link: the
+init script's `start-stop-daemon -S` looks for `/bin/sh`, which the daemon
+stops being once it `exec`s, so its pidfile check never refused a second
+start, and a shutdown could hang (the shutdown thread panicked when the diag
+thread had already given up, so the analysis task was never told to exit).
+The init script now checks the pidfile itself and, on `stop`, waits up to
+ten seconds before `kill -9`. `pidof rayhunter-daemon | wc -w` should be 1.
+
+## Talking to the TP-Link from a script
+
+Its root shell is telnet on 192.168.0.1:23 with no login. A runner that
+returns just the command's output lives in the session scratchpad as
+`tp.py`; the trick is to send `echo __BE""G__; <cmd>; echo __EN""D__ $?` so
+the echoed command line does not contain the markers the output does. Since
+the fork's pairing landed, `http://192.168.0.1:8080/api/...` from the host is
+refused until a browser is paired; go through the device's own loopback
+instead: `wget -q -O - http://127.0.0.1:8080/api/system-stats`.
+
+## Simulating a card removal on the TP-Link
+
+The slot is under the battery, so the card cannot be pulled while running.
+What looks identical to the daemon: `umount -l /media/card; mv
+/dev/mmcblk0p1 /dev/mmcblk0p1.hidden; mv /dev/mmcblk0 /dev/mmcblk0.hidden`
+(fallback to internal within ~6 s), and moving the nodes back (the daemon
+mounts the card itself and moves back within ~6 s). Do not leave a lazily
+unmounted instance and a fresh mount of the same FAT filesystem live at
+once: hide the nodes in the same command as the `umount -l`, so the switch
+to internal closes the old files before anything remounts.
+
 ## Simulating a memory card on the Orbic
 
 `removable_store_path` can point at any directory; the storage monitor treats
