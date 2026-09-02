@@ -8,6 +8,8 @@
     // and from what the unit says about itself, and shows one form, not a
     // menu of them.
     import { onMount } from 'svelte';
+    import CertificateTrust from '$lib/components/CertificateTrust.svelte';
+    import type { TlsInfo } from '$lib/utils.svelte';
 
     type Status = {
         setup_complete: boolean;
@@ -41,6 +43,7 @@
     let busy = $state(false);
     let error = $state('');
     let fingerprint = $state('');
+    let tls_info = $state<TlsInfo | null>(null);
     let insecure = $state(false);
     let code = $state('');
     let from_code_link = $state(false);
@@ -92,8 +95,9 @@
             mode = 'closed';
         }
         try {
-            const t = await get_json<{ fingerprint_sha256: string }>('/api/tls-info');
-            fingerprint = t.fingerprint_sha256;
+            const t = await get_json<TlsInfo>('/api/tls-info');
+            fingerprint = t.ca_fingerprint_sha256;
+            tls_info = t;
         } catch {
             fingerprint = '';
         }
@@ -619,17 +623,18 @@
         </div>
     {/if}
 
-    {#if fingerprint}
+    {#if fingerprint && tls_info}
         <div
             class="mt-8 border-t border-gray-200 pt-4 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400"
         >
             <p class="mb-1">
-                Your browser warned about this unit's certificate because the unit made it itself;
+                Your browser warned about this unit's certificate because the unit signs it itself;
                 nobody on the internet vouches for it, and nothing on the internet is involved. To
-                check you are talking to your own unit, compare this fingerprint with the one your
-                browser shows:
+                check you are talking to your own unit, compare this fingerprint with the one under
+                Configuration, or with the certificate authority's fingerprint your browser shows:
             </p>
             <code class="break-all">{fingerprint}</code>
         </div>
+        <CertificateTrust tls={tls_info} />
     {/if}
 </main>

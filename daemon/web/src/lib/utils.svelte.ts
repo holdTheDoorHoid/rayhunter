@@ -476,6 +476,10 @@ export interface TlsInfo {
     fingerprint_sha256: string;
     subject_alt_names: string[];
     certificate_pem: string;
+    ca_fingerprint_sha256: string;
+    ca_name: string;
+    ca_pem: string;
+    leaf_not_after: string | null;
 }
 
 export interface PairCode {

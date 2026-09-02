@@ -10,6 +10,7 @@ pub mod diag;
 pub mod display;
 pub mod error;
 pub mod export_metadata;
+pub mod frontdoor;
 pub mod gps;
 pub mod http_client;
 pub mod key_input;
@@ -71,6 +72,9 @@ use utoipa::OpenApi;
         server::debug_show_qr,
         server::debug_clear_qr,
         server::get_tls_info,
+        server::get_ca_pem,
+        server::get_ca_der,
+        server::get_ca_mobileconfig,
         server::get_setup_status,
         server::complete_setup,
         server::pair_with_passphrase,

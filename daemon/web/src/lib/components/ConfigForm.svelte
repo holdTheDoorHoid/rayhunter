@@ -30,6 +30,7 @@
     import DeviceColorSettings from './DeviceColorSettings.svelte';
     import DeviceGifSettings from './DeviceGifSettings.svelte';
     import Explainer from './Explainer.svelte';
+    import CertificateTrust from './CertificateTrust.svelte';
     import { HEURISTICS } from '../heuristics';
     import { theme, type ThemePreference } from '../theme.svelte';
     import { help } from '../helpVisibility.svelte';
@@ -193,12 +194,6 @@
         } finally {
             savingPassphrase = false;
         }
-    }
-
-    function certificate_download(): string {
-        return tlsInfo
-            ? `data:application/x-pem-file,${encodeURIComponent(tlsInfo.certificate_pem)}`
-            : '';
     }
 
     /**
@@ -866,15 +861,14 @@
                                         shows:
                                     </p>
                                     <code class="block font-mono text-xs break-all"
-                                        >{tlsInfo.fingerprint_sha256}</code
+                                        >authority {tlsInfo.ca_fingerprint_sha256}</code
                                     >
-                                    <a
-                                        href={certificate_download()}
-                                        download="rayhunter.pem"
-                                        class="mt-1 inline-block text-xs underline"
-                                    >
-                                        Download the certificate
-                                    </a>
+                                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                        The server certificate under it runs until
+                                        {short_date(tlsInfo.leaf_not_after ?? '')} and is renewed by the
+                                        unit itself.
+                                    </p>
+                                    <CertificateTrust tls={tlsInfo} />
                                 {/if}
 
                                 {#if config.web_users.length > 0}

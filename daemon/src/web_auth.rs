@@ -217,6 +217,9 @@ pub fn is_exempt_from_pairing(path: &str) -> bool {
             | "/api/setup/press-request"
             | "/api/setup/complete-press"
             | "/api/tls-info"
+            | "/api/ca.pem"
+            | "/api/ca.crt"
+            | "/api/ca.mobileconfig"
             | "/favicon.png"
             | "/rayhunter_orca_only.png"
             | "/rayhunter_text.png"
@@ -334,6 +337,18 @@ pub async fn require_auth(
     }
 }
 
+/// Whether a `Host` header names a port.
+fn host_had_port(host: &str) -> bool {
+    match host.strip_prefix('[') {
+        // An IPv6 literal: a port can only follow the closing bracket.
+        Some(rest) => rest
+            .split_once(']')
+            .map(|(_, after)| after.starts_with(':'))
+            .unwrap_or(false),
+        None => host.contains(':'),
+    }
+}
+
 /// The host part of a `Host` header, without the port.
 fn host_without_port(host: &str) -> &str {
     if let Some(rest) = host.strip_prefix('[') {
@@ -365,15 +380,19 @@ pub async fn redirect_to_tls(
     if kind != ListenerKind::Plain || state.tls.is_none() {
         return next.run(request).await;
     }
-    let Some(host) = request
+    let Some(raw_host) = request
         .headers()
         .get(header::HOST)
         .and_then(|v| v.to_str().ok())
-        .map(host_without_port)
         .filter(|h| !h.is_empty())
     else {
         return next.run(request).await;
     };
+    let host = host_without_port(raw_host);
+    // A request that arrived with no port came through the front door
+    // (`rayhunter.local`, or the alias address) on port 80, where 443 is
+    // Rayhunter's too; keep it portless. Anything else names the TLS port.
+    let had_port = host_had_port(raw_host);
     let host = if host.contains(':') {
         format!("[{host}]")
     } else {
@@ -384,7 +403,11 @@ pub async fn redirect_to_tls(
         .path_and_query()
         .map(|p| p.as_str())
         .unwrap_or("/");
-    let target = format!("https://{host}:{}{rest}", state.config.tls_port);
+    let target = if had_port {
+        format!("https://{host}:{}{rest}", state.config.tls_port)
+    } else {
+        format!("https://{host}{rest}")
+    };
     (
         StatusCode::MOVED_PERMANENTLY,
         [(header::LOCATION, target.clone())],
@@ -722,6 +745,15 @@ mod tests {
                 "{closed} should need pairing"
             );
         }
+    }
+
+    #[test]
+    fn a_portless_host_means_the_front_door() {
+        assert!(host_had_port("192.168.1.1:8080"));
+        assert!(!host_had_port("rayhunter.local"));
+        assert!(!host_had_port("192.168.1.254"));
+        assert!(host_had_port("[::1]:8080"));
+        assert!(!host_had_port("[::1]"));
     }
 
     #[test]

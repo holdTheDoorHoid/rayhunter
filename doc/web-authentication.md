@@ -12,8 +12,8 @@ minutes after it starts. Pairing the first device is:
 
 1. Join the Rayhunter's WiFi on your phone.
 2. Scan the code with the phone's camera. If the phone cannot read it, open
-   `https://192.168.1.1:8443/pair` and type the eight characters printed under
-   the code instead.
+   `https://rayhunter.local/pair` (or `https://192.168.1.1:8443/pair`) and type
+   the eight characters printed under the code instead.
 3. Your browser warns that the connection is not private. Choose to continue.
    The warning is expected, once per browser; the reason is under [Why the
    browser warns](#why-the-browser-warns).
@@ -87,16 +87,49 @@ and the unit's screen says **TERMINAL ACTIVE** the whole time.
 
 ## Why the browser warns
 
-The Rayhunter makes its own certificate the first time it starts, and nobody
-on the internet vouches for it, so the browser cannot tell it from an
-impostor and says so. Nothing on the internet is involved: the unit is
-offline by design, and a certificate that a public authority would vouch for
-cannot be issued to a private address. You are asked to accept the warning
-once per browser.
+The Rayhunter signs its own certificate, and nobody on the internet vouches
+for it, so the browser cannot tell it from an impostor and says so. Nothing
+on the internet is involved: the unit is offline by design, and a certificate
+that a public authority would vouch for cannot be issued to a private
+address. You are asked to accept the warning once per browser, or you can
+[stop it for good](#stopping-the-warning-for-good-optional).
 
 If you want to check you are talking to your own unit, compare the
 fingerprint the browser shows with the one on the pairing page or under
 **Configuration**. They are the same forty hex digits.
+
+## Stopping the warning for good (optional)
+
+The unit has its own certificate authority, made on its first start. Tell a
+phone or computer to trust that authority and the warning does not come back
+on it, the padlock is shown, and `https://rayhunter.local` opens like any
+other site. This is optional, and it is one device at a time; the unit never
+asks for it.
+
+Open the pairing page, or **Configuration → Who can use this interface**, and
+expand **Stop the certificate warning for good**. The steps for your device
+are there; in short:
+
+- **iPhone or iPad:** download the profile, install it under **Settings →
+  Profile Downloaded**, then turn on full trust under **Settings → General →
+  About → Certificate Trust Settings**.
+- **Android:** download the certificate and install it as a **CA certificate**
+  from Settings. Firefox for Android needs its own setting turned on.
+- **Mac:** download and install the profile, then mark the certificate
+  **Always Trust** in Keychain Access.
+- **Windows:** download the certificate and install it into **Trusted Root
+  Certification Authorities**.
+- **Linux, and Firefox anywhere:** import the certificate in the browser's
+  own certificate settings, trusting it to identify websites.
+
+The authority's fingerprint is shown beside the steps so you can check you
+are installing your own unit's and not somebody else's. Trusting it trusts
+this one unit and nothing more, and it is removed the same way it was
+installed.
+
+Behind it, the unit signs itself a short-lived server certificate, about
+two years, and replaces it before it runs out. A device that trusts the
+authority never notices the change.
 
 ## What this protects against, and what it does not
 

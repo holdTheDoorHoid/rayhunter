@@ -39,9 +39,9 @@ use crate::update::UpdateStatus;
 
 pub struct ServerState {
     pub config_path: String,
-    /// This unit's certificate, when TLS is up. `None` means the plain port
-    /// is all there is this run.
-    pub tls: Option<Arc<crate::tls::TlsIdentity>>,
+    /// This unit's certificates, when TLS is up. `None` means the plain
+    /// port is all there is this run.
+    pub tls: Option<Arc<crate::tls::TlsRenewer>>,
     /// Which browsers are trusted, and the setup window.
     pub pairing: Arc<crate::pairing::Pairing>,
     /// The terminal's second gate.
@@ -427,6 +427,7 @@ pub async fn complete_setup_by_press(
         let offset =
             chrono::TimeDelta::milliseconds(browser_ms - chrono::Utc::now().timestamp_millis());
         rayhunter::clock::set_offset(offset);
+        clock_changed(&state);
     }
     Ok(paired(issued))
 }
@@ -674,6 +675,7 @@ pub async fn complete_setup(
         let now_ms = chrono::Utc::now().timestamp_millis();
         let offset = chrono::TimeDelta::milliseconds(browser_ms - now_ms);
         rayhunter::clock::set_offset(offset);
+        clock_changed(&state);
         log::info!(
             "clock offset set from the setup browser: {}s",
             offset.num_seconds()
@@ -1376,8 +1378,12 @@ pub async fn get_time() -> Json<TimeResponse> {
     summary = "Set time offset",
     description = "Set the difference (in seconds) between the system time and the adjusted time for Rayhunter."
 ))]
-pub async fn set_time_offset(Json(req): Json<SetTimeOffsetRequest>) -> StatusCode {
+pub async fn set_time_offset(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<SetTimeOffsetRequest>,
+) -> StatusCode {
     rayhunter::clock::set_offset(chrono::TimeDelta::seconds(req.offset_seconds));
+    clock_changed(&state);
     StatusCode::OK
 }
 
@@ -2132,8 +2138,17 @@ pub struct TlsInfo {
     pub fingerprint_sha256: String,
     /// The names and addresses the certificate is for.
     pub subject_alt_names: Vec<String>,
-    /// The certificate itself, PEM, for anyone who wants to install it.
+    /// The server certificate itself, PEM.
     pub certificate_pem: String,
+    /// The unit's certificate authority: what a person installs to stop
+    /// the browser warning for good. Its fingerprint, its name as a phone
+    /// lists it, and the certificate as PEM.
+    pub ca_fingerprint_sha256: String,
+    pub ca_name: String,
+    pub ca_pem: String,
+    /// When the server certificate runs out, RFC 3339. It is reissued
+    /// before then; a browser that trusts the authority never notices.
+    pub leaf_not_after: Option<String>,
 }
 
 /// Describe this unit's TLS certificate.
@@ -2154,18 +2169,126 @@ pub struct TlsInfo {
 pub async fn get_tls_info(
     State(state): State<Arc<ServerState>>,
 ) -> Result<Json<TlsInfo>, (StatusCode, String)> {
-    let Some(identity) = &state.tls else {
+    let Some(tls) = &state.tls else {
         return Err((
             StatusCode::NOT_FOUND,
             "TLS is not available on this unit".to_string(),
         ));
     };
+    let identity = tls.identity().await;
     Ok(Json(TlsInfo {
         port: state.config.tls_port,
         fingerprint_sha256: identity.fingerprint_hex(),
         subject_alt_names: identity.subject_alt_names(),
         certificate_pem: identity.certificate_pem(),
+        ca_fingerprint_sha256: identity.ca_fingerprint_hex(),
+        ca_name: identity.ca_name(),
+        ca_pem: identity.ca_pem(),
+        leaf_not_after: identity.leaf_not_after(),
     }))
+}
+
+async fn ca_file(
+    state: &ServerState,
+    content_type: &'static str,
+    filename: &str,
+    body: impl FnOnce(&crate::tls::TlsIdentity) -> Vec<u8>,
+) -> Result<Response, (StatusCode, String)> {
+    let Some(tls) = &state.tls else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            "TLS is not available on this unit".to_string(),
+        ));
+    };
+    let identity = tls.identity().await;
+    let disposition = format!("attachment; filename=\"{filename}\"");
+    Ok((
+        [
+            (header::CONTENT_TYPE, content_type.to_string()),
+            (header::CONTENT_DISPOSITION, disposition),
+            (header::CACHE_CONTROL, "no-store".to_string()),
+        ],
+        body(&identity),
+    )
+        .into_response())
+}
+
+/// The authority as PEM: what Android, Windows, Linux and Firefox import.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    get,
+    path = "/api/ca.pem",
+    tag = "Configuration",
+    responses(
+        (status = StatusCode::OK, description = "The unit's certificate authority, PEM", content_type = "application/x-pem-file"),
+        (status = StatusCode::NOT_FOUND, description = "TLS is not available on this unit"),
+    ),
+    summary = "Download the certificate authority (PEM)",
+))]
+pub async fn get_ca_pem(
+    State(state): State<Arc<ServerState>>,
+) -> Result<Response, (StatusCode, String)> {
+    ca_file(&state, "application/x-pem-file", "rayhunter-ca.pem", |id| {
+        id.ca_pem().into_bytes()
+    })
+    .await
+}
+
+/// The authority as DER, for the installers that want that.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    get,
+    path = "/api/ca.crt",
+    tag = "Configuration",
+    responses(
+        (status = StatusCode::OK, description = "The unit's certificate authority, DER", content_type = "application/x-x509-ca-cert"),
+        (status = StatusCode::NOT_FOUND, description = "TLS is not available on this unit"),
+    ),
+    summary = "Download the certificate authority (DER)",
+))]
+pub async fn get_ca_der(
+    State(state): State<Arc<ServerState>>,
+) -> Result<Response, (StatusCode, String)> {
+    ca_file(
+        &state,
+        "application/x-x509-ca-cert",
+        "rayhunter-ca.crt",
+        |id| id.ca_der().to_vec(),
+    )
+    .await
+}
+
+/// The authority as an Apple configuration profile: one tap on an iPhone,
+/// iPad or Mac, then a confirmation in Settings.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    get,
+    path = "/api/ca.mobileconfig",
+    tag = "Configuration",
+    responses(
+        (status = StatusCode::OK, description = "An Apple configuration profile installing the authority", content_type = "application/x-apple-aspen-config"),
+        (status = StatusCode::NOT_FOUND, description = "TLS is not available on this unit"),
+    ),
+    summary = "Download the certificate authority (Apple profile)",
+))]
+pub async fn get_ca_mobileconfig(
+    State(state): State<Arc<ServerState>>,
+) -> Result<Response, (StatusCode, String)> {
+    ca_file(
+        &state,
+        "application/x-apple-aspen-config",
+        "rayhunter.mobileconfig",
+        |id| id.mobileconfig().into_bytes(),
+    )
+    .await
+}
+
+/// The unit has just learnt the time; a server certificate issued without
+/// it may be due for replacement. Done in the background so the request
+/// that brought the time is not held up.
+fn clock_changed(state: &Arc<ServerState>) {
+    if let Some(tls) = state.tls.clone() {
+        tokio::spawn(async move {
+            tls.check().await;
+        });
+    }
 }
 
 fn default_qr_module_px() -> u32 {

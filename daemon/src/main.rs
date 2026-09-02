@@ -10,6 +10,7 @@ mod diag;
 mod display;
 mod error;
 mod export_metadata;
+mod frontdoor;
 mod gps;
 mod http_client;
 mod key_input;
@@ -120,6 +121,9 @@ fn get_router() -> AppRouter {
         .route("/api/time", get(get_time))
         .route("/api/time-offset", post(set_time_offset))
         .route("/api/tls-info", get(get_tls_info))
+        .route("/api/ca.pem", get(server::get_ca_pem))
+        .route("/api/ca.crt", get(server::get_ca_der))
+        .route("/api/ca.mobileconfig", get(server::get_ca_mobileconfig))
         .route("/api/setup/status", get(server::get_setup_status))
         .route("/api/setup/complete", post(complete_setup))
         .route("/api/pair/passphrase", post(server::pair_with_passphrase))
@@ -323,22 +327,20 @@ async fn run_server(
     // The same interface again, over TLS, on every address the plain one
     // uses. Alongside rather than instead, so a unit whose TLS fails keeps
     // its plain port; the redirect only happens while TLS is up.
-    let tls_config = state
-        .tls
-        .as_ref()
-        .and_then(|identity| match tls::server_config(identity) {
-            Ok(config) => {
-                info!(
-                    "serving the web interface over TLS on port {tls_port}, fingerprint {}",
-                    identity.fingerprint_hex()
-                );
-                Some(config)
-            }
-            Err(e) => {
-                error!("TLS is unavailable: {e}");
-                None
-            }
-        });
+    let tls_config =
+        state
+            .tls
+            .as_ref()
+            .and_then(|tls| match tls::server_config(tls.resolver.clone()) {
+                Ok(config) => {
+                    info!("serving the web interface over TLS on port {tls_port}");
+                    Some(config)
+                }
+                Err(e) => {
+                    error!("TLS is unavailable: {e}");
+                    None
+                }
+            });
     let listeners = Arc::new(Listeners {
         base,
         tls_config,
@@ -573,6 +575,34 @@ async fn run_with_config(
         .copied()
         .filter(|ip| !ip.is_loopback() && !ip.is_unspecified())
         .collect();
+    // A second address of the unit's own on the hotspot, where
+    // `rayhunter.local` is Rayhunter without a port. Opened before the
+    // certificate is loaded, so the certificate names it too.
+    let hotspot_v4 = hotspot_addrs.iter().find_map(|ip| match ip {
+        IpAddr::V4(v4) => Some(*v4),
+        IpAddr::V6(_) => None,
+    });
+    let front_door = match hotspot_v4 {
+        Some(hotspot) if config.tls_port != 0 && !config.debug_mode => {
+            let iface = if_addrs::get_if_addrs().ok().and_then(|ifs| {
+                ifs.into_iter()
+                    .find(|i| i.ip() == IpAddr::V4(hotspot))
+                    .map(|i| i.name)
+            });
+            match iface {
+                Some(iface) => {
+                    frontdoor::FrontDoor::open(&iface, hotspot, config.port, config.tls_port).await
+                }
+                None => None,
+            }
+        }
+        _ => None,
+    };
+    let mut cert_addrs = hotspot_addrs.clone();
+    if let Some(door) = &front_door {
+        cert_addrs.push(IpAddr::V4(door.alias));
+    }
+
     let tls_identity = if config.tls_port == 0 {
         info!("TLS is switched off (tls_port = 0)");
         None
@@ -584,14 +614,36 @@ async fn run_with_config(
         warn!("no hotspot address yet and no certificate on file; TLS waits for the next start");
         None
     } else {
-        match tls::load_or_generate(Path::new(&config.auth_store_path), &hotspot_addrs).await {
-            Ok(identity) => Some(Arc::new(identity)),
+        let dir = Path::new(&config.auth_store_path);
+        match tls::load_or_generate(dir, &cert_addrs).await {
+            Ok(identity) => match tls::TlsRenewer::new(dir, cert_addrs.clone(), identity) {
+                Ok(renewer) => Some(Arc::new(renewer)),
+                Err(e) => {
+                    error!("TLS is unavailable this run: {e}");
+                    None
+                }
+            },
             Err(e) => {
                 error!("TLS is unavailable this run: {e}");
                 None
             }
         }
     };
+    if let Some(tls) = &tls_identity {
+        // The leaf is short-lived by design; look at it now and then so it
+        // is replaced in good time, and again whenever the clock is set.
+        let tls = tls.clone();
+        let shutdown = shutdown_token.clone();
+        task_tracker.spawn(async move {
+            loop {
+                select! {
+                    _ = shutdown.cancelled() => break,
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(3600)) => {}
+                }
+                tls.check().await;
+            }
+        });
+    }
 
     // Who this unit trusts. The setup code goes on the screen when there is
     // one and there is a hotspot address for the link to point at.
@@ -809,6 +861,12 @@ async fn run_with_config(
                 IpAddr::V4(v4) => Some(*v4),
                 IpAddr::V6(_) => None,
             })
+            .map(|v4| match &front_door {
+                // The name points at Rayhunter's own address, not the
+                // hotspot's, so it works without a port.
+                Some(door) if Some(v4) == hotspot_v4 => door.alias,
+                _ => v4,
+            })
             .collect(),
     ));
     if !config.debug_mode {
@@ -847,6 +905,9 @@ async fn run_with_config(
 
     task_tracker.close();
     task_tracker.wait().await;
+    if let Some(door) = &front_door {
+        door.close().await;
+    }
 
     info!("see you space cowboy...");
     Ok(restart_token.is_cancelled())
