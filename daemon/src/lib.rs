@@ -64,6 +64,8 @@ use utoipa::OpenApi;
         server::set_time_offset,
         server::debug_set_display_state,
         server::debug_keypress,
+        server::debug_show_qr,
+        server::debug_clear_qr,
         server::get_cell_info,
         server::annotate_recording,
         server::set_display_gif,

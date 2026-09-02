@@ -41,10 +41,11 @@ use crate::packet_explorer::{get_packet, list_packets};
 use crate::pcap::get_pcap;
 use crate::qmdl_store::RecordingStore;
 use crate::server::{
-    MAX_GIF_BYTES, ServerState, annotate_recording, debug_keypress, debug_set_display_state,
-    delete_display_gif, delete_web_user, get_cell_info, get_config, get_display_gif, get_qmdl,
-    get_time, get_wifi_status, get_zip, run_terminal_command, scan_wifi, serve_static, set_config,
-    set_display_gif, set_time_offset, set_web_user, test_notification, trigger_demo_warning,
+    MAX_GIF_BYTES, ServerState, annotate_recording, debug_clear_qr, debug_keypress,
+    debug_set_display_state, debug_show_qr, delete_display_gif, delete_web_user, get_cell_info,
+    get_config, get_display_gif, get_qmdl, get_time, get_wifi_status, get_zip,
+    run_terminal_command, scan_wifi, serve_static, set_config, set_display_gif, set_time_offset,
+    set_web_user, test_notification, trigger_demo_warning,
 };
 use crate::stats::{get_qmdl_manifest, get_system_stats, get_update_status};
 use crate::update::{UpdateStatus, run_update_check_worker};
@@ -115,6 +116,8 @@ fn get_router() -> AppRouter {
         .route("/api/time-offset", post(set_time_offset))
         .route("/api/debug/display-state", post(debug_set_display_state))
         .route("/api/debug/keypress", post(debug_keypress))
+        .route("/api/debug/qr", post(debug_show_qr))
+        .route("/api/debug/qr/clear", post(debug_clear_qr))
         .route("/api/terminal", post(run_terminal_command))
         .route("/api/gps", get(get_gps))
         .route("/api/gps", post(post_gps))
@@ -368,6 +371,11 @@ async fn run_with_config(
     // since a physical button cannot be pressed from a script.
     let suppression: display::SharedSuppression =
         std::sync::Arc::new(display::DisplaySuppression::new());
+    // A picture that takes the whole screen for a while: the pairing code.
+    // Shared between the display, which paints it, and the server, which
+    // puts it up.
+    let display_override: display::SharedOverride =
+        std::sync::Arc::new(display::DisplayOverride::new());
     let (analysis_tx, analysis_rx) = mpsc::channel::<AnalysisCtrlMessage>(5);
     let restart_token = CancellationToken::new();
     let shutdown_token = restart_token.child_token();
@@ -443,6 +451,7 @@ async fn run_with_config(
             &task_tracker,
             &config,
             suppression.clone(),
+            display_override.clone(),
             shutdown_token.clone(),
             ui_update_rx,
         );
@@ -547,6 +556,7 @@ async fn run_with_config(
         daemon_restart_token: restart_token.clone(),
         ui_update_sender: Some(ui_update_tx),
         suppression: Some(suppression),
+        display_override: Some(display_override),
         cell_tracker: cell_tracker.clone(),
         wifi_status,
         wifi_scan_lock: tokio::sync::Mutex::new(()),

@@ -59,6 +59,9 @@ pub struct ServerState {
     pub ui_update_sender: Option<Sender<DisplayState>>,
     /// Shared with the display, so a keypress can be simulated for testing.
     pub suppression: Option<crate::display::SharedSuppression>,
+    /// Shared with the display: a full-screen picture, such as a pairing
+    /// code, that the server can put up.
+    pub display_override: Option<crate::display::SharedOverride>,
     pub cell_tracker: Arc<RwLock<CellTracker>>,
     pub wifi_status: Arc<RwLock<wifi_station::WifiStatus>>,
     pub wifi_scan_lock: tokio::sync::Mutex<()>,
@@ -1113,6 +1116,7 @@ mod tests {
             daemon_restart_token: CancellationToken::new(),
             ui_update_sender: None,
             suppression: None,
+            display_override: None,
             cell_tracker: Arc::new(RwLock::new(CellTracker::new())),
             wifi_status: Arc::new(RwLock::new(wifi_station::WifiStatus::default())),
             wifi_scan_lock: tokio::sync::Mutex::new(()),
@@ -1425,6 +1429,181 @@ pub async fn debug_keypress(
         ),
     ))
 }
+fn default_qr_module_px() -> u32 {
+    4
+}
+
+fn default_qr_seconds() -> u64 {
+    600
+}
+
+/// Longest a picture may be asked to stay up. Long enough for any test,
+/// short enough that a forgotten request does not hide the status line for
+/// the rest of the day.
+const MAX_QR_SECONDS: u64 = 3600;
+
+/// Longest text a code is made from. The screen limits this far more
+/// tightly; this only stops a request from asking for a great deal of work
+/// that could never be drawn.
+const MAX_QR_TEXT_LEN: usize = 512;
+
+/// A QR code to show on the device's own screen.
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct DebugQrRequest {
+    /// What the code says. Uppercase keeps a URL in the compact
+    /// alphanumeric mode; the text is encoded exactly as given.
+    pub text: String,
+    /// Pixels per module. Reduced automatically if the code will not fit.
+    #[serde(default = "default_qr_module_px")]
+    pub module_px: u32,
+    /// A line of text under the code, for anyone who cannot scan it.
+    #[serde(default)]
+    pub caption: Option<String>,
+    /// How many times larger than the five by seven font to draw the caption.
+    #[serde(default)]
+    pub caption_scale: Option<u32>,
+    /// How long to leave it up.
+    #[serde(default = "default_qr_seconds")]
+    pub seconds: u64,
+}
+
+/// Where the code ended up, so a test can read the screen back and check.
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct DebugQrResponse {
+    /// QR version: 1 is 21 modules a side, each version adds four.
+    pub version: u8,
+    /// Modules a side.
+    pub size: u32,
+    /// Pixels per module actually drawn.
+    pub module_px: u32,
+    /// White margin around the code, in pixels.
+    pub quiet_px: u32,
+    /// Top left pixel of the first module.
+    pub code_x: u32,
+    pub code_y: u32,
+    /// Top row of the caption, if one was drawn.
+    pub caption_y: Option<u32>,
+    pub seconds: u64,
+}
+
+/// Show a QR code on the device's own screen for a while.
+///
+/// This is the drawing half of setup mode, exposed on its own so the thing
+/// the whole pairing design rests on, whether a phone can read a code off a
+/// screen this small, can be tested before anything is built on top of it.
+/// The code replaces everything else on the screen, status line included,
+/// and the panel is held awake while it is up.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/debug/qr",
+    tag = "Debug",
+    request_body(content = DebugQrRequest, content_type = "application/json"),
+    responses(
+        (status = StatusCode::OK, description = "Code is on the screen", body = DebugQrResponse),
+        (status = StatusCode::UNPROCESSABLE_ENTITY, description = "The text cannot be encoded, or the code does not fit the screen"),
+        (status = StatusCode::SERVICE_UNAVAILABLE, description = "This device has no screen to draw on"),
+    ),
+    summary = "Show a QR code on the device screen",
+))]
+pub async fn debug_show_qr(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<DebugQrRequest>,
+) -> Result<Json<DebugQrResponse>, (StatusCode, String)> {
+    use crate::display::qr;
+
+    let Some(override_) = &state.display_override else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "display system not available".to_string(),
+        ));
+    };
+    let Some(geo) = qr::screen_geometry(&state.config.device) else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "this device has no screen a code can be drawn on".to_string(),
+        ));
+    };
+    if req.text.is_empty() || req.text.len() > MAX_QR_TEXT_LEN {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("text must be between 1 and {MAX_QR_TEXT_LEN} bytes"),
+        ));
+    }
+    let Some(code) = qr::encode(&req.text) else {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "that text cannot be encoded as a QR code".to_string(),
+        ));
+    };
+    let size = code.size() as u32;
+    let caption = req.caption.as_deref().filter(|c| !c.is_empty());
+    let Some(layout) = qr::layout(
+        size,
+        req.module_px,
+        caption.is_some(),
+        req.caption_scale.unwrap_or(1),
+        geo,
+    ) else {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "a {size} by {size} module code does not fit a {} by {} screen even at {} pixels per module",
+                geo.width,
+                geo.height,
+                qr::MIN_MODULE_PX
+            ),
+        ));
+    };
+    let pixels = qr::render(&code, layout, caption, geo);
+    let seconds = req.seconds.clamp(1, MAX_QR_SECONDS);
+    override_.show(pixels, std::time::Duration::from_secs(seconds));
+    log::info!(
+        "showing a version {} QR code at {} px per module for {seconds}s",
+        code.version().value(),
+        layout.module_px
+    );
+    Ok(Json(DebugQrResponse {
+        version: code.version().value(),
+        size,
+        module_px: layout.module_px,
+        quiet_px: layout.quiet_px,
+        code_x: layout.code_x,
+        code_y: layout.code_y,
+        caption_y: layout.caption_y,
+        seconds,
+    }))
+}
+
+/// Take a picture put up by `debug_show_qr` down early.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/debug/qr/clear",
+    tag = "Debug",
+    responses(
+        (status = StatusCode::OK, description = "Nothing is showing any more"),
+        (status = StatusCode::SERVICE_UNAVAILABLE, description = "This device has no screen"),
+    ),
+    summary = "Clear a QR code from the device screen",
+))]
+pub async fn debug_clear_qr(
+    State(state): State<Arc<ServerState>>,
+) -> Result<(StatusCode, String), (StatusCode, String)> {
+    let Some(override_) = &state.display_override else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "display system not available".to_string(),
+        ));
+    };
+    let message = match override_.remaining() {
+        Some(left) => format!("cleared, with {}s left to run", left.as_secs()),
+        None => "nothing was showing".to_string(),
+    };
+    override_.clear();
+    Ok((StatusCode::OK, message))
+}
+
 /// One account to add or replace.
 #[derive(Debug, serde::Deserialize)]
 #[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]

@@ -4,7 +4,7 @@ use std::io::Cursor;
 use std::time::Duration;
 
 use crate::config::{self, UiLevel};
-use crate::display::{DisplayState, SharedSuppression};
+use crate::display::{DisplayState, SharedOverride, SharedSuppression};
 use rayhunter::analysis::analyzer::EventType;
 
 use log::{error, info, warn};
@@ -18,6 +18,16 @@ const REFRESH_RATE: u64 = 1000; //how often in milliseconds to refresh the displ
 // Pause between GIF passes. Short, so a warning arriving just after a loop ends
 // is picked up promptly rather than waiting out a full refresh interval.
 const FRAME_YIELD: u64 = 50;
+
+/// How often a full-screen override is put back, in milliseconds.
+///
+/// Faster than the ordinary refresh. The device's own interface writes over
+/// parts of the framebuffer on its own schedule, and a pairing code with a
+/// corner missing does not scan; a phone needs a whole frame to be clean at
+/// the moment it looks. A quarter of a second keeps the damage brief without
+/// costing much on a single core: the pixels are already converted, so each
+/// pass is one write.
+const OVERRIDE_REFRESH: u64 = 250;
 
 // Height of the status line when the user hasn't chosen one. Deliberately thin:
 // Rayhunter draws over the device's own UI, so the default stays out of the way.
@@ -346,18 +356,65 @@ pub trait GenericFramebuffer: Send + 'static {
     }
 }
 
+/// Keep only the override serviced, for a display level that draws nothing.
+///
+/// Invisible mode means no status line, no logo, no sign of Rayhunter. It
+/// does not mean no pairing code: a unit that cannot show its code cannot be
+/// set up, whatever its display level. So this loop paints an override when
+/// there is one and otherwise leaves the screen entirely alone, and clears
+/// exactly once when a picture comes down, so the last frame is not left
+/// sitting on a panel the device will not repaint.
+fn run_override_only(
+    task_tracker: &TaskTracker,
+    mut fb: impl GenericFramebuffer,
+    override_: SharedOverride,
+    shutdown_token: CancellationToken,
+) {
+    task_tracker.spawn(async move {
+        let mut was_showing = false;
+        loop {
+            if shutdown_token.is_cancelled() {
+                break;
+            }
+            match override_.current() {
+                Some(px) => {
+                    fb.write_buffer((*px).clone()).await;
+                    was_showing = true;
+                    tokio::time::sleep(Duration::from_millis(OVERRIDE_REFRESH)).await;
+                }
+                None => {
+                    if was_showing {
+                        let Dimensions { width, height } = fb.dimensions();
+                        fb.write_buffer(vec![(0, 0, 0); (width * height) as usize])
+                            .await;
+                        was_showing = false;
+                    }
+                    tokio::time::sleep(Duration::from_millis(REFRESH_RATE)).await;
+                }
+            }
+        }
+        if was_showing {
+            let Dimensions { width, height } = fb.dimensions();
+            fb.write_buffer(vec![(0, 0, 0); (width * height) as usize])
+                .await;
+        }
+    });
+}
+
 pub fn update_ui(
     task_tracker: &TaskTracker,
     config: &config::Config,
     mut fb: impl GenericFramebuffer,
     suppression: SharedSuppression,
+    override_: SharedOverride,
     shutdown_token: CancellationToken,
     mut ui_update_rx: Receiver<DisplayState>,
 ) {
     static IMAGE_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/images/");
     let display_level = config.ui_level;
     if display_level == UiLevel::Invisible {
-        info!("Invisible mode, not spawning UI.");
+        info!("Invisible mode, not spawning UI; only a pairing code will ever be drawn.");
+        run_override_only(task_tracker, fb, override_, shutdown_token);
         return;
     }
 
@@ -405,6 +462,10 @@ pub fn update_ui(
         // half erased. It gets put back on every pass, like the status line,
         // but without paying to decode it again.
         let mut still_pixels: Option<Vec<(u8, u8, u8)>> = None;
+        // Whether the last pass painted an override, so the screen can be
+        // cleared exactly once when it comes down. See the note at the end of
+        // this loop about devices that never repaint their own interface.
+        let mut override_was_showing = false;
 
         loop {
             if shutdown_token.is_cancelled() {
@@ -463,7 +524,11 @@ pub fn update_ui(
             // readable and the status indicator is still there. Going dark
             // would mean a button press could hide a high severity warning,
             // which is not a trade worth making for either side of it.
-            let paused_for_keypress = covers_the_screen && suppression.active();
+            // A full-screen override covers the screen whatever the level,
+            // so a button press steps aside from it too.
+            let override_frame = override_.current();
+            let paused_for_keypress =
+                (covers_the_screen || override_frame.is_some()) && suppression.active();
             if paused_for_keypress {
                 // `status_bar_height` is already the configured height, so the
                 // line drawn here is the one the person chose. Forcing the
@@ -479,6 +544,29 @@ pub fn update_ui(
                 }
                 tokio::time::sleep(Duration::from_millis(REFRESH_RATE)).await;
                 continue;
+            }
+
+            // Something that must be on screen regardless of the level: the
+            // pairing code, mainly. It replaces everything below, status line
+            // included, for as long as it is up. Repainted every pass and on
+            // a shorter interval than the ordinary display, because a code
+            // with a corner overwritten by the device's own interface is a
+            // code that does not scan.
+            if let Some(px) = override_frame {
+                fb.write_buffer((*px).clone()).await;
+                override_was_showing = true;
+                tokio::time::sleep(Duration::from_millis(OVERRIDE_REFRESH)).await;
+                continue;
+            }
+            if override_was_showing {
+                // The picture has just come down. Clear it before going back
+                // to normal drawing, since a thin status line on top of a
+                // pairing code is what a device that never repaints its own
+                // screen would otherwise show for ever.
+                let Dimensions { width, height } = fb.dimensions();
+                fb.write_buffer(vec![(0, 0, 0); (width * height) as usize])
+                    .await;
+                override_was_showing = false;
             }
 
             match display_level {
@@ -586,7 +674,7 @@ pub fn update_ui(
         // leaving a coloured line at the top is precisely the indicator
         // Invisible mode exists to remove.
         let Dimensions { width, height } = fb.dimensions();
-        let clear_height = if covers_the_screen {
+        let clear_height = if covers_the_screen || override_was_showing {
             height
         } else {
             configured_bar_height

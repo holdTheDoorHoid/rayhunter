@@ -59,6 +59,7 @@ async-trait = "0.1.88"
 # https://github.com/juhaku/utoipa/pull/1539 as soon as it lands.
 utoipa = { version = "5.4.0", features = ["repr"], optional = true }
 url = "2.5.4"
+qrcodegen = "1.8"
 
 [dev-dependencies]
 reqwest = { version = "0.12.20", default-features = false, features = ["gzip"] }
