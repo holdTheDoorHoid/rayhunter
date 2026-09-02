@@ -23,12 +23,14 @@ mod sim_health;
 mod stats;
 mod subscriber_id;
 mod timing_advance;
+mod tls;
 mod update;
 mod web_auth;
 mod webdav;
 mod wifi_ap;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::battery::run_battery_notification_worker;
@@ -43,7 +45,7 @@ use crate::qmdl_store::RecordingStore;
 use crate::server::{
     MAX_GIF_BYTES, ServerState, annotate_recording, debug_clear_qr, debug_keypress,
     debug_set_display_state, debug_show_qr, delete_display_gif, delete_web_user, get_cell_info,
-    get_config, get_display_gif, get_qmdl, get_time, get_wifi_status, get_zip,
+    get_config, get_display_gif, get_qmdl, get_time, get_tls_info, get_wifi_status, get_zip,
     run_terminal_command, scan_wifi, serve_static, set_config, set_display_gif, set_time_offset,
     set_web_user, test_notification, trigger_demo_warning,
 };
@@ -114,6 +116,7 @@ fn get_router() -> AppRouter {
         .route("/api/wifi-scan", post(scan_wifi))
         .route("/api/time", get(get_time))
         .route("/api/time-offset", post(set_time_offset))
+        .route("/api/tls-info", get(get_tls_info))
         .route("/api/debug/display-state", post(debug_set_display_state))
         .route("/api/debug/keypress", post(debug_keypress))
         .route("/api/debug/qr", post(debug_show_qr))
@@ -190,10 +193,13 @@ async fn web_listen_addrs() -> Vec<IpAddr> {
 async fn run_server(
     task_tracker: &TaskTracker,
     state: Arc<ServerState>,
+    addrs: Vec<IpAddr>,
     shutdown_token: CancellationToken,
 ) -> JoinHandle<()> {
     info!("spinning up server");
     let port = state.config.port;
+    let tls_port = state.config.tls_port;
+    let tls_identity = state.tls.clone();
     // Wrapped around every route. When no accounts are configured the layer
     // passes everything through, so this changes nothing until somebody adds
     // one.
@@ -207,8 +213,43 @@ async fn run_server(
         .layer(axum::middleware::from_fn(web_auth::csrf_protection))
         .with_state(state);
 
-    let addrs = web_listen_addrs().await;
     info!("serving the web interface on port {port}, addresses {addrs:?}");
+
+    // The same interface again, over TLS, on every address the plain one
+    // uses. Alongside rather than instead: nothing about the plain port
+    // changes until pairing is enforced, so a unit updated in the field
+    // behaves exactly as before with one more port open. Any failure here
+    // costs the TLS port and nothing else.
+    if let Some(identity) = tls_identity {
+        match tls::server_config(&identity) {
+            Ok(config) => {
+                for ip in &addrs {
+                    let sock = SocketAddr::new(*ip, tls_port);
+                    let listener = match tls::TlsListener::bind(sock, config.clone()).await {
+                        Ok(listener) => listener,
+                        Err(e) => {
+                            error!("couldn't bind the TLS web interface to {sock}: {e}");
+                            continue;
+                        }
+                    };
+                    let app = app.clone();
+                    let shutdown = shutdown_token.clone();
+                    task_tracker.spawn(async move {
+                        info!("The orca is hunting for stingrays... ({sock}, TLS)");
+                        axum::serve(listener, app)
+                            .with_graceful_shutdown(shutdown.cancelled_owned())
+                            .await
+                            .unwrap();
+                    });
+                }
+                info!(
+                    "serving the web interface over TLS on port {tls_port}, fingerprint {}",
+                    identity.fingerprint_hex()
+                );
+            }
+            Err(e) => error!("TLS is unavailable: {e}"),
+        }
+    }
 
     // One listener per address, all shut down together. The listeners bind the
     // hotspot and loopback but not the WAN side; see select_listen_addrs.
@@ -545,8 +586,40 @@ async fn run_with_config(
         None
     };
 
+    // Where the web interface will listen decides what the certificate is
+    // for, so the addresses are settled before the identity is loaded. The
+    // identity is only ever made once there is a hotspot address to put in
+    // it; a start that finds none waits for the next one rather than making
+    // a certificate that names nothing.
+    let listen_addrs = web_listen_addrs().await;
+    let hotspot_addrs: Vec<IpAddr> = listen_addrs
+        .iter()
+        .copied()
+        .filter(|ip| !ip.is_loopback() && !ip.is_unspecified())
+        .collect();
+    let tls_identity = if config.tls_port == 0 {
+        info!("TLS is switched off (tls_port = 0)");
+        None
+    } else if hotspot_addrs.is_empty()
+        && !tokio::fs::try_exists(Path::new(&config.auth_store_path).join(tls::CERT_FILE))
+            .await
+            .unwrap_or(false)
+    {
+        warn!("no hotspot address yet and no certificate on file; TLS waits for the next start");
+        None
+    } else {
+        match tls::load_or_generate(Path::new(&config.auth_store_path), &hotspot_addrs).await {
+            Ok(identity) => Some(Arc::new(identity)),
+            Err(e) => {
+                error!("TLS is unavailable this run: {e}");
+                None
+            }
+        }
+    };
+
     let state = Arc::new(ServerState {
         config_path: args.config_path.clone(),
+        tls: tls_identity,
         web_users: Arc::new(tokio::sync::RwLock::new(config.web_users.clone())),
         config,
         qmdl_store_lock: qmdl_store_lock.clone(),
@@ -563,7 +636,7 @@ async fn run_with_config(
         gps_state: Arc::new(tokio::sync::RwLock::new(initial_gps)),
         update_status_lock: update_status_lock.clone(),
     });
-    run_server(&task_tracker, state, shutdown_token.clone()).await;
+    run_server(&task_tracker, state, listen_addrs, shutdown_token.clone()).await;
 
     task_tracker.close();
     task_tracker.wait().await;

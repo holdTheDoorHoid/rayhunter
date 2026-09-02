@@ -39,6 +39,9 @@ use crate::update::UpdateStatus;
 
 pub struct ServerState {
     pub config_path: String,
+    /// This unit's certificate, when TLS is up. `None` means the plain port
+    /// is all there is this run.
+    pub tls: Option<Arc<crate::tls::TlsIdentity>>,
     pub config: Config,
     /// The accounts as they stand now, rather than as they were at startup.
     ///
@@ -1106,6 +1109,7 @@ mod tests {
         };
 
         Arc::new(ServerState {
+            tls: None,
             config_path: "/tmp/test_config.toml".to_string(),
             config: Config::default(),
             web_users: Arc::new(RwLock::new(Vec::new())),
@@ -1429,6 +1433,52 @@ pub async fn debug_keypress(
         ),
     ))
 }
+/// What a person needs to check they are talking to their own unit.
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct TlsInfo {
+    /// The port the interface is served on over TLS.
+    pub port: u16,
+    /// SHA-256 of the certificate, `AB:CD:…`, as browsers show it.
+    pub fingerprint_sha256: String,
+    /// The names and addresses the certificate is for.
+    pub subject_alt_names: Vec<String>,
+    /// The certificate itself, PEM, for anyone who wants to install it.
+    pub certificate_pem: String,
+}
+
+/// Describe this unit's TLS certificate.
+///
+/// The fingerprint is the one thing a person can compare between what the
+/// browser shows and what the unit itself says, so it is available to
+/// anyone who can reach the interface at all.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    get,
+    path = "/api/tls-info",
+    tag = "Configuration",
+    responses(
+        (status = StatusCode::OK, description = "The unit's certificate", body = TlsInfo),
+        (status = StatusCode::NOT_FOUND, description = "TLS is not available on this unit"),
+    ),
+    summary = "Describe the TLS certificate",
+))]
+pub async fn get_tls_info(
+    State(state): State<Arc<ServerState>>,
+) -> Result<Json<TlsInfo>, (StatusCode, String)> {
+    let Some(identity) = &state.tls else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            "TLS is not available on this unit".to_string(),
+        ));
+    };
+    Ok(Json(TlsInfo {
+        port: state.config.tls_port,
+        fingerprint_sha256: identity.fingerprint_hex(),
+        subject_alt_names: identity.subject_alt_names(),
+        certificate_pem: identity.certificate_pem(),
+    }))
+}
+
 fn default_qr_module_px() -> u32 {
     4
 }

@@ -23,6 +23,7 @@ pub mod sim_health;
 pub mod stats;
 pub mod subscriber_id;
 pub mod timing_advance;
+pub mod tls;
 pub mod update;
 pub mod web_auth;
 pub mod webdav;
@@ -66,6 +67,7 @@ use utoipa::OpenApi;
         server::debug_keypress,
         server::debug_show_qr,
         server::debug_clear_qr,
+        server::get_tls_info,
         server::get_cell_info,
         server::annotate_recording,
         server::set_display_gif,

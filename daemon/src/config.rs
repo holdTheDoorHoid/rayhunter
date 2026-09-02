@@ -211,6 +211,18 @@ pub struct Config {
     /// knowing the WiFi password rather than protection against someone able
     /// to capture the traffic itself.
     pub web_users: Vec<crate::web_auth::WebUser>,
+    /// Where the unit keeps what it must never share: its TLS key, and in
+    /// time the pairing records. Mode 0700, written atomically, excluded from
+    /// support bundles. Nothing in here belongs in `config.toml`, which is
+    /// world readable and travels.
+    pub auth_store_path: String,
+    /// The port the web interface is served on over TLS, alongside the
+    /// plain one. Zero switches TLS off, which leaves the plain port exactly
+    /// as it always was.
+    ///
+    /// Not 443: the hotspot's own admin pages own 80 and 443 on every
+    /// supported device.
+    pub tls_port: u16,
     /// Whether the web interface may run commands on the device.
     ///
     /// Deliberately not settable from the web interface: it can only be turned
@@ -425,6 +437,8 @@ impl Default for Config {
             key_input_mode: KeyInputMode::Disabled,
             show_subscriber_identity: false,
             web_users: Vec::new(),
+            auth_store_path: "/data/rayhunter/auth".to_string(),
+            tls_port: 8443,
             terminal_enabled: false,
             // Off by default. It holds a backlight on, which is a real cost
             // to a device that may be running on battery.
