@@ -77,6 +77,10 @@ where they are on the card.
 The daemon watches the card: if it is pulled, recordings continue on
 internal storage and a Storage notification says so; when it returns, they
 move back, and a card inserted after boot is mounted by Rayhunter itself.
+On hardware version 3.0 the firmware unmounts the card about a minute and a
+half after boot; Rayhunter notices within a few seconds, mounts it again,
+and resumes recording on it, so the first recording of a boot may be
+split in two.
 The choice lives on the settings page under **Storage Management**, and
 [Recordings](./recordings.md#where-recordings-are-stored) explains the
 behaviour. `--skip-sdcard` installs for internal storage only.
