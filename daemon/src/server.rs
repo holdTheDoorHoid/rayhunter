@@ -1538,10 +1538,12 @@ pub async fn get_zip(
                         continue;
                     };
                     let json = serde_json::to_vec_pretty(&sidecar.redacted())?;
+                    // Entries carry an explicit mode; without one, some unzip tools
+                    // extract every file unreadable.
                     let zip_entry = ZipEntryBuilder::new(
                         file_kind.get_filename(&qmdl_idx, false).into(),
                         Compression::Stored,
-                    );
+                    ).unix_permissions(0o644);
                     let mut entry_writer = zip.write_entry_stream(zip_entry).await?.compat_write();
                     entry_writer.write_all(&json).await?;
                     entry_writer.into_inner().close().await?;
@@ -1562,7 +1564,7 @@ pub async fn get_zip(
                 let zip_entry = ZipEntryBuilder::new(
                     file_kind.get_filename(&qmdl_idx, false).into(),
                     Compression::Stored,
-                );
+                ).unix_permissions(0o644);
                 // FuturesAsyncWriteCompatExt::compat_write because async-zip's entrystream does
                 // not impl tokio's AsyncWrite, but only future's AsyncWrite. This can be removed
                 // once https://github.com/Majored/rs-async-zip/pull/160 is released.
@@ -1582,7 +1584,8 @@ pub async fn get_zip(
             // Add PCAP file
             {
                 let entry =
-                    ZipEntryBuilder::new(format!("{qmdl_idx}.pcapng").into(), Compression::Stored);
+                    ZipEntryBuilder::new(format!("{qmdl_idx}.pcapng").into(), Compression::Stored)
+                        .unix_permissions(0o644);
                 let mut entry_writer = zip.write_entry_stream(entry).await?.compat_write();
 
                 let qmdl_file_for_pcap = {
@@ -1641,7 +1644,7 @@ pub async fn get_zip(
                         let entry = ZipEntryBuilder::new(
                             "metadata.json".to_string().into(),
                             Compression::Stored,
-                        );
+                        ).unix_permissions(0o644);
                         let mut entry_writer = zip.write_entry_stream(entry).await?.compat_write();
                         tokio::io::AsyncWriteExt::write_all(&mut entry_writer, &json).await?;
                         entry_writer.into_inner().close().await?;
@@ -1659,7 +1662,7 @@ pub async fn get_zip(
                         let entry = ZipEntryBuilder::new(
                             "redaction-report.json".to_string().into(),
                             Compression::Stored,
-                        );
+                        ).unix_permissions(0o644);
                         let mut entry_writer =
                             zip.write_entry_stream(entry).await?.compat_write();
                         tokio::io::AsyncWriteExt::write_all(&mut entry_writer, &json).await?;
