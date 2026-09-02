@@ -73,7 +73,12 @@ your detector needs to be seen, its meaningful events must be at least `Low`.
    This is enforced: the type derives its keys from the config, so a detector
    with no entry here is a **type error**, not a silent omission. The `summary`
    is what a user reads when deciding whether to switch your detector off, and
-   your detector page's one-sentence summary must match it.
+   your detector page's one-sentence summary must match it. Two more places
+   know the key by name: the `AnalyzerConfig` interface in
+   `daemon/web/src/lib/utils.svelte.ts`, which the type above derives from,
+   and the expected key list in `heuristics.spec.ts`, whose tests also hold
+   the `summary` to 160 characters so it fits under a checkbox. Run
+   `npm run check` and `npm run test` in `daemon/web` after adding the entry.
 
 7. **Add a demonstration scenario.** In `daemon/src/demo.rs`, add a scenario
    that injects a message which makes your detector fire, through the real
