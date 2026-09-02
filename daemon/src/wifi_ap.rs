@@ -33,22 +33,17 @@ use log::{error, info, warn};
 /// Both routes end in a restart, because that is the only thing that reliably
 /// works. `Temporary` schedules it, `UntilRestart` waits for the person to do
 /// it. Neither can leave a device permanently unreachable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum WifiApOffMode {
-    /// Comes back on its own after a set time.
+    /// Comes back on its own after a set time. The default: the safer of
+    /// the two, since it comes back without anybody having to remember it
+    /// was turned off.
+    #[default]
     Temporary,
     /// Stays off until the device is restarted.
     UntilRestart,
-}
-
-impl Default for WifiApOffMode {
-    fn default() -> Self {
-        // The safer of the two: it comes back without anybody having to
-        // remember it was turned off.
-        Self::Temporary
-    }
 }
 
 /// The smallest number of presses worth accepting.

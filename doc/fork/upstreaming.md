@@ -32,7 +32,7 @@ issue, not with a finished pull request.
 So that features can be found and separated later, commits in this fork carry two
 trailers naming the feature and any related upstream issue:
 
-```
+```text
 Feature: keep-screen-on
 Upstream: EFForg/rayhunter#916, EFForg/rayhunter#539
 ```

@@ -476,3 +476,20 @@ silently missing from the published docs.
   `config.toml` or it lands in `[analyzers]` and does nothing.
 - `POST /api/config` restarts the daemon; an unpaired unit re-arms its setup
   window on every start, a paired one never does.
+
+## Release CI is stricter than the local loop
+
+Two things pass locally and fail the release workflow, which is what broke
+the first v0.12.3 tag push:
+
+- `check_and_test` runs clippy with `RUSTFLAGS=-Dwarnings` (lib and bins,
+  not tests). Any clippy warning is fatal there. Mirror it with
+  `RUSTFLAGS=-Dwarnings cargo clippy --workspace --exclude installer-gui`.
+- `mdbook test` compiles every **untagged** code fence in `doc/` as Rust.
+  Tag every fence (`text`, `bash`, `toml`); run `mdbook test` before tagging.
+- `openapi_build` compiles the daemon with placeholder web files it
+  `touch`es in `.github/workflows/main.yml`; every `include_bytes!` under
+  `daemon/web/build/` must be in that list.
+
+A failed release run leaves no release; delete and re-push the tag after the
+fix (`git tag -d vX; git push origin :refs/tags/vX; git tag -a vX; git push origin vX`).

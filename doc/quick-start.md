@@ -127,7 +127,7 @@ page](./troubleshooting.md) covers what to check.
 The Orbic's screen is showing a square code. With your phone on the Orbic's
 WiFi, scan it with the camera. On a computer instead, open:
 
-```
+```text
 https://192.168.1.1:8443/pair
 ```
 

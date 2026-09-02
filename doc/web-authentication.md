@@ -69,7 +69,7 @@ until you remove it.
 The pairing records are removed over USB, which needs the unit in your hand
 and a computer with the installer:
 
-```
+```bash
 ./installer util reset-auth
 ```
 
