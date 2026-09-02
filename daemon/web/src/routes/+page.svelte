@@ -22,6 +22,7 @@
     import RecordingControls from '$lib/components/RecordingControls.svelte';
     import ConfigForm from '$lib/components/ConfigForm.svelte';
     import Terminal from '$lib/components/Terminal.svelte';
+    import WifiSurvey from '$lib/components/WifiSurvey.svelte';
     import ActionErrors from '$lib/components/ActionErrors.svelte';
     import ClockDriftAlert from '$lib/components/ClockDriftAlert.svelte';
     import LogView from '$lib/components/LogView.svelte';
@@ -37,6 +38,7 @@
     let logview_shown: boolean = $state(false);
     let config_shown: boolean = $state(false);
     let terminal_shown: boolean = $state(false);
+    let wifi_survey_shown: boolean = $state(false);
     /**
      * Whether this device offers the terminal at all.
      *
@@ -113,6 +115,7 @@
 <LogView bind:shown={logview_shown} />
 <ConfigForm bind:shown={config_shown} />
 <Terminal bind:shown={terminal_shown} />
+<WifiSurvey bind:shown={wifi_survey_shown} />
 <div
     class="p-4 xl:px-8 bg-rayhunter-blue drop-shadow-sm flex flex-row justify-between items-center"
 >
@@ -163,6 +166,29 @@
                     stroke="currentColor"
                     stroke-width="1.5"
                     stroke-linecap="round"
+                />
+            </svg>
+        </button>
+        <button onclick={() => (wifi_survey_shown = true)} class="flex flex-row gap-1 group">
+            <span
+                class="hidden text-white group-hover:text-gray-400 dark:group-hover:text-gray-500 lg:flex"
+                >Wi-Fi</span
+            >
+            <svg
+                class="w-6 h-6 text-white group-hover:text-gray-400 dark:group-hover:text-gray-500"
+                aria-hidden="true"
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                fill="none"
+                viewBox="0 0 24 24"
+            >
+                <path
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 18h.01M8.5 14.5a5 5 0 0 1 7 0M5 11a10 10 0 0 1 14 0M2 7.5a15 15 0 0 1 20 0"
                 />
             </svg>
         </button>

@@ -1,0 +1,25 @@
+[package]
+name = "rayhunter-radio"
+version = "0.12.2"
+edition = "2024"
+description = "Transport-agnostic wireless observation, signature matching and persistence analysis for Rayhunter"
+
+[lib]
+name = "rayhunter_radio"
+path = "src/lib.rs"
+
+[features]
+# Schema derives for the OpenAPI build. Off by default so the crate stays
+# dependency-light for the daemon's normal build.
+apidocs = ["dep:utoipa"]
+
+[dependencies]
+chrono = { version = "0.4.31", features = ["serde"] }
+log = "0.4.20"
+serde = { version = "1.0.197", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0.50"
+utoipa = { version = "5.4.0", optional = true }
+
+[dev-dependencies]
+tempfile = "3"

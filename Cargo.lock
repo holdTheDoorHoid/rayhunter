@@ -4681,6 +4681,7 @@ dependencies = [
  "log",
  "pycrate-rs",
  "rayhunter",
+ "rayhunter-radio",
  "reqwest 0.12.20",
  "rustls-post-quantum",
  "rustls-rustcrypto",
@@ -4697,6 +4698,19 @@ dependencies = [
  "url",
  "utoipa",
  "wifi-station",
+]
+
+[[package]]
+name = "rayhunter-radio"
+version = "0.12.2"
+dependencies = [
+ "chrono",
+ "log",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "utoipa",
 ]
 
 [[package]]

@@ -17,7 +17,7 @@ required-features = ["apidocs"]
 default = ["rustcrypto-tls"]
 rustcrypto-tls = ["reqwest/rustls-tls-webpki-roots-no-provider", "dep:rustls-rustcrypto"]
 pq-tls = ["reqwest/rustls-tls-webpki-roots-no-provider", "dep:rustls-post-quantum"]
-apidocs = ["dep:utoipa", "wifi-station/utoipa"]
+apidocs = ["dep:utoipa", "wifi-station/utoipa", "rayhunter-radio/apidocs"]
 
 [dependencies]
 sha2 = "0.10"
@@ -25,6 +25,7 @@ hmac = "0.12"
 fastrand = "2"
 base64 = "0.22"
 rayhunter = { path = "../lib" }
+rayhunter-radio = { path = "../radio" }
 wifi-station = "0.10.1"
 toml = "0.8.8"
 serde = { version = "1.0.193", features = ["derive"] }

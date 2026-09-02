@@ -27,6 +27,7 @@ pub mod update;
 pub mod web_auth;
 pub mod webdav;
 pub mod wifi_ap;
+pub mod wifi_survey;
 
 #[cfg(feature = "apidocs")]
 use utoipa::OpenApi;
@@ -76,7 +77,10 @@ use utoipa::OpenApi;
         packet_explorer::list_packets,
         packet_explorer::get_packet,
         gps::post_gps,
-        gps::get_gps
+        gps::get_gps,
+        wifi_survey::wifi_survey,
+        wifi_survey::get_wifi_rules,
+        wifi_survey::set_wifi_rules
     ),
     servers(
         (

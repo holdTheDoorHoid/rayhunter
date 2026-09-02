@@ -445,3 +445,117 @@ export async function run_terminal_command(command: string): Promise<TerminalRes
     if (!response.ok) throw new Error(await response.text());
     return response.json();
 }
+
+export interface Detection {
+    signature_id: string;
+    vendor: string;
+    product?: string | null;
+    technology: string;
+    confidence: 'info' | 'low' | 'medium' | 'high';
+    severity: string;
+    matched_fields: string[];
+}
+
+export interface SurveyEntry {
+    bssid: string | null;
+    ssid: string | null;
+    hidden: boolean;
+    frequency_mhz: number | null;
+    channel: number | null;
+    band: string | null;
+    signal_dbm: number | null;
+    elements: number[];
+    security: string | null;
+    unprotected: boolean;
+    wps: boolean;
+    last_seen_ms: number | null;
+    alerts: Detection[];
+    randomised_address: boolean;
+}
+
+export interface SurveyResponse {
+    scanned_at: string;
+    interface: string;
+    networks: SurveyEntry[];
+    alerting: number;
+    builtin_rules_enabled: number;
+    user_rules_enabled: number;
+    limitations: string[];
+}
+
+export interface UserCriterion {
+    type: string;
+    prefix?: string;
+    mac?: string;
+    substring?: string;
+    pattern?: string;
+}
+
+export interface UserRule {
+    id: string;
+    name: string;
+    description?: string;
+    enabled?: boolean;
+    technology: string;
+    severity: string;
+    criteria: UserCriterion[];
+    cooldown_secs?: number;
+}
+
+export interface AllowlistEntry {
+    prefix: string;
+    label: string;
+}
+
+export interface UserRuleSet {
+    rules: UserRule[];
+    allowlist: AllowlistEntry[];
+    /** Per-signature overrides of the built-in pack's own enabled flag. */
+    builtin_overrides: Record<string, boolean>;
+}
+
+export interface BuiltinSummary {
+    id: string;
+    vendor: string;
+    description: string;
+    enabled: boolean;
+    overridden: boolean;
+    confidence: string;
+    severity: string;
+    /** False when the rule cannot fire on the only capture this device has. */
+    reachable: boolean;
+    unverified: boolean;
+    notes: string | null;
+}
+
+export interface WifiRules {
+    rules: UserRuleSet;
+    builtin: BuiltinSummary[];
+}
+
+/** Survey the access points around the device. Rate limited by the daemon. */
+export async function fetch_wifi_survey(): Promise<SurveyResponse> {
+    const response = await fetch('/api/wifi/survey');
+    if (!response.ok) throw new Error(await response.text());
+    return response.json();
+}
+
+export async function fetch_wifi_rules(): Promise<WifiRules> {
+    const response = await fetch('/api/wifi/alert-rules');
+    if (!response.ok) throw new Error(await response.text());
+    return response.json();
+}
+
+/**
+ * Replace the whole rule set. The daemon validates before storing, so a
+ * rejected set leaves the previous one in place rather than disarming alerts.
+ */
+export async function save_wifi_rules(rules: UserRuleSet): Promise<WifiRules> {
+    const response = await fetch('/api/wifi/alert-rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rules),
+    });
+    if (!response.ok) throw new Error(await response.text());
+    return response.json();
+}
