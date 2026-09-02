@@ -213,12 +213,18 @@ pub fn is_exempt_from_pairing(path: &str) -> bool {
             | "/api/setup/complete"
             | "/api/pair/passphrase"
             | "/api/pair/account"
+            | "/api/pair/code"
+            | "/api/setup/press-request"
+            | "/api/setup/complete-press"
             | "/api/tls-info"
             | "/favicon.png"
             | "/rayhunter_orca_only.png"
             | "/rayhunter_text.png"
     ) || path.starts_with("/s/")
         || path.starts_with("/S/")
+        || path.starts_with("/p/")
+        || path.starts_with("/P/")
+        || path.starts_with("/api/setup/press-status/")
 }
 
 fn basic_challenge() -> axum::response::Response {
@@ -240,13 +246,16 @@ fn basic_challenge() -> axum::response::Response {
 ///
 /// In order: the pairing page and its API are open to all, since they are
 /// how a browser becomes trusted; loopback is trusted outright; a valid
-/// device cookie passes; a web account from before pairing existed still
-/// passes, until every fielded unit has migrated. Anything else is sent to
-/// the pairing page, or told so in JSON if it is an API call.
+/// device cookie passes. Anything else is sent to the pairing page, or told
+/// so in JSON if it is an API call. Web accounts from before pairing are no
+/// longer a way in on their own: basic auth crossed the hotspot in the
+/// clear, which is what pairing exists to end. They can be used once, on
+/// the pairing page, to pair the browser.
 ///
 /// If TLS is not up there is no way to pair, so nothing can be required:
 /// the unit falls back to exactly what it did before pairing existed, open
-/// unless accounts are configured. A unit whose TLS broke stays usable.
+/// unless accounts are configured, in which case basic auth is honoured for
+/// that run only. A unit whose TLS broke stays usable.
 ///
 /// Applied to every route rather than a chosen list. Guessing which endpoints
 /// are sensitive is how one gets forgotten, and the interesting data here is
@@ -285,34 +294,30 @@ pub async fn require_auth(
         return next.run(request).await;
     }
 
-    // The live list, so an account set a moment ago is already in force and one
-    // just deleted has already stopped working.
-    let users = state.web_users.read().await.clone();
-    let supplied = request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(parse_basic_auth);
-    if !users.is_empty()
-        && let Some((username, password)) = supplied
-    {
-        // PBKDF2 is deliberately slow, and this runtime is single-threaded, so
-        // verifying inline would stall every other request — including plain
-        // asset loads — for the duration. Run it on the blocking pool instead.
-        let users = users.clone();
-        let valid = tokio::task::spawn_blocking(move || {
-            credentials_are_valid(&users, &username, &password)
-        })
-        .await
-        .unwrap_or(false);
-        if valid {
-            return next.run(request).await;
-        }
-    }
-
     if state.tls.is_none() {
+        // The live list, so an account set a moment ago is already in force
+        // and one just deleted has already stopped working.
+        let users = state.web_users.read().await.clone();
         if users.is_empty() {
             return next.run(request).await;
+        }
+        let supplied = request
+            .headers()
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(parse_basic_auth);
+        if let Some((username, password)) = supplied {
+            // PBKDF2 is deliberately slow, and this runtime is
+            // single-threaded, so verifying inline would stall every other
+            // request for the duration. Run it on the blocking pool instead.
+            let valid = tokio::task::spawn_blocking(move || {
+                credentials_are_valid(&users, &username, &password)
+            })
+            .await
+            .unwrap_or(false);
+            if valid {
+                return next.run(request).await;
+            }
         }
         return basic_challenge();
     }
@@ -690,6 +695,10 @@ mod tests {
             "/api/setup/status",
             "/api/setup/complete",
             "/api/pair/passphrase",
+            "/api/pair/code",
+            "/p/123456",
+            "/api/setup/press-request",
+            "/api/setup/press-status/abc",
             "/api/tls-info",
             "/favicon.png",
         ] {
@@ -704,6 +713,9 @@ mod tests {
             "/api/terminal",
             "/api/setup",
             "/spair",
+            "/api/devices/code",
+            "/api/stepup/start",
+            "/api/passphrase",
         ] {
             assert!(
                 !is_exempt_from_pairing(closed),

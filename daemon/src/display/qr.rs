@@ -168,6 +168,67 @@ pub fn render(
     buf
 }
 
+/// The code as an SVG, for a web page to show. One `<path>` of unit
+/// squares in a `viewBox` with `border` modules of margin, so it scales to
+/// any size the page wants without a raster in between.
+pub fn svg(code: &QrCode, border: u32) -> String {
+    let size = code.size() as u32;
+    let span = size + 2 * border;
+    let mut path = String::new();
+    for y in 0..size {
+        for x in 0..size {
+            if code.get_module(x as i32, y as i32) {
+                path.push_str(&format!("M{} {}h1v1h-1z", x + border, y + border));
+            }
+        }
+    }
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {span} {span}\" shape-rendering=\"crispEdges\"><rect width=\"{span}\" height=\"{span}\" fill=\"#fff\"/><path d=\"{path}\" fill=\"#000\"/></svg>"
+    )
+}
+
+/// A screen of centred text lines, each at its own scale, black on white.
+///
+/// For the few words a unit ever has to say on its own: the step-up code,
+/// or "press the button". Lines that do not fit are drawn anyway and
+/// clipped, which is still more use than nothing.
+pub fn text_screen(lines: &[(&str, u32)], geo: ScreenGeometry) -> Vec<(u8, u8, u8)> {
+    let mut buf = vec![WHITE; (geo.width * geo.height) as usize];
+    let gap = 3;
+    let total: u32 = lines
+        .iter()
+        .map(|(_, s)| font::GLYPH_H * s.max(&1) + gap)
+        .sum::<u32>()
+        .saturating_sub(gap);
+    let avail = geo.height.saturating_sub(geo.top_inset);
+    let mut y = geo.top_inset + avail.saturating_sub(total) / 2;
+    for (text, scale) in lines {
+        let scale = (*scale).max(1);
+        let w = font::text_width(text, scale);
+        let x = geo.width.saturating_sub(w) / 2;
+        font::draw_text(&mut buf, geo, text, x, y, scale, BLACK);
+        y += font::GLYPH_H * scale + gap;
+    }
+    buf
+}
+
+/// Rows drawn under the status line.
+pub const BANNER_HEIGHT: u32 = font::GLYPH_H + 2;
+
+/// A strip of white text on black, `BANNER_HEIGHT` rows by `width`.
+pub fn banner_strip(width: u32, text: &str) -> Vec<(u8, u8, u8)> {
+    let geo = ScreenGeometry {
+        width,
+        height: BANNER_HEIGHT,
+        top_inset: 0,
+    };
+    let mut buf = vec![BLACK; (width * BANNER_HEIGHT) as usize];
+    let w = font::text_width(text, 1);
+    let x = width.saturating_sub(w) / 2;
+    font::draw_text(&mut buf, geo, text, x, 1, 1, WHITE);
+    buf
+}
+
 /// Paint a rectangle, clipped to the screen.
 fn fill_rect(
     buf: &mut [(u8, u8, u8)],
@@ -595,6 +656,35 @@ mod tests {
         assert_eq!(dark_in(cy - 1), 0);
         // And so is everything below the caption.
         assert!((cy + font::GLYPH_H..128).all(|y| dark_in(y) == 0));
+    }
+
+    #[test]
+    fn the_svg_has_one_square_per_dark_module() {
+        let code = encode(SETUP_URL).unwrap();
+        let s = svg(&code, 2);
+        let dark = (0..25)
+            .flat_map(|y| (0..25).map(move |x| (x, y)))
+            .filter(|&(x, y)| code.get_module(x, y))
+            .count();
+        assert_eq!(s.matches("h1v1h-1z").count(), dark);
+        assert!(s.contains("viewBox=\"0 0 29 29\""));
+    }
+
+    #[test]
+    fn text_screens_and_banners_are_the_right_size() {
+        let px = text_screen(&[("TERMINAL", 2), ("CODE", 2), ("4815", 4)], ORBIC);
+        assert_eq!(px.len(), 128 * 128);
+        assert!(px.contains(&BLACK));
+        let strip = banner_strip(128, "TERMINAL ACTIVE");
+        assert_eq!(strip.len(), (128 * BANNER_HEIGHT) as usize);
+        assert!(strip.contains(&WHITE));
+        // Top and bottom rows are margin.
+        assert!(strip[..128].iter().all(|&p| p == BLACK));
+        assert!(
+            strip[(128 * (BANNER_HEIGHT - 1)) as usize..]
+                .iter()
+                .all(|&p| p == BLACK)
+        );
     }
 
     #[test]

@@ -13,6 +13,7 @@ pub mod export_metadata;
 pub mod gps;
 pub mod http_client;
 pub mod key_input;
+pub mod mdns;
 pub mod notifications;
 pub mod packet_explorer;
 pub mod pairing;
@@ -22,6 +23,7 @@ pub mod redact;
 pub mod server;
 pub mod sim_health;
 pub mod stats;
+pub mod stepup;
 pub mod subscriber_id;
 pub mod timing_advance;
 pub mod tls;
@@ -38,7 +40,7 @@ use utoipa::OpenApi;
 #[derive(OpenApi)]
 #[openapi(
     info(
-        description = "OpenAPI documentation for Rayhunter daemon\n\n**Note:** API endpoints are subject to change as needs arise, though we will try to keep them as stable as possible and notify about breaking changes in the changelogs for new versions.\n\nEvery endpoint except the pairing ones requires a paired browser (the `rh_device` cookie issued by `/api/setup/complete` or `/api/pair/*`), or a loopback connection such as an adb port-forward. Accounts configured under `web_users` are still accepted as HTTP Basic credentials until they have been migrated. To use the in-browser execution on this page, you may need to disable CORS temporarily for your browser.",
+        description = "OpenAPI documentation for Rayhunter daemon\n\n**Note:** API endpoints are subject to change as needs arise, though we will try to keep them as stable as possible and notify about breaking changes in the changelogs for new versions.\n\nEvery endpoint except the pairing ones requires a paired browser (the `rh_device` cookie issued by `/api/setup/complete` or `/api/pair/*`), or a loopback connection such as an adb port-forward. Accounts configured under `web_users` are no longer accepted as HTTP Basic credentials; they can be used once on the pairing page to pair a browser. `/api/terminal` additionally needs a step-up (`/api/stepup/*`). To use the in-browser execution on this page, you may need to disable CORS temporarily for your browser.",
         license(
             name = "GNU General Public License v3.0",
             url = "https://github.com/EFForg/rayhunter/blob/main/LICENSE"
@@ -76,6 +78,16 @@ use utoipa::OpenApi;
         server::list_devices,
         server::rename_device,
         server::revoke_device,
+        server::change_passphrase,
+        server::mint_pair_code,
+        server::pair_with_code,
+        server::request_press,
+        server::press_status,
+        server::complete_setup_by_press,
+        server::stepup_start,
+        server::stepup_confirm,
+        server::stepup_status,
+        server::stepup_end,
         server::get_cell_info,
         server::annotate_recording,
         server::set_display_gif,

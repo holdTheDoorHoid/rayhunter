@@ -28,6 +28,8 @@ pub fn run_key_input_thread(
     // somebody holding it, which is the whole basis for trusting the code
     // on its screen.
     pairing: Option<std::sync::Arc<crate::pairing::Pairing>>,
+    // A press also confirms a waiting terminal step-up, on any unit.
+    stepup: Option<std::sync::Arc<crate::stepup::StepUp>>,
     cancellation_token: CancellationToken,
 ) {
     let restart_on_double_tap = config.key_input_mode != KeyInputMode::Disabled;
@@ -112,13 +114,14 @@ pub fn run_key_input_thread(
                     // then every press re-arms the window. In the
                     // background so a slow flash write never delays the
                     // gestures below.
+                    if let Some(stepup) = &stepup
+                        && stepup.button_pressed()
+                    {
+                        info!("button press confirmed a terminal step-up");
+                    }
                     if let Some(pairing) = &pairing {
                         let pairing = pairing.clone();
-                        tokio::spawn(async move {
-                            if pairing.open_setup_window().await.is_ok() {
-                                info!("button press re-armed the setup window");
-                            }
-                        });
+                        tokio::spawn(async move { pairing.button_pressed().await });
                     }
 
                     // Checked before the double tap below, and on its own

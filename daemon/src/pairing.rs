@@ -151,6 +151,10 @@ pub enum PairError {
     NoPassphrase,
     #[error("no such device")]
     NoSuchDevice,
+    #[error("no add-a-device code is active; make one from a trusted browser")]
+    NoCode,
+    #[error("nobody pressed the button in time")]
+    NotPressed,
     #[error("could not save: {0}")]
     Storage(String),
 }
@@ -224,11 +228,33 @@ pub struct Pairing {
     backoff: Mutex<Backoff>,
     last_seen_written: Mutex<HashMap<String, Instant>>,
     display: Option<SetupDisplay>,
+    pair_code: Mutex<Option<PairCode>>,
+    press: Mutex<Option<PressRequest>>,
+}
+
+/// A code minted from a trusted browser for adding another.
+pub const PAIR_CODE_TTL: Duration = Duration::from_secs(5 * 60);
+pub const MAX_CODE_ATTEMPTS: u8 = 5;
+/// How long a "press the button" request waits for the press, and how long
+/// an approved one stays good for finishing setup.
+pub const PRESS_WINDOW: Duration = Duration::from_secs(30);
+
+struct PairCode {
+    code: String,
+    created: Instant,
+    wrong: u8,
+}
+
+/// A browser that asked to be paired by a button press.
+struct PressRequest {
+    id: String,
+    created: Instant,
+    approved: Option<Instant>,
 }
 
 /// Constant-time equality, so a comparison cannot leak how much of a guess
 /// was right.
-fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }
@@ -369,6 +395,8 @@ impl Pairing {
             backoff: Mutex::new(Backoff::default()),
             last_seen_written: Mutex::new(HashMap::new()),
             display,
+            pair_code: Mutex::new(None),
+            press: Mutex::new(None),
         })
     }
 
@@ -382,6 +410,8 @@ impl Pairing {
             backoff: Mutex::new(Backoff::default()),
             last_seen_written: Mutex::new(HashMap::new()),
             display,
+            pair_code: Mutex::new(None),
+            press: Mutex::new(None),
         }
     }
 
@@ -540,6 +570,203 @@ impl Pairing {
             return Err(PairError::AlreadyComplete);
         }
         self.check_setup_token(token)?;
+        self.finish_setup(passphrase, device_name, user_agent).await
+    }
+
+    /// Ask to be paired by a press of the unit's button, for a unit with no
+    /// screen to scan, or a phone that will not scan one. Only while the
+    /// unit has no owner: afterwards a button press must never let anybody
+    /// in. The unit says "press the button" on its screen if it has one.
+    pub async fn request_press(&self) -> Result<String, PairError> {
+        if self.state.read().await.setup_complete || self.device_count().await > 0 {
+            return Err(PairError::AlreadyComplete);
+        }
+        let mut raw = [0u8; 8];
+        random_bytes(&mut raw).map_err(|e| PairError::Storage(e.to_string()))?;
+        let id = hex(&raw);
+        {
+            let mut press = self.press.lock().unwrap_or_else(|e| e.into_inner());
+            *press = Some(PressRequest {
+                id: id.clone(),
+                created: Instant::now(),
+                approved: None,
+            });
+        }
+        if let Some(d) = &self.display {
+            let px = qr::text_screen(
+                &[("PRESS THE", 2), ("BUTTON ON", 2), ("THE UNIT", 2)],
+                d.screen,
+            );
+            d.override_.show(px, PRESS_WINDOW);
+        }
+        info!(
+            "a browser asked to pair by button press; waiting {}s",
+            PRESS_WINDOW.as_secs()
+        );
+        Ok(id)
+    }
+
+    /// Whether the press has happened: `Some(approved)` while the request
+    /// is live, `None` once it has lapsed or never existed.
+    pub fn press_status(&self, id: &str) -> Option<bool> {
+        let press = self.press.lock().unwrap_or_else(|e| e.into_inner());
+        let p = press.as_ref()?;
+        if p.id != id {
+            return None;
+        }
+        let since = p.approved.unwrap_or(p.created).elapsed();
+        (since < PRESS_WINDOW).then_some(p.approved.is_some())
+    }
+
+    /// The button on the unit was pressed.
+    ///
+    /// Approves a waiting press request, and on a unit with no owner opens
+    /// the setup window again. Both are the same statement: whoever pressed
+    /// the button is holding the unit.
+    pub async fn button_pressed(&self) {
+        let approved = {
+            let mut press = self.press.lock().unwrap_or_else(|e| e.into_inner());
+            match press.as_mut() {
+                Some(p) if p.approved.is_none() && p.created.elapsed() < PRESS_WINDOW => {
+                    p.approved = Some(Instant::now());
+                    true
+                }
+                _ => false,
+            }
+        };
+        if approved {
+            info!("button press approved a pairing request");
+            if let Some(d) = &self.display {
+                let px =
+                    qr::text_screen(&[("CONTINUE", 2), ("ON YOUR", 2), ("PHONE", 2)], d.screen);
+                d.override_.show(px, PRESS_WINDOW);
+            }
+            return;
+        }
+        if self.open_setup_window().await.is_ok() {
+            info!("button press re-armed the setup window");
+        }
+    }
+
+    /// Finish setup for a browser whose press request was approved.
+    pub async fn complete_setup_by_press(
+        &self,
+        id: &str,
+        passphrase: &str,
+        device_name: Option<&str>,
+        user_agent: &str,
+    ) -> Result<IssuedDevice, PairError> {
+        if self.state.read().await.setup_complete {
+            return Err(PairError::AlreadyComplete);
+        }
+        match self.press_status(id) {
+            Some(true) => {}
+            _ => return Err(PairError::NotPressed),
+        }
+        let issued = self
+            .finish_setup(passphrase, device_name, user_agent)
+            .await?;
+        let mut press = self.press.lock().unwrap_or_else(|e| e.into_inner());
+        *press = None;
+        Ok(issued)
+    }
+
+    /// Check the passphrase, counting a wrong one against the backoff.
+    pub async fn verify_passphrase(&self, passphrase: &str) -> Result<(), PairError> {
+        self.check_backoff()?;
+        let Some(hash) = self.state.read().await.owner_passphrase_hash.clone() else {
+            return Err(PairError::NoPassphrase);
+        };
+        if passphrase.len() > web_auth::MAX_PASSWORD_LEN
+            || !verify_off_thread(passphrase.to_string(), hash).await
+        {
+            self.note_failure();
+            return Err(PairError::WrongPassphrase);
+        }
+        self.note_success();
+        Ok(())
+    }
+
+    /// Replace the owner passphrase. Knowing the old one is required, so a
+    /// paired browser that has been picked up cannot quietly change it.
+    pub async fn change_passphrase(&self, current: &str, new: &str) -> Result<(), PairError> {
+        self.verify_passphrase(current).await?;
+        if new.chars().count() < MIN_PASSPHRASE_LEN || new.len() > web_auth::MAX_PASSWORD_LEN {
+            return Err(PairError::PassphraseTooShort);
+        }
+        let hash = hash_off_thread(new.to_string()).await;
+        let mut state = self.state.write().await;
+        state.owner_passphrase_hash = Some(hash);
+        self.save(&state).await?;
+        info!("owner passphrase changed");
+        Ok(())
+    }
+
+    /// A six-digit code a trusted browser hands to a new one. Five minutes,
+    /// single use, five wrong guesses burn it. Only one is live at a time;
+    /// minting another replaces it.
+    pub fn mint_code(&self) -> Result<(String, Duration), PairError> {
+        let mut raw = [0u8; 4];
+        random_bytes(&mut raw).map_err(|e| PairError::Storage(e.to_string()))?;
+        let code = format!("{:06}", u32::from_le_bytes(raw) % 1_000_000);
+        let mut slot = self.pair_code.lock().unwrap_or_else(|e| e.into_inner());
+        *slot = Some(PairCode {
+            code: code.clone(),
+            created: Instant::now(),
+            wrong: 0,
+        });
+        Ok((code, PAIR_CODE_TTL))
+    }
+
+    /// The link a code's QR holds, for a phone that scans rather than types.
+    pub fn code_url(&self, host: &str, code: &str) -> String {
+        format!("HTTPS://{}/P/{code}", host.to_uppercase())
+    }
+
+    /// Trust this browser because it has a live code from a trusted one.
+    pub async fn pair_with_code(
+        &self,
+        code: &str,
+        device_name: Option<&str>,
+        user_agent: &str,
+    ) -> Result<IssuedDevice, PairError> {
+        let given: String = code.chars().filter(|c| c.is_ascii_digit()).collect();
+        {
+            let mut slot = self.pair_code.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(pc) = slot.as_mut() else {
+                return Err(PairError::NoCode);
+            };
+            if pc.created.elapsed() >= PAIR_CODE_TTL {
+                *slot = None;
+                return Err(PairError::NoCode);
+            }
+            if !ct_eq(pc.code.as_bytes(), given.as_bytes()) {
+                pc.wrong += 1;
+                if pc.wrong >= MAX_CODE_ATTEMPTS {
+                    warn!("{MAX_CODE_ATTEMPTS} wrong add-a-device codes; burning it");
+                    *slot = None;
+                    return Err(PairError::NoCode);
+                }
+                return Err(PairError::WrongToken {
+                    attempts_left: MAX_CODE_ATTEMPTS - pc.wrong,
+                });
+            }
+            // Single use.
+            *slot = None;
+        }
+        let mut state = self.state.write().await;
+        let issued = add_device(&mut state, device_name, user_agent)?;
+        self.save(&state).await?;
+        info!("paired {:?} with an add-a-device code", issued.name);
+        Ok(issued)
+    }
+
+    async fn finish_setup(
+        &self,
+        passphrase: &str,
+        device_name: Option<&str>,
+        user_agent: &str,
+    ) -> Result<IssuedDevice, PairError> {
         if passphrase.chars().count() < MIN_PASSPHRASE_LEN {
             return Err(PairError::PassphraseTooShort);
         }
@@ -567,19 +794,7 @@ impl Pairing {
         device_name: Option<&str>,
         user_agent: &str,
     ) -> Result<IssuedDevice, PairError> {
-        self.check_backoff()?;
-        let Some(hash) = self.state.read().await.owner_passphrase_hash.clone() else {
-            return Err(PairError::NoPassphrase);
-        };
-        if passphrase.len() > web_auth::MAX_PASSWORD_LEN {
-            self.note_failure();
-            return Err(PairError::WrongPassphrase);
-        }
-        if !verify_off_thread(passphrase.to_string(), hash).await {
-            self.note_failure();
-            return Err(PairError::WrongPassphrase);
-        }
-        self.note_success();
+        self.verify_passphrase(passphrase).await?;
         let mut state = self.state.write().await;
         let issued = add_device(&mut state, device_name, user_agent)?;
         // A unit set up over the old accounts path has a passphrase but may
@@ -1100,6 +1315,102 @@ mod tests {
             Pairing::load(dir.path(), None).await,
             Err(PairError::Storage(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn the_passphrase_can_be_changed_only_by_someone_who_knows_it() {
+        let p = fresh();
+        let token = p.open_setup_window().await.unwrap();
+        p.complete_setup(&token, "correct horse", None, UA)
+            .await
+            .unwrap();
+        assert_eq!(
+            p.change_passphrase("wrong horse", "new passphrase").await,
+            Err(PairError::WrongPassphrase)
+        );
+        p.note_success();
+        assert_eq!(
+            p.change_passphrase("correct horse", "short").await,
+            Err(PairError::PassphraseTooShort)
+        );
+        p.change_passphrase("correct horse", "new passphrase")
+            .await
+            .unwrap();
+        assert!(
+            p.pair_with_passphrase("new passphrase", None, UA)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn an_add_a_device_code_works_once_and_burns_after_five_misses() {
+        let p = fresh();
+        assert_eq!(
+            p.pair_with_code("123456", None, UA).await,
+            Err(PairError::NoCode)
+        );
+        let (code, ttl) = p.mint_code().unwrap();
+        assert_eq!(code.len(), 6);
+        assert_eq!(ttl, PAIR_CODE_TTL);
+        assert_eq!(
+            p.code_url("192.168.1.1:8443", &code),
+            format!("HTTPS://192.168.1.1:8443/P/{code}")
+        );
+        let wrong = if code == "000000" { "111111" } else { "000000" };
+        for left in (1..MAX_CODE_ATTEMPTS).rev() {
+            assert_eq!(
+                p.pair_with_code(wrong, None, UA).await,
+                Err(PairError::WrongToken {
+                    attempts_left: left
+                })
+            );
+        }
+        assert_eq!(
+            p.pair_with_code(wrong, None, UA).await,
+            Err(PairError::NoCode)
+        );
+        assert_eq!(
+            p.pair_with_code(&code, None, UA).await,
+            Err(PairError::NoCode),
+            "burnt"
+        );
+
+        let (code, _) = p.mint_code().unwrap();
+        let spaced = format!("{} {}", &code[..3], &code[3..]);
+        let issued = p.pair_with_code(&spaced, Some("Tablet"), UA).await.unwrap();
+        assert!(p.authenticate(&issued.cookie_value).await.is_some());
+        assert_eq!(
+            p.pair_with_code(&code, None, UA).await,
+            Err(PairError::NoCode),
+            "single use"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_button_press_pairs_the_browser_that_asked_and_nobody_later() {
+        let p = fresh();
+        assert_eq!(
+            p.complete_setup_by_press("nope", "correct horse", None, UA)
+                .await,
+            Err(PairError::NotPressed)
+        );
+        let id = p.request_press().await.unwrap();
+        assert_eq!(p.press_status(&id), Some(false));
+        assert_eq!(p.press_status("other"), None);
+        p.button_pressed().await;
+        assert_eq!(p.press_status(&id), Some(true));
+        let issued = p
+            .complete_setup_by_press(&id, "correct horse", None, UA)
+            .await
+            .unwrap();
+        assert!(p.setup_complete().await);
+        assert!(p.authenticate(&issued.cookie_value).await.is_some());
+        // Owned now: no more press requests.
+        assert_eq!(p.request_press().await, Err(PairError::AlreadyComplete));
+        // And a press on an owned unit does nothing.
+        p.button_pressed().await;
+        assert!(p.setup_window().is_none());
     }
 
     #[test]

@@ -333,7 +333,29 @@ pub trait GenericFramebuffer: Send + 'static {
     }
 
     async fn draw_patterned_line(&mut self, color: Color, height: u32, pattern: LinePattern) {
-        let width = self.dimensions().width;
+        self.draw_status(color, height, pattern, None).await
+    }
+
+    /// The status line, and under it a strip of text when there is one.
+    ///
+    /// Composed as one buffer because every driver writes from the top of
+    /// the framebuffer. When the line fills the screen the strip takes its
+    /// last rows, so the text is always visible.
+    async fn draw_status(
+        &mut self,
+        color: Color,
+        height: u32,
+        pattern: LinePattern,
+        banner: Option<&str>,
+    ) {
+        let Dimensions {
+            width,
+            height: screen_height,
+        } = self.dimensions();
+        let height = match banner {
+            Some(_) => height.min(screen_height.saturating_sub(super::qr::BANNER_HEIGHT)),
+            None => height,
+        };
         let mut buffer = Vec::with_capacity((height * width).try_into().unwrap());
 
         for _row in 0..height {
@@ -350,6 +372,9 @@ pub trait GenericFramebuffer: Send + 'static {
                     buffer.push((0, 0, 0)); // Black background
                 }
             }
+        }
+        if let Some(text) = banner {
+            buffer.extend(super::qr::banner_strip(width, text));
         }
 
         self.write_buffer(buffer).await
@@ -539,7 +564,8 @@ pub fn update_ui(
                 if status_bar_height > 0 {
                     let (color, pattern) =
                         display_style_from_state(state, colorblind_mode, &display_colors);
-                    fb.draw_patterned_line(color, status_bar_height, pattern)
+                    let banner = override_.current_banner();
+                    fb.draw_status(color, status_bar_height, pattern, banner.as_deref())
                         .await;
                 }
                 tokio::time::sleep(Duration::from_millis(REFRESH_RATE)).await;
@@ -628,10 +654,11 @@ pub fn update_ui(
                 _ => {}
             };
 
-            if status_bar_height > 0 {
+            let banner = override_.current_banner();
+            if status_bar_height > 0 || banner.is_some() {
                 let (color, pattern) =
                     display_style_from_state(state, colorblind_mode, &display_colors);
-                fb.draw_patterned_line(color, status_bar_height, pattern)
+                fb.draw_status(color, status_bar_height, pattern, banner.as_deref())
                     .await;
             }
 

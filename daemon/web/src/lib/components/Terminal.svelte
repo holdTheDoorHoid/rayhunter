@@ -1,7 +1,15 @@
 <script lang="ts">
     import Modal from './Modal.svelte';
     import Explainer from './Explainer.svelte';
-    import { run_terminal_command, type TerminalResult } from '../utils.svelte';
+    import {
+        run_terminal_command,
+        stepup_start,
+        stepup_confirm,
+        stepup_status,
+        stepup_end,
+        StepUpRequired,
+        type TerminalResult,
+    } from '../utils.svelte';
 
     /**
      * Run commands on the device from the browser.
@@ -11,6 +19,12 @@
      * reason it is built this way rather than as a real terminal.
      */
     let { shown = $bindable() }: { shown: boolean } = $props();
+
+    // Closing the panel closes the terminal's window on the unit too, so the
+    // "TERMINAL ACTIVE" line on its screen does not outlive the panel.
+    $effect(() => {
+        if (!shown) close_terminal();
+    });
 
     interface Entry {
         command: string;
@@ -24,6 +38,90 @@
     /** Position when arrowing back through previous commands. */
     let recall = $state(-1);
     let output_el = $state<HTMLDivElement | null>(null);
+
+    /**
+     * The step-up: before the first command the unit wants the passphrase,
+     * then a code from its own screen (or a button press on a unit with no
+     * screen). Once confirmed the terminal stays open for a few minutes,
+     * longer with use.
+     */
+    let stepup = $state<'none' | 'passphrase' | 'code' | 'button'>('none');
+    let stepup_passphrase = $state('');
+    let stepup_code = $state('');
+    let stepup_error = $state('');
+    let stepup_busy = $state(false);
+    /** The command that hit the gate, to run once it opens. */
+    let pending_command = $state('');
+    let button_poll: ReturnType<typeof setInterval> | null = null;
+
+    async function start_stepup() {
+        stepup_error = '';
+        stepup_busy = true;
+        try {
+            const r = await stepup_start(stepup_passphrase);
+            stepup_passphrase = '';
+            if (r.has_screen) {
+                stepup = 'code';
+            } else {
+                stepup = 'button';
+                button_poll = setInterval(async () => {
+                    try {
+                        const s = await stepup_status();
+                        if (s.active) opened();
+                    } catch {
+                        /* keep waiting */
+                    }
+                }, 1000);
+            }
+        } catch (e) {
+            stepup_error = `${e}`;
+        } finally {
+            stepup_busy = false;
+        }
+    }
+
+    async function confirm_stepup() {
+        stepup_error = '';
+        stepup_busy = true;
+        try {
+            await stepup_confirm(stepup_code);
+            stepup_code = '';
+            opened();
+        } catch (e) {
+            stepup_error = `${e}`;
+            // Too many wrong codes, or it expired: back to the passphrase.
+            if (`${e}`.includes('start again')) stepup = 'passphrase';
+        } finally {
+            stepup_busy = false;
+        }
+    }
+
+    function opened() {
+        if (button_poll) clearInterval(button_poll);
+        button_poll = null;
+        stepup = 'none';
+        if (pending_command) {
+            command = pending_command;
+            pending_command = '';
+            submit();
+        }
+    }
+
+    function cancel_stepup() {
+        if (button_poll) clearInterval(button_poll);
+        button_poll = null;
+        stepup = 'none';
+        pending_command = '';
+        stepup_error = '';
+    }
+
+    async function close_terminal() {
+        try {
+            await stepup_end();
+        } catch {
+            /* it lapses on its own anyway */
+        }
+    }
 
     /**
      * Commands worth having to hand, since most of what anyone needs here is
@@ -50,14 +148,17 @@
         command = '';
         try {
             const result = await run_terminal_command(text);
-            // Through `history`, never through a reference kept from before it
-            // was added. Putting an object into a `$state` array stores a proxy
-            // of it, and the template reads that proxy; assigning to the plain
-            // object we started with writes past the proxy, so the output never
-            // appears and the entry reads "running" for ever. That was a real
-            // bug: the request succeeded and returned the output every time.
             history[index].result = result;
         } catch (e) {
+            if (e instanceof StepUpRequired) {
+                // Not an error: the unit wants proof first. Take the entry
+                // back, keep the command, and ask.
+                history = history.slice(0, index);
+                pending_command = text;
+                stepup = 'passphrase';
+                running = false;
+                return;
+            }
             history[index].error = `${e}`;
         } finally {
             running = false;
@@ -92,6 +193,85 @@
             Commands run on the device as root, in a fresh shell each time. Nothing is carried
             between them, so a directory you change into does not persist.
         </p>
+
+        {#if stepup !== 'none'}
+            <div
+                class="mt-2 rounded-md border border-amber-400 bg-amber-50 p-2 text-sm dark:border-amber-600 dark:bg-amber-950"
+            >
+                {#if stepup === 'passphrase'}
+                    <p class="mb-2">
+                        The terminal needs proof you are holding the unit. Enter the owner
+                        passphrase; the unit will then show a code on its screen.
+                    </p>
+                    <form
+                        class="flex flex-wrap gap-2"
+                        onsubmit={(e) => {
+                            e.preventDefault();
+                            start_stepup();
+                        }}
+                    >
+                        <input
+                            type="password"
+                            bind:value={stepup_passphrase}
+                            autocomplete="current-password"
+                            placeholder="Owner passphrase"
+                            aria-label="Owner passphrase"
+                            class="flex-1 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
+                        />
+                        <button
+                            type="submit"
+                            disabled={stepup_busy || !stepup_passphrase}
+                            class="rounded-md border border-gray-300 px-3 py-1 text-sm disabled:opacity-40 dark:border-gray-600"
+                        >
+                            Continue
+                        </button>
+                        <button type="button" onclick={cancel_stepup} class="text-xs underline">
+                            cancel
+                        </button>
+                    </form>
+                {:else if stepup === 'code'}
+                    <p class="mb-2">
+                        Type the four-digit code now showing on the unit's screen. It is good for a
+                        minute.
+                    </p>
+                    <form
+                        class="flex flex-wrap gap-2"
+                        onsubmit={(e) => {
+                            e.preventDefault();
+                            confirm_stepup();
+                        }}
+                    >
+                        <input
+                            type="text"
+                            bind:value={stepup_code}
+                            inputmode="numeric"
+                            autocomplete="one-time-code"
+                            placeholder="0000"
+                            aria-label="Code from the unit's screen"
+                            class="w-24 rounded-md border border-gray-300 px-2 py-1 font-mono text-sm tracking-widest dark:border-gray-600"
+                        />
+                        <button
+                            type="submit"
+                            disabled={stepup_busy || stepup_code.length < 4}
+                            class="rounded-md border border-gray-300 px-3 py-1 text-sm disabled:opacity-40 dark:border-gray-600"
+                        >
+                            Open the terminal
+                        </button>
+                        <button type="button" onclick={cancel_stepup} class="text-xs underline">
+                            cancel
+                        </button>
+                    </form>
+                {:else}
+                    <p>Now press the button on the unit. Waiting…</p>
+                    <button type="button" onclick={cancel_stepup} class="mt-1 text-xs underline">
+                        cancel
+                    </button>
+                {/if}
+                {#if stepup_error}
+                    <p class="mt-1 text-xs text-red-600 dark:text-red-400">{stepup_error}</p>
+                {/if}
+            </div>
+        {/if}
 
         <div class="mt-2 flex flex-wrap gap-1">
             {#each SUGGESTIONS as s (s.command)}

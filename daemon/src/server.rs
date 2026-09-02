@@ -44,6 +44,8 @@ pub struct ServerState {
     pub tls: Option<Arc<crate::tls::TlsIdentity>>,
     /// Which browsers are trusted, and the setup window.
     pub pairing: Arc<crate::pairing::Pairing>,
+    /// The terminal's second gate.
+    pub stepup: Arc<crate::stepup::StepUp>,
     pub config: Config,
     /// The accounts as they stand now, rather than as they were at startup.
     ///
@@ -191,9 +193,369 @@ fn pair_error(e: crate::pairing::PairError) -> (StatusCode, String) {
         PassphraseTooShort => StatusCode::UNPROCESSABLE_ENTITY,
         Backoff(_) => StatusCode::TOO_MANY_REQUESTS,
         NoSuchDevice => StatusCode::NOT_FOUND,
+        NoCode | NotPressed => StatusCode::GONE,
         Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
     };
     (status, e.to_string())
+}
+
+fn stepup_error(e: crate::stepup::StepUpError) -> (StatusCode, String) {
+    use crate::stepup::StepUpError::*;
+    let status = match e {
+        NoPending | Expired | TooManyWrong => StatusCode::GONE,
+        WrongCode { .. } | NotYours => StatusCode::FORBIDDEN,
+    };
+    (status, e.to_string())
+}
+
+/// Which browser is asking, for things kept per browser. Loopback has no
+/// cookie and gets a fixed name: it is one place, the USB cable.
+fn device_id_of(current: &Option<axum::Extension<crate::web_auth::CurrentDevice>>) -> String {
+    current
+        .as_ref()
+        .map(|c| c.0.0.clone())
+        .unwrap_or_else(|| "loopback".to_string())
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct ChangePassphraseRequest {
+    pub current_passphrase: String,
+    pub new_passphrase: String,
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/passphrase",
+    tag = "Pairing",
+    request_body(content = ChangePassphraseRequest, content_type = "application/json"),
+    responses(
+        (status = StatusCode::OK, description = "Changed"),
+        (status = StatusCode::FORBIDDEN, description = "The current passphrase is wrong"),
+        (status = StatusCode::UNPROCESSABLE_ENTITY, description = "The new passphrase is too short"),
+        (status = StatusCode::TOO_MANY_REQUESTS, description = "Too many wrong attempts; wait"),
+    ),
+    summary = "Change the owner passphrase",
+))]
+pub async fn change_passphrase(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<ChangePassphraseRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    state
+        .pairing
+        .change_passphrase(&req.current_passphrase, &req.new_passphrase)
+        .await
+        .map_err(pair_error)?;
+    Ok(StatusCode::OK)
+}
+
+/// A code for adding another browser, and the same as a link and a QR.
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct PairCodeResponse {
+    pub code: String,
+    /// `HTTPS://<the host this browser used>/P/<code>`.
+    pub url: String,
+    pub expires_in_secs: u64,
+    /// The link as a QR code, SVG, for the page to show.
+    pub svg: String,
+}
+
+/// Mint an add-a-device code from a trusted browser.
+///
+/// The link uses whatever host this browser reached the unit by, so it
+/// resolves for the new device on the same network, hotspot or home LAN.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/devices/code",
+    tag = "Pairing",
+    responses((status = StatusCode::OK, description = "A fresh code", body = PairCodeResponse)),
+    summary = "Make a code for adding a device",
+))]
+pub async fn mint_pair_code(
+    State(state): State<Arc<ServerState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<PairCodeResponse>, (StatusCode, String)> {
+    let (code, ttl) = state.pairing.mint_code().map_err(pair_error)?;
+    let host = headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .map(|h| h.split(':').next().unwrap_or(h))
+        .filter(|h| !h.is_empty())
+        .unwrap_or("192.168.1.1");
+    let url = state
+        .pairing
+        .code_url(&format!("{host}:{}", state.config.tls_port), &code);
+    let svg = crate::display::qr::encode(&url)
+        .map(|c| crate::display::qr::svg(&c, 2))
+        .unwrap_or_default();
+    Ok(Json(PairCodeResponse {
+        code,
+        url,
+        expires_in_secs: ttl.as_secs(),
+        svg,
+    }))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct PairCodeRequest {
+    pub code: String,
+    #[serde(default)]
+    pub device_name: Option<String>,
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/pair/code",
+    tag = "Pairing",
+    request_body(content = PairCodeRequest, content_type = "application/json"),
+    responses(
+        (status = StatusCode::OK, description = "This browser is now trusted; the cookie is in Set-Cookie", body = PairedResponse),
+        (status = StatusCode::FORBIDDEN, description = "Wrong code"),
+        (status = StatusCode::GONE, description = "No code is active"),
+    ),
+    summary = "Pair this browser with a code from a trusted one",
+))]
+pub async fn pair_with_code(
+    State(state): State<Arc<ServerState>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<PairCodeRequest>,
+) -> Result<Response, (StatusCode, String)> {
+    let issued = state
+        .pairing
+        .pair_with_code(&req.code, req.device_name.as_deref(), &user_agent(&headers))
+        .await
+        .map_err(pair_error)?;
+    Ok(paired(issued))
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct PressRequestResponse {
+    pub id: String,
+    pub seconds: u64,
+}
+
+/// Ask to pair by pressing the unit's button: for units with no screen,
+/// and for anyone who cannot scan.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/setup/press-request",
+    tag = "Pairing",
+    responses(
+        (status = StatusCode::OK, description = "Waiting for the button", body = PressRequestResponse),
+        (status = StatusCode::CONFLICT, description = "This unit already has an owner"),
+    ),
+    summary = "Pair by button press: start waiting",
+))]
+pub async fn request_press(
+    State(state): State<Arc<ServerState>>,
+) -> Result<Json<PressRequestResponse>, (StatusCode, String)> {
+    let id = state.pairing.request_press().await.map_err(pair_error)?;
+    Ok(Json(PressRequestResponse {
+        id,
+        seconds: crate::pairing::PRESS_WINDOW.as_secs(),
+    }))
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct PressStatusResponse {
+    pub approved: bool,
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    get,
+    path = "/api/setup/press-status/{id}",
+    tag = "Pairing",
+    params(("id" = String, Path, description = "The id from press-request")),
+    responses(
+        (status = StatusCode::OK, description = "Whether the button has been pressed", body = PressStatusResponse),
+        (status = StatusCode::GONE, description = "That request has lapsed"),
+    ),
+    summary = "Pair by button press: has it been pressed?",
+))]
+pub async fn press_status(
+    State(state): State<Arc<ServerState>>,
+    Path(id): Path<String>,
+) -> Result<Json<PressStatusResponse>, (StatusCode, String)> {
+    match state.pairing.press_status(&id) {
+        Some(approved) => Ok(Json(PressStatusResponse { approved })),
+        None => Err(pair_error(crate::pairing::PairError::NotPressed)),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct CompleteByPressRequest {
+    pub id: String,
+    pub passphrase: String,
+    #[serde(default)]
+    pub device_name: Option<String>,
+    #[serde(default)]
+    pub browser_unix_ms: Option<i64>,
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/setup/complete-press",
+    tag = "Pairing",
+    request_body(content = CompleteByPressRequest, content_type = "application/json"),
+    responses(
+        (status = StatusCode::OK, description = "Set up; the cookie is in Set-Cookie", body = PairedResponse),
+        (status = StatusCode::GONE, description = "The button was not pressed in time"),
+    ),
+    summary = "Pair by button press: finish setup",
+))]
+pub async fn complete_setup_by_press(
+    State(state): State<Arc<ServerState>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<CompleteByPressRequest>,
+) -> Result<Response, (StatusCode, String)> {
+    let issued = state
+        .pairing
+        .complete_setup_by_press(
+            &req.id,
+            &req.passphrase,
+            req.device_name.as_deref(),
+            &user_agent(&headers),
+        )
+        .await
+        .map_err(pair_error)?;
+    if let Some(browser_ms) = req.browser_unix_ms {
+        let offset =
+            chrono::TimeDelta::milliseconds(browser_ms - chrono::Utc::now().timestamp_millis());
+        rayhunter::clock::set_offset(offset);
+    }
+    Ok(paired(issued))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct StepUpStartRequest {
+    pub passphrase: String,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct StepUpResponse {
+    /// Whether the unit has a screen to show the code on. Without one, a
+    /// button press on the unit confirms instead.
+    pub has_screen: bool,
+    pub seconds: u64,
+}
+
+/// Start a terminal step-up: the passphrase, then a code on the unit.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/stepup/start",
+    tag = "Terminal",
+    request_body(content = StepUpStartRequest, content_type = "application/json"),
+    responses(
+        (status = StatusCode::OK, description = "A code is on the unit's screen, or it awaits a button press", body = StepUpResponse),
+        (status = StatusCode::FORBIDDEN, description = "Wrong passphrase"),
+        (status = StatusCode::TOO_MANY_REQUESTS, description = "Too many wrong attempts; wait"),
+    ),
+    summary = "Terminal step-up: start",
+))]
+pub async fn stepup_start(
+    State(state): State<Arc<ServerState>>,
+    current: Option<axum::Extension<crate::web_auth::CurrentDevice>>,
+    Json(req): Json<StepUpStartRequest>,
+) -> Result<Json<StepUpResponse>, (StatusCode, String)> {
+    state
+        .pairing
+        .verify_passphrase(&req.passphrase)
+        .await
+        .map_err(pair_error)?;
+    let ttl = state
+        .stepup
+        .start(&device_id_of(&current))
+        .map_err(stepup_error)?;
+    Ok(Json(StepUpResponse {
+        has_screen: state.stepup.has_screen(),
+        seconds: ttl.as_secs(),
+    }))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct StepUpConfirmRequest {
+    pub code: String,
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/stepup/confirm",
+    tag = "Terminal",
+    request_body(content = StepUpConfirmRequest, content_type = "application/json"),
+    responses(
+        (status = StatusCode::OK, description = "The terminal is open for a while", body = StepUpResponse),
+        (status = StatusCode::FORBIDDEN, description = "Wrong code"),
+        (status = StatusCode::GONE, description = "No code is waiting, or too many wrong ones"),
+    ),
+    summary = "Terminal step-up: confirm the code",
+))]
+pub async fn stepup_confirm(
+    State(state): State<Arc<ServerState>>,
+    current: Option<axum::Extension<crate::web_auth::CurrentDevice>>,
+    Json(req): Json<StepUpConfirmRequest>,
+) -> Result<Json<StepUpResponse>, (StatusCode, String)> {
+    let window = state
+        .stepup
+        .confirm(&device_id_of(&current), &req.code)
+        .map_err(stepup_error)?;
+    Ok(Json(StepUpResponse {
+        has_screen: state.stepup.has_screen(),
+        seconds: window.as_secs(),
+    }))
+}
+
+/// Close this browser's terminal window now rather than letting it lapse.
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    post,
+    path = "/api/stepup/end",
+    tag = "Terminal",
+    responses((status = StatusCode::OK, description = "Closed")),
+    summary = "Terminal step-up: end",
+))]
+pub async fn stepup_end(
+    State(state): State<Arc<ServerState>>,
+    current: Option<axum::Extension<crate::web_auth::CurrentDevice>>,
+) -> StatusCode {
+    state.stepup.end(&device_id_of(&current));
+    StatusCode::OK
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct StepUpStatus {
+    pub active: bool,
+    pub seconds_left: u64,
+}
+
+#[cfg_attr(feature = "apidocs", utoipa::path(
+    get,
+    path = "/api/stepup/status",
+    tag = "Terminal",
+    responses((status = StatusCode::OK, description = "Whether this browser's terminal window is open", body = StepUpStatus)),
+    summary = "Terminal step-up: status",
+))]
+pub async fn stepup_status(
+    State(state): State<Arc<ServerState>>,
+    current: Option<axum::Extension<crate::web_auth::CurrentDevice>>,
+) -> Json<StepUpStatus> {
+    let id = device_id_of(&current);
+    let active = state.stepup.active(&id);
+    Json(StepUpStatus {
+        active,
+        seconds_left: state
+            .stepup
+            .remaining(&id)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    })
 }
 
 fn user_agent(headers: &axum::http::HeaderMap) -> String {
@@ -1436,6 +1798,7 @@ mod tests {
                 crate::pairing::AuthState::default(),
                 None,
             )),
+            stepup: Arc::new(crate::stepup::StepUp::new(None)),
             config_path: "/tmp/test_config.toml".to_string(),
             config: Config::default(),
             web_users: Arc::new(RwLock::new(Vec::new())),
@@ -2228,6 +2591,7 @@ static TERMINAL_SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new
 ))]
 pub async fn run_terminal_command(
     State(state): State<Arc<ServerState>>,
+    current: Option<axum::Extension<crate::web_auth::CurrentDevice>>,
     Json(body): Json<TerminalRequest>,
 ) -> Result<Json<TerminalResponse>, (StatusCode, String)> {
     if !state.config.terminal_enabled {
@@ -2244,14 +2608,17 @@ pub async fn run_terminal_command(
     // exists, so without this check an enabled terminal on an account-less
     // device would be unauthenticated root command execution. Requiring an
     // account here is independent of that middleware.
-    if state.web_users.read().await.is_empty() {
+    // The second gate: a step-up confirmed on the unit itself, per browser,
+    // and each command keeps it open a little longer. 428 tells the
+    // interface to ask for one rather than showing a bare failure.
+    let device_id = device_id_of(&current);
+    if !state.stepup.active(&device_id) {
         return Err((
-            StatusCode::FORBIDDEN,
-            "the terminal requires a web interface password. Set one under Configuration \
-             before using it."
-                .to_string(),
+            StatusCode::PRECONDITION_REQUIRED,
+            r#"{"stepup":"required"}"#.to_string(),
         ));
     }
+    state.stepup.extend(&device_id);
     let command = body.command.trim();
     if command.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "no command given".to_string()));

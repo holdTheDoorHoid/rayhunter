@@ -19,7 +19,15 @@
         tls_port: number;
     };
 
-    type Mode = 'setup' | 'passphrase' | 'account' | 'closed' | 'loading';
+    type Mode =
+        | 'setup'
+        | 'code'
+        | 'passphrase'
+        | 'account'
+        | 'press'
+        | 'press-setup'
+        | 'closed'
+        | 'loading';
 
     let status: Status | null = $state(null);
     let mode: Mode = $state('loading');
@@ -34,6 +42,11 @@
     let error = $state('');
     let fingerprint = $state('');
     let insecure = $state(false);
+    let code = $state('');
+    let from_code_link = $state(false);
+    let press_id = $state('');
+    let press_seconds = $state(0);
+    let press_timer: ReturnType<typeof setInterval> | null = null;
 
     const MIN_PASSPHRASE = 8;
 
@@ -66,9 +79,14 @@
             token = decodeURIComponent(m[1]).toUpperCase();
             from_link = true;
         }
+        const c = location.pathname.match(/^\/p\/([^/]+)/i);
+        if (c) {
+            code = decodeURIComponent(c[1]);
+            from_code_link = true;
+        }
         try {
             status = await get_json<Status>('/api/setup/status');
-            mode = decide_mode(status);
+            mode = from_code_link ? 'code' : decide_mode(status);
         } catch (e) {
             error = e instanceof Error ? e.message : String(e);
             mode = 'closed';
@@ -143,6 +161,90 @@
                 username,
                 password,
                 device_name: device_name || null,
+            });
+            done();
+        } catch (e) {
+            error = e instanceof Error ? e.message : String(e);
+        } finally {
+            busy = false;
+        }
+    }
+
+    async function submit_code() {
+        error = '';
+        busy = true;
+        try {
+            await post_json('/api/pair/code', { code, device_name: device_name || null });
+            done();
+        } catch (e) {
+            error = e instanceof Error ? e.message : String(e);
+        } finally {
+            busy = false;
+        }
+    }
+
+    // Pair by pressing the button on the unit: for units with no screen,
+    // and for a phone that will not scan one. The unit says "press the
+    // button" on its screen if it has one; a press within the window
+    // approves this browser, which then chooses the passphrase as usual.
+    async function request_press() {
+        error = '';
+        busy = true;
+        try {
+            const r = await fetch('/api/setup/press-request', { method: 'POST' });
+            if (!r.ok) throw new Error(await r.text());
+            const j = (await r.json()) as { id: string; seconds: number };
+            press_id = j.id;
+            press_seconds = j.seconds;
+            mode = 'press';
+            press_timer = setInterval(poll_press, 1000);
+        } catch (e) {
+            error = e instanceof Error ? e.message : String(e);
+        } finally {
+            busy = false;
+        }
+    }
+
+    async function poll_press() {
+        press_seconds = Math.max(0, press_seconds - 1);
+        try {
+            const r = await fetch(`/api/setup/press-status/${encodeURIComponent(press_id)}`);
+            if (r.status === 410) throw new Error('Nobody pressed the button in time.');
+            if (!r.ok) throw new Error(await r.text());
+            const j = (await r.json()) as { approved: boolean };
+            if (j.approved) {
+                stop_polling();
+                mode = 'press-setup';
+            }
+        } catch (e) {
+            stop_polling();
+            error = e instanceof Error ? e.message : String(e);
+            mode = status ? decide_mode(status) : 'closed';
+        }
+    }
+
+    function stop_polling() {
+        if (press_timer) clearInterval(press_timer);
+        press_timer = null;
+    }
+
+    async function submit_press_setup() {
+        error = '';
+        if (passphrase.length < MIN_PASSPHRASE) {
+            error = `The passphrase needs at least ${MIN_PASSPHRASE} characters.`;
+            return;
+        }
+        if (passphrase !== confirm) {
+            error = 'The two passphrases do not match.';
+            return;
+        }
+        busy = true;
+        try {
+            await post_json('/api/setup/complete-press', {
+                id: press_id,
+                passphrase,
+                device_name: device_name || null,
+                browser_unix_ms: Date.now(),
             });
             done();
         } catch (e) {
@@ -254,6 +356,134 @@
                 {busy ? 'Setting up…' : 'Set up and pair this browser'}
             </button>
         </form>
+        <button
+            class="mt-4 text-sm text-blue-700 underline dark:text-blue-300"
+            onclick={request_press}
+            disabled={busy}
+        >
+            Can't scan or read the code? Pair by pressing the button on the unit instead
+        </button>
+    {:else if mode === 'code'}
+        <h2 class="mb-1 text-xl font-semibold">Pair this browser with a code</h2>
+        <p class="mb-4 text-sm text-gray-600 dark:text-gray-400">
+            Enter the six-digit code shown on a phone or computer that is already paired with this
+            unit. It is good for a few minutes and one device.
+        </p>
+        <form
+            class="space-y-4"
+            onsubmit={(e) => {
+                e.preventDefault();
+                submit_code();
+            }}
+        >
+            <label class="block">
+                <span class="text-sm font-medium">Code</span>
+                <input
+                    class="mt-1 w-full rounded border border-gray-300 bg-white p-2 font-mono text-lg tracking-widest dark:border-gray-600 dark:bg-gray-800"
+                    bind:value={code}
+                    inputmode="numeric"
+                    autocomplete="one-time-code"
+                    placeholder="123 456"
+                    readonly={from_code_link}
+                    required
+                />
+            </label>
+            <label class="block">
+                <span class="text-sm font-medium">Name for this phone or computer (optional)</span>
+                <input
+                    class="mt-1 w-full rounded border border-gray-300 bg-white p-2 dark:border-gray-600 dark:bg-gray-800"
+                    bind:value={device_name}
+                    maxlength="64"
+                />
+            </label>
+            {#if error}
+                <p class="text-sm text-red-600 dark:text-red-400">{error}</p>
+            {/if}
+            <button
+                class="w-full rounded bg-blue-600 p-2 font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                type="submit"
+                disabled={busy}
+            >
+                {busy ? 'Checking…' : 'Pair'}
+            </button>
+        </form>
+        {#if status?.has_passphrase}
+            <button
+                class="mt-4 text-sm text-blue-700 underline dark:text-blue-300"
+                onclick={() => (mode = 'passphrase')}
+            >
+                Use the owner passphrase instead
+            </button>
+        {/if}
+    {:else if mode === 'press'}
+        <h2 class="mb-1 text-xl font-semibold">Now press the button on the unit</h2>
+        <p class="mb-4 text-sm text-gray-600 dark:text-gray-400">
+            Any press will do. This page is waiting for it: {press_seconds} seconds left.
+        </p>
+        <button
+            class="rounded border border-gray-400 px-3 py-1 text-sm"
+            onclick={() => {
+                stop_polling();
+                mode = status ? decide_mode(status) : 'closed';
+            }}
+        >
+            Cancel
+        </button>
+    {:else if mode === 'press-setup'}
+        <h2 class="mb-1 text-xl font-semibold">Button pressed. This unit is yours to set up.</h2>
+        <p class="mb-4 text-sm text-gray-600 dark:text-gray-400">
+            Choose a passphrase. You will use it to add another phone or computer, or to get back in
+            if you lose this one.
+        </p>
+        <form
+            class="space-y-4"
+            onsubmit={(e) => {
+                e.preventDefault();
+                submit_press_setup();
+            }}
+        >
+            <label class="block">
+                <span class="text-sm font-medium"
+                    >Passphrase (at least {MIN_PASSPHRASE} characters)</span
+                >
+                <input
+                    class="mt-1 w-full rounded border border-gray-300 bg-white p-2 dark:border-gray-600 dark:bg-gray-800"
+                    type="password"
+                    bind:value={passphrase}
+                    autocomplete="new-password"
+                    minlength={MIN_PASSPHRASE}
+                    required
+                />
+            </label>
+            <label class="block">
+                <span class="text-sm font-medium">Same passphrase again</span>
+                <input
+                    class="mt-1 w-full rounded border border-gray-300 bg-white p-2 dark:border-gray-600 dark:bg-gray-800"
+                    type="password"
+                    bind:value={confirm}
+                    autocomplete="new-password"
+                    required
+                />
+            </label>
+            <label class="block">
+                <span class="text-sm font-medium">Name for this phone or computer (optional)</span>
+                <input
+                    class="mt-1 w-full rounded border border-gray-300 bg-white p-2 dark:border-gray-600 dark:bg-gray-800"
+                    bind:value={device_name}
+                    maxlength="64"
+                />
+            </label>
+            {#if error}
+                <p class="text-sm text-red-600 dark:text-red-400">{error}</p>
+            {/if}
+            <button
+                class="w-full rounded bg-blue-600 p-2 font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                type="submit"
+                disabled={busy}
+            >
+                {busy ? 'Setting up…' : 'Set up and pair this browser'}
+            </button>
+        </form>
     {:else if mode === 'passphrase'}
         <h2 class="mb-1 text-xl font-semibold">Pair this browser</h2>
         <p class="mb-4 text-sm text-gray-600 dark:text-gray-400">
@@ -296,14 +526,22 @@
                 {busy ? 'Checking…' : 'Pair'}
             </button>
         </form>
-        {#if status?.has_accounts}
+        <div class="mt-4 flex flex-col gap-2">
             <button
-                class="mt-4 text-sm text-blue-700 underline dark:text-blue-300"
-                onclick={() => (mode = 'account')}
+                class="text-left text-sm text-blue-700 underline dark:text-blue-300"
+                onclick={() => (mode = 'code')}
             >
-                Sign in with a Rayhunter username and password instead
+                I have a code from a device that is already paired
             </button>
-        {/if}
+            {#if status?.has_accounts}
+                <button
+                    class="text-left text-sm text-blue-700 underline dark:text-blue-300"
+                    onclick={() => (mode = 'account')}
+                >
+                    Sign in with a Rayhunter username and password instead
+                </button>
+            {/if}
+        </div>
     {:else if mode === 'account'}
         <h2 class="mb-1 text-xl font-semibold">Sign in to pair this browser</h2>
         <p class="mb-4 text-sm text-gray-600 dark:text-gray-400">
@@ -362,12 +600,23 @@
         {#if error}
             <p class="text-sm text-red-600 dark:text-red-400">{error}</p>
         {/if}
-        <button
-            class="rounded border border-gray-400 px-3 py-1 text-sm"
-            onclick={() => location.reload()}
-        >
-            Check again
-        </button>
+        <div class="flex flex-wrap gap-2">
+            <button
+                class="rounded border border-gray-400 px-3 py-1 text-sm"
+                onclick={() => location.reload()}
+            >
+                Check again
+            </button>
+            {#if status && !status.setup_complete}
+                <button
+                    class="rounded bg-blue-600 px-3 py-1 text-sm font-semibold text-white"
+                    onclick={request_press}
+                    disabled={busy}
+                >
+                    Pair by pressing the button on the unit
+                </button>
+            {/if}
+        </div>
     {/if}
 
     {#if fingerprint}

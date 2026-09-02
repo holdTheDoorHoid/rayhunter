@@ -440,6 +440,14 @@ export interface TerminalResult {
     timed_out: boolean;
 }
 
+/** The terminal wants a step-up before it will run anything. */
+export class StepUpRequired extends Error {
+    constructor() {
+        super('step-up required');
+        this.name = 'StepUpRequired';
+    }
+}
+
 /** Run one command on the device. Requires the terminal to be enabled. */
 export async function run_terminal_command(command: string): Promise<TerminalResult> {
     const response = await fetch('/api/terminal', {
@@ -447,6 +455,92 @@ export async function run_terminal_command(command: string): Promise<TerminalRes
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ command }),
     });
+    if (response.status === 428) throw new StepUpRequired();
     if (!response.ok) throw new Error(await response.text());
     return response.json();
+}
+
+// ---- Pairing: who may use this interface ----
+
+export interface DeviceInfo {
+    id: string;
+    name: string;
+    created: string;
+    last_seen: string;
+    user_agent: string;
+    current: boolean;
+}
+
+export interface TlsInfo {
+    port: number;
+    fingerprint_sha256: string;
+    subject_alt_names: string[];
+    certificate_pem: string;
+}
+
+export interface PairCode {
+    code: string;
+    url: string;
+    expires_in_secs: number;
+    svg: string;
+}
+
+export interface StepUpResponse {
+    has_screen: boolean;
+    seconds: number;
+}
+
+export interface StepUpStatus {
+    active: boolean;
+    seconds_left: number;
+}
+
+export async function get_devices(): Promise<DeviceInfo[]> {
+    return req_json<DeviceInfo[]>('GET', '/api/devices');
+}
+
+export async function rename_device(id: string, name: string): Promise<void> {
+    await req('POST', `/api/devices/${encodeURIComponent(id)}/rename`, { name });
+}
+
+export async function revoke_device(id: string): Promise<void> {
+    await req('POST', `/api/devices/${encodeURIComponent(id)}/revoke`);
+}
+
+export async function mint_pair_code(): Promise<PairCode> {
+    return req_json<PairCode>('POST', '/api/devices/code');
+}
+
+export async function change_passphrase(current: string, next: string): Promise<void> {
+    await req('POST', '/api/passphrase', {
+        current_passphrase: current,
+        new_passphrase: next,
+    });
+}
+
+export async function get_tls_info(): Promise<TlsInfo> {
+    return req_json<TlsInfo>('GET', '/api/tls-info');
+}
+
+export async function stepup_start(passphrase: string): Promise<StepUpResponse> {
+    return req_json<StepUpResponse>('POST', '/api/stepup/start', { passphrase });
+}
+
+export async function stepup_confirm(code: string): Promise<StepUpResponse> {
+    return req_json<StepUpResponse>('POST', '/api/stepup/confirm', { code });
+}
+
+export async function stepup_end(): Promise<void> {
+    await req('POST', '/api/stepup/end');
+}
+
+export async function stepup_status(): Promise<StepUpStatus> {
+    return req_json<StepUpStatus>('GET', '/api/stepup/status');
+}
+
+/** A date from the unit, whose clock may be wrong, shortened for a list. */
+export function short_date(iso: string): string {
+    const d = new Date(iso);
+    if (isNaN(d.getTime()) || d.getFullYear() < 2020) return 'unknown';
+    return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }

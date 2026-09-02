@@ -108,6 +108,9 @@ pub type SharedSuppression = Arc<DisplaySuppression>;
 #[derive(Debug, Default)]
 pub struct DisplayOverride {
     inner: Mutex<Option<OverrideFrame>>,
+    /// A short line of text drawn under the status line for a while,
+    /// without taking the screen: "TERMINAL ACTIVE" is the one use so far.
+    banner: Mutex<Option<(String, Instant)>>,
 }
 
 #[derive(Debug)]
@@ -156,6 +159,29 @@ impl DisplayOverride {
     /// Whether a picture is up.
     pub fn active(&self) -> bool {
         self.current().is_some()
+    }
+
+    pub fn show_banner(&self, text: &str, period: Duration) {
+        let mut b = self.banner.lock().unwrap_or_else(|e| e.into_inner());
+        *b = Some((text.to_string(), Instant::now() + period));
+    }
+
+    pub fn clear_banner(&self) {
+        let mut b = self.banner.lock().unwrap_or_else(|e| e.into_inner());
+        *b = None;
+    }
+
+    /// The banner text to draw now, if any; an expired one is dropped.
+    pub fn current_banner(&self) -> Option<String> {
+        let mut b = self.banner.lock().unwrap_or_else(|e| e.into_inner());
+        match b.as_ref() {
+            Some((text, until)) if Instant::now() < *until => Some(text.clone()),
+            Some(_) => {
+                *b = None;
+                None
+            }
+            None => None,
+        }
     }
 
     /// How much longer the current picture has, if there is one.
@@ -241,6 +267,20 @@ mod override_tests {
         std::thread::sleep(Duration::from_millis(5));
         assert!(o.current().is_none());
         assert!(!o.active());
+    }
+
+    #[test]
+    fn a_banner_shows_and_lapses_on_its_own() {
+        let o = DisplayOverride::new();
+        assert!(o.current_banner().is_none());
+        o.show_banner("TERMINAL ACTIVE", Duration::from_secs(60));
+        assert_eq!(o.current_banner().as_deref(), Some("TERMINAL ACTIVE"));
+        o.show_banner("GONE", Duration::from_millis(0));
+        std::thread::sleep(Duration::from_millis(5));
+        assert!(o.current_banner().is_none());
+        o.show_banner("X", Duration::from_secs(60));
+        o.clear_banner();
+        assert!(o.current_banner().is_none());
     }
 
     #[test]

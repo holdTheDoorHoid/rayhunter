@@ -13,6 +13,7 @@ mod export_metadata;
 mod gps;
 mod http_client;
 mod key_input;
+mod mdns;
 mod notifications;
 mod packet_explorer;
 mod pairing;
@@ -22,6 +23,7 @@ mod redact;
 mod server;
 mod sim_health;
 mod stats;
+mod stepup;
 mod subscriber_id;
 mod timing_advance;
 mod tls;
@@ -125,6 +127,21 @@ fn get_router() -> AppRouter {
         .route("/api/devices", get(server::list_devices))
         .route("/api/devices/{id}/rename", post(server::rename_device))
         .route("/api/devices/{id}/revoke", post(server::revoke_device))
+        .route("/api/devices/code", post(server::mint_pair_code))
+        .route("/api/pair/code", post(server::pair_with_code))
+        .route("/api/passphrase", post(server::change_passphrase))
+        .route("/api/setup/press-request", post(server::request_press))
+        .route("/api/setup/press-status/{id}", get(server::press_status))
+        .route(
+            "/api/setup/complete-press",
+            post(server::complete_setup_by_press),
+        )
+        .route("/api/stepup/start", post(server::stepup_start))
+        .route("/api/stepup/confirm", post(server::stepup_confirm))
+        .route("/api/stepup/status", get(server::stepup_status))
+        .route("/api/stepup/end", post(server::stepup_end))
+        .route("/p/{code}", get(server::serve_pair_page))
+        .route("/P/{code}", get(server::serve_pair_page))
         .route("/pair", get(server::serve_pair_page))
         .route("/s/{token}", get(server::serve_pair_page))
         .route("/S/{token}", get(server::serve_pair_page))
@@ -198,19 +215,94 @@ async fn web_listen_addrs() -> Vec<IpAddr> {
     vec![IpAddr::V4(Ipv4Addr::UNSPECIFIED)]
 }
 
-// Runs the axum server, taking all the elements needed to build up our
-// ServerState and a oneshot Receiver that'll fire when it's time to shutdown
-// (i.e. user hit ctrl+c)
+/// Everything needed to serve the interface on one more address.
+///
+/// Built once, then used for every address the unit has at start and for
+/// any that appears later, such as the STA address when the unit joins a
+/// home network. Each address gets a plain listener and, when TLS is up, a
+/// TLS one; each is stamped with what kind of listener it is.
+struct Listeners {
+    base: Router,
+    tls_config: Option<Arc<rustls::ServerConfig>>,
+    port: u16,
+    tls_port: u16,
+}
+
+impl Listeners {
+    fn app_for(&self, kind: web_auth::ListenerKind) -> Router {
+        self.base.clone().layer(axum::Extension(kind))
+    }
+
+    /// Bind `ip` and serve until `shutdown`. Returns whether the plain
+    /// listener bound.
+    async fn serve(
+        &self,
+        task_tracker: &TaskTracker,
+        ip: IpAddr,
+        shutdown: CancellationToken,
+    ) -> bool {
+        let loopback = ip.is_loopback();
+        let sock = SocketAddr::new(ip, self.port);
+        let mut bound = false;
+        match TcpListener::bind(&sock).await {
+            Ok(listener) => {
+                let app = self.app_for(if loopback {
+                    web_auth::ListenerKind::Loopback
+                } else {
+                    web_auth::ListenerKind::Plain
+                });
+                let shutdown = shutdown.clone();
+                task_tracker.spawn(async move {
+                    info!("The orca is hunting for stingrays... ({sock})");
+                    axum::serve(listener, app)
+                        .with_graceful_shutdown(shutdown.cancelled_owned())
+                        .await
+                        .unwrap();
+                });
+                bound = true;
+            }
+            Err(e) => error!("couldn't bind the web interface to {sock}: {e}"),
+        }
+        if let Some(config) = &self.tls_config {
+            let sock = SocketAddr::new(ip, self.tls_port);
+            match tls::TlsListener::bind(sock, config.clone()).await {
+                Ok(listener) => {
+                    let app = self.app_for(if loopback {
+                        web_auth::ListenerKind::Loopback
+                    } else {
+                        web_auth::ListenerKind::Tls
+                    });
+                    task_tracker.spawn(async move {
+                        info!("The orca is hunting for stingrays... ({sock}, TLS)");
+                        axum::serve(listener, app)
+                            .with_graceful_shutdown(shutdown.cancelled_owned())
+                            .await
+                            .unwrap();
+                    });
+                }
+                Err(e) => error!("couldn't bind the TLS web interface to {sock}: {e}"),
+            }
+        }
+        bound
+    }
+}
+
+/// How often the STA address is looked at.
+const STA_POLL: std::time::Duration = std::time::Duration::from_secs(3);
+
+// Runs the axum server on every address the unit has, and on the STA
+// address whenever it has one. Takes the ServerState and a token that fires
+// when it is time to shut down (i.e. user hit ctrl+c).
 async fn run_server(
     task_tracker: &TaskTracker,
     state: Arc<ServerState>,
     addrs: Vec<IpAddr>,
+    mdns_addrs: mdns::SharedAddresses,
     shutdown_token: CancellationToken,
-) -> JoinHandle<()> {
+) {
     info!("spinning up server");
     let port = state.config.port;
     let tls_port = state.config.tls_port;
-    let tls_identity = state.tls.clone();
     // Wrapped around every route. Innermost decides who may pass; then a
     // cross-site state-changing request is refused before anything else
     // looks at it; outermost, the plain hotspot port is sent to TLS. Each
@@ -226,101 +318,107 @@ async fn run_server(
             state.clone(),
             web_auth::redirect_to_tls,
         ))
-        .with_state(state);
-    let app_for = |kind: web_auth::ListenerKind| base.clone().layer(axum::Extension(kind));
-    let plain_kind = |ip: &IpAddr| {
-        if ip.is_loopback() {
-            web_auth::ListenerKind::Loopback
-        } else {
-            web_auth::ListenerKind::Plain
-        }
-    };
-    let tls_kind = |ip: &IpAddr| {
-        if ip.is_loopback() {
-            web_auth::ListenerKind::Loopback
-        } else {
-            web_auth::ListenerKind::Tls
-        }
-    };
-
-    info!("serving the web interface on port {port}, addresses {addrs:?}");
+        .with_state(state.clone());
 
     // The same interface again, over TLS, on every address the plain one
-    // uses. Alongside rather than instead: nothing about the plain port
-    // changes until pairing is enforced, so a unit updated in the field
-    // behaves exactly as before with one more port open. Any failure here
-    // costs the TLS port and nothing else.
-    if let Some(identity) = tls_identity {
-        match tls::server_config(&identity) {
+    // uses. Alongside rather than instead, so a unit whose TLS fails keeps
+    // its plain port; the redirect only happens while TLS is up.
+    let tls_config = state
+        .tls
+        .as_ref()
+        .and_then(|identity| match tls::server_config(identity) {
             Ok(config) => {
-                for ip in &addrs {
-                    let sock = SocketAddr::new(*ip, tls_port);
-                    let listener = match tls::TlsListener::bind(sock, config.clone()).await {
-                        Ok(listener) => listener,
-                        Err(e) => {
-                            error!("couldn't bind the TLS web interface to {sock}: {e}");
-                            continue;
-                        }
-                    };
-                    let app = app_for(tls_kind(ip));
-                    let shutdown = shutdown_token.clone();
-                    task_tracker.spawn(async move {
-                        info!("The orca is hunting for stingrays... ({sock}, TLS)");
-                        axum::serve(listener, app)
-                            .with_graceful_shutdown(shutdown.cancelled_owned())
-                            .await
-                            .unwrap();
-                    });
-                }
                 info!(
                     "serving the web interface over TLS on port {tls_port}, fingerprint {}",
                     identity.fingerprint_hex()
                 );
+                Some(config)
             }
-            Err(e) => error!("TLS is unavailable: {e}"),
-        }
-    }
-
-    // One listener per address, all shut down together. The listeners bind the
-    // hotspot and loopback but not the WAN side; see select_listen_addrs.
-    let mut last_handle = None;
-    for ip in addrs {
-        let sock = SocketAddr::new(ip, port);
-        let listener = match TcpListener::bind(&sock).await {
-            Ok(listener) => listener,
             Err(e) => {
-                error!("couldn't bind the web interface to {sock}: {e}");
-                continue;
+                error!("TLS is unavailable: {e}");
+                None
             }
-        };
-        let app = app_for(plain_kind(&ip));
+        });
+    let listeners = Arc::new(Listeners {
+        base,
+        tls_config,
+        port,
+        tls_port,
+    });
+    info!("serving the web interface on port {port}, addresses {addrs:?}");
+
+    let mut any_bound = false;
+    for ip in &addrs {
+        any_bound |= listeners
+            .serve(task_tracker, *ip, shutdown_token.clone())
+            .await;
+    }
+    // If every chosen address failed to bind, serve on all interfaces so the
+    // device is still reachable rather than silently offering no interface.
+    if !any_bound {
+        let sock = SocketAddr::from(([0, 0, 0, 0], port));
+        let listener = TcpListener::bind(&sock).await.unwrap();
+        let app = listeners.app_for(web_auth::ListenerKind::Plain);
         let shutdown = shutdown_token.clone();
-        last_handle = Some(task_tracker.spawn(async move {
-            info!("The orca is hunting for stingrays... ({sock})");
+        task_tracker.spawn(async move {
+            info!("The orca is hunting for stingrays... ({sock}, fallback)");
             axum::serve(listener, app)
                 .with_graceful_shutdown(shutdown.cancelled_owned())
                 .await
                 .unwrap();
-        }));
+        });
     }
 
-    // If every chosen address failed to bind, serve on all interfaces so the
-    // device is still reachable rather than silently offering no interface.
-    match last_handle {
-        Some(handle) => handle,
-        None => {
-            let sock = SocketAddr::from(([0, 0, 0, 0], port));
-            let listener = TcpListener::bind(&sock).await.unwrap();
-            let app = app_for(web_auth::ListenerKind::Plain);
-            task_tracker.spawn(async move {
-                info!("The orca is hunting for stingrays... ({sock}, fallback)");
-                axum::serve(listener, app)
-                    .with_graceful_shutdown(shutdown_token.cancelled_owned())
-                    .await
-                    .unwrap();
-            })
+    // The STA address comes and goes with the network the unit joins, and
+    // usually after the daemon has started, which used to mean it was never
+    // served at all: reaching a unit on a home LAN was a race with its
+    // startup. Watch for it, serve it while it lasts, and tell the mDNS
+    // responder about it.
+    let tracker = task_tracker.clone();
+    let watcher_state = state.clone();
+    task_tracker.spawn(async move {
+        let mut served: Option<(std::net::Ipv4Addr, CancellationToken)> = None;
+        loop {
+            select! {
+                _ = shutdown_token.cancelled() => break,
+                _ = tokio::time::sleep(STA_POLL) => {}
+            }
+            let sta = watcher_state
+                .wifi_status
+                .read()
+                .await
+                .ip
+                .as_deref()
+                .and_then(|s| s.parse::<std::net::Ipv4Addr>().ok());
+            match (sta, &served) {
+                (Some(ip), Some((current, _))) if *current == ip => {}
+                (Some(ip), _) => {
+                    if let Some((old, token)) = served.take() {
+                        token.cancel();
+                        mdns_addrs.write().await.retain(|a| *a != old);
+                    }
+                    if addrs.contains(&IpAddr::V4(ip)) {
+                        // Already served since start.
+                        continue;
+                    }
+                    info!("WiFi client address {ip} appeared; serving the web interface on it");
+                    let token = shutdown_token.child_token();
+                    listeners
+                        .serve(&tracker, IpAddr::V4(ip), token.clone())
+                        .await;
+                    mdns_addrs.write().await.push(ip);
+                    served = Some((ip, token));
+                }
+                (None, Some((old, _))) => {
+                    info!("WiFi client address {old} is gone; no longer serving on it");
+                    let (old, token) = served.take().unwrap();
+                    token.cancel();
+                    mdns_addrs.write().await.retain(|a| *a != old);
+                }
+                (None, None) => {}
+            }
         }
-    }
+    });
 }
 
 // Loads a RecordingStore if one exists, and if not, only create one if we're
@@ -523,6 +621,13 @@ async fn run_with_config(
                 ))
             }
         };
+    // The terminal's second gate uses the same screen.
+    let stepup = Arc::new(stepup::StepUp::new(
+        display::qr::screen_geometry(&config.device).map(|screen| stepup::StepUpDisplay {
+            override_: display_override.clone(),
+            screen,
+        }),
+    ));
     if tls_identity.is_some()
         && !pairing.setup_complete().await
         && pairing.device_count().await == 0
@@ -611,6 +716,7 @@ async fn run_with_config(
             diag_tx.clone(),
             suppression.clone(),
             Some(pairing.clone()),
+            Some(stepup.clone()),
             shutdown_token.clone(),
         );
 
@@ -694,10 +800,26 @@ async fn run_with_config(
         None
     };
 
+    // The addresses `rayhunter.local` answers with: the hotspot's now, the
+    // STA one when it appears.
+    let mdns_addrs: mdns::SharedAddresses = Arc::new(RwLock::new(
+        hotspot_addrs
+            .iter()
+            .filter_map(|ip| match ip {
+                IpAddr::V4(v4) => Some(*v4),
+                IpAddr::V6(_) => None,
+            })
+            .collect(),
+    ));
+    if !config.debug_mode {
+        mdns::run(&task_tracker, mdns_addrs.clone(), shutdown_token.clone());
+    }
+
     let state = Arc::new(ServerState {
         config_path: args.config_path.clone(),
         tls: tls_identity,
         pairing,
+        stepup,
         web_users: Arc::new(tokio::sync::RwLock::new(config.web_users.clone())),
         config,
         qmdl_store_lock: qmdl_store_lock.clone(),
@@ -714,7 +836,14 @@ async fn run_with_config(
         gps_state: Arc::new(tokio::sync::RwLock::new(initial_gps)),
         update_status_lock: update_status_lock.clone(),
     });
-    run_server(&task_tracker, state, listen_addrs, shutdown_token.clone()).await;
+    run_server(
+        &task_tracker,
+        state,
+        listen_addrs,
+        mdns_addrs,
+        shutdown_token.clone(),
+    )
+    .await;
 
     task_tracker.close();
     task_tracker.wait().await;
