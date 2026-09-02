@@ -85,22 +85,54 @@ fn pick_soc(machine: Option<String>, cpuinfo: Option<String>) -> Option<String> 
     }
 }
 
-/// Ask the TP-Link's own web interface, on the loopback, what it is. The
-/// status call needs no login and answers on every revision seen so far.
+/// Ask the TP-Link's own web interface what it is. The status call needs
+/// no login and answers on every revision seen so far, but not always on
+/// the loopback: the v3.0's server listens only on the LAN address, so
+/// every address the device has is tried, loopback first.
 async fn tplink_web_identity() -> Option<(Option<String>, Option<String>)> {
     let client = crate::http_client::client().ok()?;
-    let body = client
-        .post("http://127.0.0.1/cgi-bin/qcmap_web_cgi")
-        .timeout(std::time::Duration::from_secs(3))
-        .body(r#"{"module":"status","action":0}"#)
-        .send()
-        .await
-        .ok()?
-        .text()
-        .await
-        .ok()?;
-    let hardware = tplink_status_hardware_ver(&body)?;
-    Some(split_tplink_hardware_ver(&hardware))
+    let own: Vec<std::net::IpAddr> = if_addrs::get_if_addrs()
+        .map(|ifs| ifs.into_iter().map(|i| i.ip()).collect())
+        .unwrap_or_default();
+    for address in status_call_addresses(&own) {
+        let response = client
+            .post(format!("http://{address}/cgi-bin/qcmap_web_cgi"))
+            .timeout(std::time::Duration::from_secs(3))
+            // What a browser's form post carries; the CGI rejects
+            // application/json outright.
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(r#"{"module":"status","action":0}"#)
+            .send()
+            .await;
+        let Ok(response) = response else {
+            continue;
+        };
+        let Ok(body) = response.text().await else {
+            continue;
+        };
+        if let Some(hardware) = tplink_status_hardware_ver(&body) {
+            return Some(split_tplink_hardware_ver(&hardware));
+        }
+    }
+    None
+}
+
+/// Loopback first, then the device's own private IPv4 addresses, without
+/// repeats.
+fn status_call_addresses(own: &[std::net::IpAddr]) -> Vec<String> {
+    let mut list = vec!["127.0.0.1".to_string()];
+    for ip in own {
+        if let std::net::IpAddr::V4(v4) = ip
+            && !v4.is_loopback()
+            && v4.is_private()
+        {
+            let text = v4.to_string();
+            if !list.contains(&text) {
+                list.push(text);
+            }
+        }
+    }
+    list
 }
 
 /// `deviceInfo.hardwareVer` out of the status reply, without trusting the
@@ -283,6 +315,24 @@ mod tests {
         );
         assert_eq!(tplink_status_hardware_ver("not json"), None);
         assert_eq!(tplink_status_hardware_ver(r#"{"deviceInfo":{}}"#), None);
+    }
+
+    #[test]
+    fn status_call_tries_loopback_then_private_addresses_once_each() {
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+        let own = [
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)),
+            IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+        ];
+        assert_eq!(
+            status_call_addresses(&own),
+            vec!["127.0.0.1", "192.168.0.1", "10.0.0.5"]
+        );
+        assert_eq!(status_call_addresses(&[]), vec!["127.0.0.1"]);
     }
 
     #[test]

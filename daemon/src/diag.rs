@@ -437,10 +437,17 @@ impl DiagTask {
     ) -> Result<(), RecordingStoreError> {
         let was_recording = matches!(self.state, DiagState::Recording { .. });
         if qmdl_store.path == path {
-            // The store is already there. All that may be needed is to pick
-            // recording back up after an interruption, such as the card
-            // being unmounted under it and remounted.
-            if !was_recording && !self.stopped_by_user {
+            // The store is already there, but the card under it went away
+            // and came back. A recording still open belongs to the old
+            // mount, so it is closed and a fresh one started; a stopped one
+            // is picked back up unless the user stopped it.
+            if was_recording {
+                info!("restarting recording in {} ({reason})", path.display());
+                self.finish_current_entry(qmdl_store, Some(format!("storage changed: {reason}")))
+                    .await;
+                return self.start(qmdl_store).await;
+            }
+            if !self.stopped_by_user {
                 info!("resuming recording in {} ({reason})", path.display());
                 return self.start(qmdl_store).await;
             }
