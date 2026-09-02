@@ -63,6 +63,12 @@ pub async fn detect(device: &Device) -> HardwareInfo {
     info
 }
 
+/// Whether a later look might learn more: the TP-Link's revision comes
+/// from a web server that is not up yet when the daemon starts.
+pub fn incomplete(info: &HardwareInfo, device: &Device) -> bool {
+    matches!(device, Device::Tplink) && info.hardware_version.is_none()
+}
+
 /// Rayhunter's name for the device type, as written in the config file.
 fn device_name(device: &Device) -> String {
     format!("{device:?}").to_lowercase()
@@ -91,8 +97,8 @@ fn pick_soc(machine: Option<String>, cpuinfo: Option<String>) -> Option<String> 
 /// every address the device has is tried, loopback first.
 async fn tplink_web_identity() -> Option<(Option<String>, Option<String>)> {
     let client = crate::http_client::client().ok()?;
-    let own: Vec<std::net::IpAddr> = if_addrs::get_if_addrs()
-        .map(|ifs| ifs.into_iter().map(|i| i.ip()).collect())
+    let own: Vec<(String, std::net::IpAddr)> = if_addrs::get_if_addrs()
+        .map(|ifs| ifs.into_iter().map(|i| (i.name.clone(), i.ip())).collect())
         .unwrap_or_default();
     for address in status_call_addresses(&own) {
         let response = client
@@ -118,11 +124,16 @@ async fn tplink_web_identity() -> Option<(Option<String>, Option<String>)> {
 }
 
 /// Loopback first, then the device's own private IPv4 addresses, without
-/// repeats.
-fn status_call_addresses(own: &[std::net::IpAddr]) -> Vec<String> {
+/// repeats. The carrier-side interfaces are left out: an address there is
+/// private too, but nothing answers on it and each try costs the timeout.
+fn status_call_addresses(own: &[(String, std::net::IpAddr)]) -> Vec<String> {
     let mut list = vec!["127.0.0.1".to_string()];
-    for ip in own {
-        if let std::net::IpAddr::V4(v4) = ip
+    for (name, ip) in own {
+        let carrier = ["rmnet", "wwan", "ppp", "qmi"]
+            .iter()
+            .any(|prefix| name.starts_with(prefix));
+        if !carrier
+            && let std::net::IpAddr::V4(v4) = ip
             && !v4.is_loopback()
             && v4.is_private()
         {
@@ -321,12 +332,19 @@ mod tests {
     fn status_call_tries_loopback_then_private_addresses_once_each() {
         use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
         let own = [
-            IpAddr::V4(Ipv4Addr::LOCALHOST),
-            IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1)),
-            IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1)),
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)),
-            IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
-            IpAddr::V6(Ipv6Addr::LOCALHOST),
+            ("lo".to_string(), IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            ("br0".to_string(), IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1))),
+            ("br0".to_string(), IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1))),
+            (
+                "bridge0".to_string(),
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)),
+            ),
+            (
+                "rmnet_data0".to_string(),
+                IpAddr::V4(Ipv4Addr::new(10, 20, 30, 40)),
+            ),
+            ("wlan0".to_string(), IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))),
+            ("lo".to_string(), IpAddr::V6(Ipv6Addr::LOCALHOST)),
         ];
         assert_eq!(
             status_call_addresses(&own),

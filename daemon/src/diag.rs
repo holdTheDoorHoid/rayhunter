@@ -352,6 +352,11 @@ impl DiagTask {
         };
         // Save what this device is and knows, beside the recording, so the
         // recording can be judged and re-analysed without the device.
+        if crate::hardware::incomplete(&self.hardware, &self.device) {
+            // Read at startup, before the vendor's web server was up to say
+            // which revision this is; ask again now.
+            self.hardware = crate::hardware::detect(&self.device).await;
+        }
         if let Some((_, entry)) = qmdl_store.get_current_entry() {
             let wifi =
                 Some(recording_metadata::wifi_info(self.wifi_enabled, &self.wifi_status).await);
