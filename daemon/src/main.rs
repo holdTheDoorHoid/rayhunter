@@ -25,6 +25,7 @@ mod recording_metadata;
 mod redact;
 mod server;
 mod sim_health;
+mod single_instance;
 mod stats;
 mod stepup;
 mod storage;
@@ -518,14 +519,19 @@ fn run_shutdown_thread(
         }
 
         shutdown_token.cancel();
-        diag_device_sender
+        // Either thread may already be gone, the diag one after giving up
+        // on the device; that is no reason to stop telling the other, and
+        // panicking here left the process hanging in the task tracker.
+        if diag_device_sender
             .send(DiagDeviceCtrlMessage::Exit)
             .await
-            .expect("couldn't send Exit message to diag thread");
-        analysis_tx
-            .send(AnalysisCtrlMessage::Exit)
-            .await
-            .expect("couldn't send Exit message to analysis thread");
+            .is_err()
+        {
+            warn!("diag thread had already exited");
+        }
+        if analysis_tx.send(AnalysisCtrlMessage::Exit).await.is_err() {
+            warn!("analysis thread had already exited");
+        }
         Ok(())
     })
 }
@@ -537,6 +543,18 @@ async fn main() -> Result<(), RayhunterError> {
     crate::crypto_provider::install_default();
 
     let args = parse_args();
+
+    // Held until the process ends. A second instance, however it was
+    // started, says so and leaves rather than fighting the first for the
+    // diag device and the web ports.
+    let _instance_lock =
+        match single_instance::acquire(std::path::Path::new(single_instance::LOCK_PATH)) {
+            Ok(lock) => lock,
+            Err(err) => {
+                error!("{err}; exiting");
+                std::process::exit(1);
+            }
+        };
 
     loop {
         let config = parse_config(&args.config_path).await?;

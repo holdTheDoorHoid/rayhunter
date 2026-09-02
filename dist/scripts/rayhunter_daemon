@@ -5,6 +5,14 @@ set -e
 case "$1" in
 start)
     echo -n "Starting rayhunter: "
+    # start-stop-daemon's own check looks for /bin/sh, which the daemon stops
+    # being once it execs, so check the pidfile ourselves: a second instance
+    # would only fight the first for the diag device and the web ports.
+    RUNNING=$(cat /tmp/rayhunter.pid 2>/dev/null)
+    if [ -n "$RUNNING" ] && kill -0 "$RUNNING" 2>/dev/null; then
+        echo "already running (pid $RUNNING)"
+        exit 0
+    fi
     # Below line may be replaced by the installer with device-specific startup commands, such as mounting the SD card.
     #RAYHUNTER-PRESTART
     start-stop-daemon -S -b --make-pidfile --pidfile /tmp/rayhunter.pid \
@@ -13,7 +21,19 @@ start)
     ;;
   stop)
     echo -n "Stopping rayhunter: "
-    start-stop-daemon -K -p /tmp/rayhunter.pid
+    STOPPING=$(cat /tmp/rayhunter.pid 2>/dev/null)
+    start-stop-daemon -K -p /tmp/rayhunter.pid || true
+    # The daemon closes its recording before it exits. Give it a moment, so a
+    # restart does not start the next one on top of it, then insist.
+    if [ -n "$STOPPING" ]; then
+        WAITED=0
+        while kill -0 "$STOPPING" 2>/dev/null && [ "$WAITED" -lt 10 ]; do
+            sleep 1
+            WAITED=$((WAITED + 1))
+        done
+        kill -9 "$STOPPING" 2>/dev/null || true
+    fi
+    rm -f /tmp/rayhunter.pid
     echo "done"
     ;;
   restart)

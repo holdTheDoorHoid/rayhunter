@@ -25,6 +25,7 @@ pub mod recording_metadata;
 pub mod redact;
 pub mod server;
 pub mod sim_health;
+pub mod single_instance;
 pub mod stats;
 pub mod stepup;
 pub mod storage;
