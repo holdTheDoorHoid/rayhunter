@@ -349,11 +349,21 @@ async fn observe(path: &Path, device_hint: Option<&str>) -> (Observation, Option
     )
 }
 
+/// What one check of the card found, and whether the check itself had to
+/// mount the card to find it usable. A remount means the card was gone in
+/// between, whatever the state before and after says.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Check {
+    pub state: RemovableState,
+    pub remounted: bool,
+}
+
 /// Check the card, mounting it if the system has not, and unmounting a
 /// stale entry a pulled card left behind so the next insertion can mount.
-pub async fn check_removable(path: &Path, device_hint: Option<&str>) -> RemovableState {
+pub async fn check_removable(path: &Path, device_hint: Option<&str>) -> Check {
     let (observation, device) = observe(path, device_hint).await;
-    match judge(&observation) {
+    let mut remounted = false;
+    let state = match judge(&observation) {
         RemovableState::Missing if observation.mounted => {
             // Pulled without unmounting. Detach the dead mount so a fresh
             // card can be mounted on the same path.
@@ -366,13 +376,19 @@ pub async fn check_removable(path: &Path, device_hint: Option<&str>) -> Removabl
         }
         RemovableState::Unusable { reason } if !observation.mounted => {
             let Some(device) = device else {
-                return RemovableState::Unusable { reason };
+                return Check {
+                    state: RemovableState::Unusable { reason },
+                    remounted: false,
+                };
             };
             let target = mount_target(path);
             info!("mounting {} on {}", device.display(), target.display());
             if let Err(e) = fs::create_dir_all(&target).await {
-                return RemovableState::Unusable {
-                    reason: format!("cannot create {}: {e}", target.display()),
+                return Check {
+                    state: RemovableState::Unusable {
+                        reason: format!("cannot create {}: {e}", target.display()),
+                    },
+                    remounted: false,
                 };
             }
             match run_quiet(
@@ -382,6 +398,7 @@ pub async fn check_removable(path: &Path, device_hint: Option<&str>) -> Removabl
             .await
             {
                 Ok(()) => {
+                    remounted = true;
                     let (again, _) = observe(path, device_hint).await;
                     judge(&again)
                 }
@@ -391,6 +408,26 @@ pub async fn check_removable(path: &Path, device_hint: Option<&str>) -> Removabl
             }
         }
         state => state,
+    };
+    Check { state, remounted }
+}
+
+/// Whether the recordings should move, and where: `Some(true)` to the card,
+/// `Some(false)` to internal storage, `None` to stay put. A card that has
+/// just been (re)mounted counts as having returned even when the state
+/// before and after both read "present", since the store on it was gone in
+/// between and any recording there stopped.
+pub fn decide_switch(
+    previous: &RemovableState,
+    check: &Check,
+    active_is_card: bool,
+) -> Option<bool> {
+    let want_card = check.state == RemovableState::Present;
+    let returned = want_card && (*previous != RemovableState::Present || check.remounted);
+    if want_card == active_is_card && !returned {
+        None
+    } else {
+        Some(want_card)
     }
 }
 
@@ -413,7 +450,9 @@ pub async fn choose_active(config: &StorageConfig) -> (PathBuf, RemovableState) 
     match &config.removable {
         None => (config.internal.clone(), RemovableState::NotConfigured),
         Some(removable) => {
-            let state = check_removable(removable, config.device.as_deref()).await;
+            let state = check_removable(removable, config.device.as_deref())
+                .await
+                .state;
             if state == RemovableState::Present {
                 (removable.clone(), state)
             } else {
@@ -586,7 +625,7 @@ pub fn run_storage_monitor(
                 _ = shutdown_token.cancelled() => return,
                 _ = tokio::time::sleep(POLL_INTERVAL) => {}
             }
-            let state = check_removable(&removable, config.device.as_deref()).await;
+            let check = check_removable(&removable, config.device.as_deref()).await;
             let (previous_state, active_is_card) = {
                 let status = status.read().await;
                 (
@@ -594,21 +633,14 @@ pub fn run_storage_monitor(
                     Path::new(&status.active_path) == removable,
                 )
             };
-            let want_card = state == RemovableState::Present;
-            let returned = want_card && previous_state != RemovableState::Present;
-            // Already where it should be, and nothing came back: note any
-            // change of condition and carry on. A card that went away and
-            // came back between two checks, or was unmounted and remounted
-            // under a store that never moved, still goes through the switch
-            // below, which restarts a recording the interruption may have
-            // stopped.
-            if want_card == active_is_card && !returned {
-                if state != previous_state {
+            let Some(want_card) = decide_switch(&previous_state, &check, active_is_card) else {
+                if check.state != previous_state {
                     let mut status = status.write().await;
-                    status.removable = state;
+                    status.removable = check.state;
                 }
                 continue;
-            }
+            };
+            let state = check.state;
             let (target, reason, event) = if want_card {
                 (
                     removable.clone(),
@@ -816,8 +848,9 @@ mod tests {
     async fn an_unmounted_directory_with_no_card_is_missing() {
         let dir = tempfile::tempdir().unwrap();
         // A device hint that does not exist means no card to mount.
-        let state = check_removable(dir.path(), Some("/dev/rayhunter-no-such-card")).await;
-        assert_eq!(state, RemovableState::Missing);
+        let check = check_removable(dir.path(), Some("/dev/rayhunter-no-such-card")).await;
+        assert_eq!(check.state, RemovableState::Missing);
+        assert!(!check.remounted);
         let config = StorageConfig {
             internal: PathBuf::from("/data/rayhunter/qmdl"),
             removable: Some(dir.path().to_path_buf()),
@@ -887,5 +920,42 @@ mod tests {
             Path::new("/media/cardx"),
             Path::new("/media/card")
         ));
+    }
+
+    #[test]
+    fn a_remount_counts_as_a_return_even_between_two_presents() {
+        let present = |remounted| Check {
+            state: RemovableState::Present,
+            remounted,
+        };
+        let missing = Check {
+            state: RemovableState::Missing,
+            remounted: false,
+        };
+        // Steady state on the card: nothing to do.
+        assert_eq!(
+            decide_switch(&RemovableState::Present, &present(false), true),
+            None
+        );
+        // The card went away and came back within one check: switch (resume).
+        assert_eq!(
+            decide_switch(&RemovableState::Present, &present(true), true),
+            Some(true)
+        );
+        // It came back after being missing: switch to it.
+        assert_eq!(
+            decide_switch(&RemovableState::Missing, &present(false), false),
+            Some(true)
+        );
+        // It is gone while the store is on it: switch to internal.
+        assert_eq!(
+            decide_switch(&RemovableState::Present, &missing, true),
+            Some(false)
+        );
+        // Gone and already on internal storage: nothing to do.
+        assert_eq!(
+            decide_switch(&RemovableState::Missing, &missing, false),
+            None
+        );
     }
 }
