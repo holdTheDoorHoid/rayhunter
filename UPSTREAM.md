@@ -578,3 +578,23 @@ rather than load average.
 
 `CLAUDE.md` and this file are working notes for this fork. `40a7d49`,
 `4945032`, `0735392`, `1257791`, `6bcbfbd` are documentation only.
+
+### web-pairing (with web-tls and setup-qr-display)
+The web interface is served over TLS with a certificate the unit makes for
+itself, and only paired browsers may use it. A new unit shows a QR setup
+link on its screen; the first browser to scan it sets the owner passphrase
+and gets a device cookie. More browsers pair with the passphrase or a
+six-digit code from a trusted browser; screenless units pair by button press.
+The terminal needs a step-up (passphrase, then a code shown on the unit).
+`rayhunter.local` resolves via a small mDNS responder, and the WiFi client
+address is served when it appears.
+**Upstream:** none yet. Discuss before proposing: it changes the default from
+open to paired, which upstream has so far declined (see the closed
+authentication issues).
+**Commits:** `git log --grep="^Feature: setup-qr-display"`, `web-tls`,
+`web-pairing`.
+**Files:** `daemon/src/{tls,pairing,stepup,mdns}.rs`, `daemon/src/web_auth.rs`,
+`daemon/src/display/qr.rs` and the override in `display/mod.rs`,
+`daemon/web/src/routes/pair/`, the pairing section of `ConfigForm.svelte`,
+`Terminal.svelte`, `installer util reset-auth`, `doc/web-authentication.md`.
+**Depends on:** nothing else on this branch.

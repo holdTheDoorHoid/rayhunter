@@ -124,23 +124,33 @@ page](./troubleshooting.md) covers what to check.
 
 ## Step 7: Open Rayhunter's dashboard
 
-With your computer still on the Orbic's WiFi, open:
+The Orbic's screen is showing a square code. With your phone on the Orbic's
+WiFi, scan it with the camera. On a computer instead, open:
 
 ```
-http://192.168.1.1:8080
+https://192.168.1.1:8443/pair
 ```
 
-Your browser will warn that the connection is not secure. That is expected, Rayhunter does not use HTTPS on the device, and you can safely continue past
-the warning.
+and type the eight characters printed under the code.
+
+Your browser will warn that the connection is not private. That is expected:
+the Orbic made its own certificate, and nobody on the internet vouches for it.
+Continue past the warning; you are asked once per browser.
+
+Choose a passphrase of at least eight characters and write it down. This is
+what pairs a second phone or computer later. [Securing the Web
+Interface](./web-authentication.md) has the rest.
 
 **Expected result:** Rayhunter's web dashboard, showing a recording already in
 progress and panels for the current status. This is the home base for everything
-else.
+else. Your phone or computer is now paired and is not asked again.
 
 *If the warning has no "continue anyway" option:* different browsers hide it
 differently, look for "Advanced," "Show details," or "visit this website."
+*If the code has gone from the screen:* press any button on the Orbic and it
+comes back for ten minutes.
 *If the page does not load at all:* re-check that you are on the Orbic's WiFi and
-that you included `:8080` at the end of the address.
+that the address starts with `https` and ends with `:8443`.
 
 ## You are done
 

@@ -40,7 +40,9 @@ not have, and **(not in template)** marks a key absent from the shipped
 | Key | Type | Default | Effect and what breaks |
 |---|---|---|---|
 | `qmdl_store_path` | string | `/data/rayhunter/qmdl` | Where recordings are stored. A path on a read-only or missing mount means no recordings. |
-| `port` | integer | `8080` | Web interface port. The daemon fails to start if it cannot bind this port. |
+| `port` | integer | `8080` | Plain web interface port. While TLS is up it only redirects to `tls_port`; over USB (loopback) it serves as before. The daemon fails to start if it cannot bind this port. |
+| `tls_port` | integer | `8443` | The port the interface is served on over HTTPS, with the certificate the unit makes for itself. `0` switches TLS off, which also switches pairing off. **Fork, (not in template)** |
+| `auth_store_path` | string | `/data/rayhunter/auth` | Where the unit keeps its TLS key and certificate and the pairing records (`auth.toml`). Mode 0700. Never in a support bundle. **Fork, (not in template)** |
 | `debug_mode` | boolean | `false` | Runs without the diagnostic thread, display, or recording; the store must already exist. For development, not normal use. |
 | `device` | enum | `orbic` | Selects the display driver and device-specific paths. Written by the installer. A wrong value gives a broken display and wrong system paths. **(not in template)** |
 
@@ -116,14 +118,17 @@ are uploaded in the background once old enough.
 | `webdav.min_age_secs` | integer | `86400` | How old a recording must be before it is eligible (default one day). |
 | `webdav.delete_on_upload` | boolean | `false` | Delete the local copy after a successful upload. |
 
-## Web accounts
+## Pairing and web accounts
 
-`web_users` is a list of accounts permitted to use the interface, managed through
-the interface (not by hand) and stored in its own place rather than in the config
-snapshot. Empty means no authentication, which is the default and keeps an update
-from locking anyone out. There is no HTTPS on these devices, so accounts are a
-second factor beyond the WiFi password, not a secure channel. See [Securing the
-Web Interface](./web-authentication.md). **Fork, (not in template)**
+Which browsers may use the interface is not in this file at all. Paired
+devices and the owner passphrase live in `auth.toml` under `auth_store_path`,
+as hashes, managed from the interface. See [Securing the Web
+Interface](./web-authentication.md).
+
+`web_users` is the list of accounts from before pairing existed. They no
+longer open the interface on their own; signing in with one on the pairing
+page pairs that browser once. Remove them from the interface when every device
+has been paired. **Fork, (not in template)**
 
 ## Where to next
 
