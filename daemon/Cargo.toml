@@ -20,7 +20,7 @@ pq-tls = ["reqwest/rustls-tls-webpki-roots-no-provider", "dep:rustls-post-quantu
 apidocs = ["dep:utoipa", "wifi-station/utoipa", "rayhunter-radio/apidocs"]
 
 [dependencies]
-sha2 = "0.10"
+sha2 = { version = "0.10", features = ["oid"] }
 hmac = "0.12"
 fastrand = "2"
 base64 = "0.22"
@@ -63,7 +63,10 @@ url = "2.5.4"
 qrcodegen = "1.8"
 x509-cert = { version = "0.2.5", features = ["builder", "hazmat"] }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "pkcs8", "std"] }
-ecdsa = { version = "0.16", default-features = false, features = ["der", "signing", "verifying"] }
+# `pkcs8`/`pem` and sha2's `oid` are what the certificate builder needs to
+# name the signature algorithm and encode the public key; the RustCrypto TLS provider happened to enable
+# them, the post-quantum firmware build does not, so they are named here.
+ecdsa = { version = "0.16", default-features = false, features = ["der", "signing", "verifying", "pkcs8", "pem"] }
 der = { version = "0.7", features = ["std"] }
 const-oid = { version = "0.9", features = ["db"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12"] }
