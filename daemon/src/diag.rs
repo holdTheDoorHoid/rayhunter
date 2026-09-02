@@ -440,7 +440,18 @@ impl DiagTask {
             self.finish_current_entry(qmdl_store, Some(format!("storage changed: {reason}")))
                 .await;
         }
-        *qmdl_store = RecordingStore::open_or_recover(path).await?;
+        let new_store = match RecordingStore::open_or_recover(path).await {
+            Ok(store) => store,
+            Err(err) => {
+                // The old store is still there and still fine: carry on in
+                // it rather than leave the device silent.
+                if was_recording && let Err(e) = self.start(qmdl_store).await {
+                    error!("could not resume recording after a failed storage switch: {e}");
+                }
+                return Err(err);
+            }
+        };
+        *qmdl_store = new_store;
         info!("recordings now go to {}", path.display());
         if was_recording || !self.stopped_by_user {
             self.start(qmdl_store).await

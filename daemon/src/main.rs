@@ -572,7 +572,27 @@ async fn run_with_config(
     } else {
         storage::choose_active(&storage_config).await
     };
-    let store = init_qmdl_store(&config, &active_path).await?;
+    // A card that mounts but whose store cannot be opened must not keep the
+    // device from recording at all: fall back to internal storage and say
+    // why, and the monitor keeps trying the card.
+    let (store, active_path, removable_state) = match init_qmdl_store(&config, &active_path).await {
+        Ok(store) => (store, active_path, removable_state),
+        Err(err) if active_path != storage_config.internal => {
+            warn!(
+                "cannot open the recording store on the memory card at {}: {err}",
+                active_path.display()
+            );
+            let store = init_qmdl_store(&config, &storage_config.internal).await?;
+            (
+                store,
+                storage_config.internal.clone(),
+                storage::RemovableState::Unusable {
+                    reason: format!("cannot open its recording store: {err}"),
+                },
+            )
+        }
+        Err(err) => return Err(err),
+    };
     let storage_status = storage::initial_status(&storage_config, &active_path, removable_state);
     if let Some(event) = &storage_status.last_event {
         info!("{event}");
