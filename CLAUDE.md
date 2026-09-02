@@ -279,6 +279,18 @@ P=$(cat /tmp/rayhunter.pid); for i in $(seq 1 100); do kill -0 $P 2>/dev/null ||
 Do not use `pgrep -f rayhunter-daemon` for this from a shell: it matches the
 shell running the loop, and the loop never ends.
 
+## The TP-Link's SD slot: what not to touch
+
+Unbinding and rebinding the SD host (`7864900.sdhci` under
+`/sys/bus/platform/drivers/sdhci_msm/`) **reboots the M7350 v8.0**. It comes
+back, but nothing is learned. A card the kernel logs as
+`sdhci_msm_execute_tuning: no tuning point found` followed by
+`mmc_sd_init_card() failure (err = -5)` is failing the UHS tuning handshake
+before any filesystem is involved; formatting cannot help, and
+`/sys/kernel/debug/mmc1/max_clock` rejects writes until a card has
+initialised. Reseat the card or try a different one, ideally a non-UHS
+(class 4/10 SDHC) card.
+
 ## Simulating a memory card on the Orbic
 
 `removable_store_path` can point at any directory; the storage monitor treats
