@@ -21,13 +21,13 @@ pub async fn detect(device: &Device) -> HardwareInfo {
         ..Default::default()
     };
     info.model = read_trimmed("/proc/device-tree/model").await;
-    info.soc = match read_trimmed("/sys/devices/soc0/machine").await {
-        Some(machine) => Some(machine),
-        None => fs::read_to_string("/proc/cpuinfo")
-            .await
-            .ok()
-            .and_then(|cpuinfo| cpuinfo_hardware(&cpuinfo)),
-    };
+    // Older kernels name the machine just "Snapdragon"; cpuinfo's Hardware
+    // line then says which one.
+    let cpuinfo_soc = fs::read_to_string("/proc/cpuinfo")
+        .await
+        .ok()
+        .and_then(|cpuinfo| cpuinfo_hardware(&cpuinfo));
+    info.soc = pick_soc(read_trimmed("/sys/devices/soc0/machine").await, cpuinfo_soc);
     match device {
         Device::Tplink => {
             if let Some((model, version)) = tplink_upnpd_identity(Path::new("/proc")).await {
@@ -36,6 +36,14 @@ pub async fn detect(device: &Device) -> HardwareInfo {
                 if model.is_some() {
                     info.model = model;
                 }
+                info.hardware_version = version;
+            }
+            // Revisions whose UPnP daemon says nothing (v3) still answer
+            // the vendor's own status call on the loopback.
+            if info.hardware_version.is_none()
+                && let Some((model, version)) = tplink_web_identity().await
+            {
+                info.model = model.or(info.model);
                 info.hardware_version = version;
             }
         }
@@ -65,6 +73,64 @@ async fn read_trimmed(path: &str) -> Option<String> {
     let text = String::from_utf8_lossy(&contents);
     let text = text.trim_matches(|c: char| c == '\0' || c.is_whitespace());
     (!text.is_empty()).then(|| text.to_string())
+}
+
+/// The chipset name: the SoC's machine name when it says something, else
+/// cpuinfo's Hardware line.
+fn pick_soc(machine: Option<String>, cpuinfo: Option<String>) -> Option<String> {
+    match machine {
+        Some(machine) if machine.chars().any(|c| c.is_ascii_digit()) => Some(machine),
+        Some(machine) => cpuinfo.or(Some(machine)),
+        None => cpuinfo,
+    }
+}
+
+/// Ask the TP-Link's own web interface, on the loopback, what it is. The
+/// status call needs no login and answers on every revision seen so far.
+async fn tplink_web_identity() -> Option<(Option<String>, Option<String>)> {
+    let client = crate::http_client::client().ok()?;
+    let body = client
+        .post("http://127.0.0.1/cgi-bin/qcmap_web_cgi")
+        .timeout(std::time::Duration::from_secs(3))
+        .body(r#"{"module":"status","action":0}"#)
+        .send()
+        .await
+        .ok()?
+        .text()
+        .await
+        .ok()?;
+    let hardware = tplink_status_hardware_ver(&body)?;
+    Some(split_tplink_hardware_ver(&hardware))
+}
+
+/// `deviceInfo.hardwareVer` out of the status reply, without trusting the
+/// rest of the document to be well formed.
+fn tplink_status_hardware_ver(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    value
+        .get("deviceInfo")?
+        .get("hardwareVer")?
+        .as_str()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// `"M7350(EU) v3.0"` is a model, a region in parentheses, and a revision.
+fn split_tplink_hardware_ver(text: &str) -> (Option<String>, Option<String>) {
+    let text = text.trim();
+    let (model_part, version) = match text.rsplit_once(' ') {
+        Some((model, version)) if version.starts_with(['v', 'V']) => {
+            (model, Some(version.to_string()))
+        }
+        _ => (text, None),
+    };
+    let model = model_part
+        .split('(')
+        .next()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(str::to_string);
+    (model, version)
 }
 
 /// The `Hardware` line of `/proc/cpuinfo`, which ARM kernels use for the
@@ -183,6 +249,40 @@ mod tests {
             (Some("HW1.2".into()), Some("SW3.4".into()))
         );
         assert_eq!(wingtech_versions("nothing here\n"), (None, None));
+    }
+
+    #[test]
+    fn a_generic_machine_name_defers_to_cpuinfo() {
+        let mdm = Some("MDM9207".to_string());
+        let cpu = Some("Qualcomm MSM 9625 (Flattened Device Tree)".to_string());
+        assert_eq!(pick_soc(mdm.clone(), cpu.clone()), mdm);
+        assert_eq!(pick_soc(Some("Snapdragon".into()), cpu.clone()), cpu);
+        assert_eq!(
+            pick_soc(Some("Snapdragon".into()), None).as_deref(),
+            Some("Snapdragon")
+        );
+        assert_eq!(pick_soc(None, cpu.clone()), cpu);
+    }
+
+    #[test]
+    fn the_vendor_status_reply_names_model_and_revision() {
+        let body = r#"{"factoryDefault":false,"deviceInfo":{"productID":"73501003","model":"M7350","hardwareVer":"M7350(EU) v3.0","firmwareVer":"1.1.1 Build 160330 Rel.1002n"},"battery":{"connected":true}}"#;
+        let hardware = tplink_status_hardware_ver(body).unwrap();
+        assert_eq!(hardware, "M7350(EU) v3.0");
+        assert_eq!(
+            split_tplink_hardware_ver(&hardware),
+            (Some("M7350".into()), Some("v3.0".into()))
+        );
+        assert_eq!(
+            split_tplink_hardware_ver("M7350 v8.0"),
+            (Some("M7350".into()), Some("v8.0".into()))
+        );
+        assert_eq!(
+            split_tplink_hardware_ver("M7350"),
+            (Some("M7350".into()), None)
+        );
+        assert_eq!(tplink_status_hardware_ver("not json"), None);
+        assert_eq!(tplink_status_hardware_ver(r#"{"deviceInfo":{}}"#), None);
     }
 
     #[test]
