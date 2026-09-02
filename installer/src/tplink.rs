@@ -18,7 +18,9 @@ use serde::Deserialize;
 use tokio::time::sleep;
 
 use crate::InstallTpLink;
-use crate::connection::{TelnetConnection, install_config, setup_data_directory};
+use crate::connection::{
+    DeviceConnection, TelnetConnection, install_config, is_symlink, readlink, setup_data_directory,
+};
 use crate::output::println;
 use crate::util::{interactive_shell, telnet_send_command, telnet_send_file};
 
@@ -128,10 +130,13 @@ async fn tplink_run_install(
     println!("Connecting via telnet to {admin_ip}");
     let addr = SocketAddr::from_str(&format!("{admin_ip}:23")).unwrap();
 
-    let data_dir = if let Some(dir) = cli_data_dir {
-        dir
-    } else if skip_sdcard {
-        "/cache/rayhunter-data".to_owned()
+    // Rayhunter itself lives on internal flash either way; only recordings
+    // go to the card, and only while it is there. Earlier installers put the
+    // whole data directory on the card, which meant a pulled card took the
+    // config and the binary's home with it.
+    let data_dir = cli_data_dir.unwrap_or_else(|| "/cache/rayhunter-data".to_owned());
+    let card_store: Option<String> = if skip_sdcard {
+        None
     } else {
         if sdcard_path.is_empty() {
             let try_paths = [
@@ -180,13 +185,23 @@ async fn tplink_run_install(
             println!("sdcard already mounted");
         }
 
-        sdcard_path
+        Some(format!("{sdcard_path}/qmdl"))
     };
 
     let mut conn = TelnetConnection::new(addr, true);
+    if let Some(card_store) = &card_store {
+        migrate_card_layout(&mut conn, card_store, &data_dir).await?;
+    }
     setup_data_directory(&mut conn, &data_dir).await?;
 
-    install_config(&mut conn, "tplink", reset_config, false).await?;
+    install_config(
+        &mut conn,
+        "tplink",
+        reset_config,
+        false,
+        card_store.as_deref(),
+    )
+    .await?;
 
     let rayhunter_daemon_bin = crate::get_file!("FILE_RAYHUNTER_DAEMON");
 
@@ -198,7 +213,10 @@ async fn tplink_run_install(
     )
     .await?;
 
-    let init_script = get_rayhunter_daemon(if skip_sdcard { None } else { Some(&data_dir) });
+    let card_mount = card_store
+        .as_deref()
+        .and_then(|store| store.strip_suffix("/qmdl"));
+    let init_script = get_rayhunter_daemon(card_mount);
 
     telnet_send_file(
         addr,
@@ -371,6 +389,52 @@ async fn tplink_launch_telnet_v5(admin_ip: &str) -> Result<(), Error> {
 
     handle.abort();
 
+    Ok(())
+}
+
+/// Move an install that lived entirely on the card to the new layout.
+///
+/// Earlier installers symlinked `/data/rayhunter` at the card's mount point,
+/// so the binary, the config and the recordings all sat on the card. The
+/// recordings stay where they are (`<card>/qmdl` becomes the card store);
+/// the config and any custom GIFs are copied to internal flash, the old
+/// binary on the card is removed, and the symlink is dropped so
+/// `setup_data_directory` creates the internal directory afresh instead of
+/// trying to move a mount point.
+async fn migrate_card_layout(
+    conn: &mut TelnetConnection,
+    card_store: &str,
+    data_dir: &str,
+) -> Result<(), Error> {
+    let Some(card_mount) = card_store.strip_suffix("/qmdl") else {
+        return Ok(());
+    };
+    if !is_symlink(conn, "/data/rayhunter").await {
+        return Ok(());
+    }
+    let target = readlink(conn, "/data/rayhunter").await?;
+    if target.trim_end_matches('/') != card_mount.trim_end_matches('/') {
+        return Ok(());
+    }
+    println!(
+        "Moving Rayhunter from the card to internal flash; recordings stay on the card at {card_store}"
+    );
+    let _ = conn
+        .run_command("/etc/init.d/rayhunter_daemon stop 2>/dev/null; true")
+        .await;
+    conn.run_command(&format!("mkdir -p '{data_dir}'")).await?;
+    for name in ["config.toml", "gifs"] {
+        let _ = conn
+            .run_command(&format!(
+                "[ -e '{card_mount}/{name}' ] && cp -r '{card_mount}/{name}' '{data_dir}/' ; true"
+            ))
+            .await;
+    }
+    conn.run_command(&format!(
+        "rm -f '{card_mount}/rayhunter-daemon' '{card_mount}/rayhunter-daemon.new'"
+    ))
+    .await?;
+    conn.run_command("rm -f /data/rayhunter").await?;
     Ok(())
 }
 

@@ -27,6 +27,7 @@ pub mod server;
 pub mod sim_health;
 pub mod stats;
 pub mod stepup;
+pub mod storage;
 pub mod subscriber_id;
 pub mod timing_advance;
 pub mod tls;
@@ -55,6 +56,7 @@ use utoipa::OpenApi;
         server::get_qmdl,
         server::get_zip,
         stats::get_system_stats,
+        storage::get_storage_candidates,
         stats::get_qmdl_manifest,
         stats::get_update_status,
         stats::get_log,

@@ -1,8 +1,38 @@
 /** Whether ADB is on, and whether this device lets it be changed from here. */
 export type AdbState = { state: 'enabled' } | { state: 'disabled' } | { state: 'not_adjustable' };
 
+export type RemovableState =
+    | { state: 'not_configured' }
+    | { state: 'present' }
+    | { state: 'missing' }
+    | { state: 'unusable'; reason: string };
+
+/** Where recordings are going, and how the memory card is doing. */
+export interface StorageStatus {
+    active_path: string;
+    internal_path: string;
+    removable_path?: string;
+    removable: RemovableState;
+    using_fallback: boolean;
+    since?: string;
+    last_event?: string;
+}
+
+/** A place recordings can be stored, as offered on the settings page. */
+export interface StorageCandidate {
+    path: string;
+    kind: 'internal' | 'card' | 'other';
+    device?: string;
+    fstype?: string;
+    mounted: boolean;
+    total_bytes?: number;
+    available_bytes?: number;
+    configured: boolean;
+}
+
 export interface SystemStats {
     adb: AdbState;
+    storage: StorageStatus;
     disk_stats: DiskStats;
     memory_stats: MemoryStats;
     runtime_metadata: RuntimeMetadata;

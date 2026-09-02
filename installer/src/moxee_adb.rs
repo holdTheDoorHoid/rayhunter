@@ -134,7 +134,7 @@ pub async fn install(
     .await?;
 
     install_wifi_tools(&mut conn).await?;
-    install_config(&mut conn, "moxee", reset_config, enable_terminal).await?;
+    install_config(&mut conn, "moxee", reset_config, enable_terminal, None).await?;
 
     println!("Installing the startup scripts...");
     conn.write_file(

@@ -53,6 +53,14 @@ clock_sync_mode = 2
 min_space_to_start_recording_mb = 1
 # Minimum free space (MB) to continue recording (stops if below this)
 min_space_to_continue_recording_mb = 1
+# Where recordings go when a memory card is mounted there. While the card is
+# missing, recordings go to qmdl_store_path (internal storage) and move back
+# when it returns. Leave unset for internal storage only. The TP-Link mounts
+# its card on /media/card (hardware before v9) or /media/sdcard (v9 and later).
+# removable_store_path = "/media/card"
+# The block device to mount there when the system has not done so already.
+# Unset looks for the first SD card partition (/dev/mmcblk0p1).
+# removable_store_device = "/dev/mmcblk0p1"
 
 # WiFi Client Mode
 # Toggle wifi_enabled to connect the device to an existing WiFi network.

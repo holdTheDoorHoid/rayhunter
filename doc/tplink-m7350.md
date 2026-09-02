@@ -63,6 +63,24 @@ To get started, follow the [release installation guide](./installing-from-releas
 The Rayhunter UI will be available at <http://192.168.0.1:8080>.
 
 <a name=shell></a>
+## The memory card
+
+The installer mounts a FAT32 card on `/media/card` (hardware before v9) or
+`/media/sdcard` (v9 and later). Rayhunter itself, its config and its
+internal recording space live on the device's own flash at
+`/cache/rayhunter-data`; recordings go to the card, in a `qmdl` directory
+at its root, whenever the card is there. Earlier installers put the whole
+data directory on the card, so a pulled card took the config with it; this
+installer moves such an install to the new layout, keeping the recordings
+where they are on the card.
+
+The daemon watches the card: if it is pulled, recordings continue on
+internal storage and a Storage notification says so; when it returns, they
+move back, and a card inserted after boot is mounted by Rayhunter itself.
+The choice lives on the settings page under **Storage Management**, and
+[Recordings](./recordings.md#where-recordings-are-stored) explains the
+behaviour. `--skip-sdcard` installs for internal storage only.
+
 ## Obtaining a shell
 
 You can obtain a root shell with the following command:

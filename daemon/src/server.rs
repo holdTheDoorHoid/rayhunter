@@ -80,6 +80,8 @@ pub struct ServerState {
     pub display_override: Option<crate::display::SharedOverride>,
     pub cell_tracker: Arc<RwLock<CellTracker>>,
     pub wifi_status: Arc<RwLock<wifi_station::WifiStatus>>,
+    /// Where recordings are going, and how the memory card is doing.
+    pub storage_status: Arc<RwLock<crate::storage::StorageStatus>>,
     pub wifi_scan_lock: tokio::sync::Mutex<()>,
     pub gps_state: Arc<RwLock<Option<GpsData>>>,
     pub update_status_lock: Arc<RwLock<UpdateStatus>>,
@@ -1023,6 +1025,9 @@ pub async fn set_config(
     if let Err(msg) = config.webdav.validate() {
         return Err((StatusCode::BAD_REQUEST, msg));
     }
+    if let Err(msg) = config.validate_storage() {
+        return Err((StatusCode::BAD_REQUEST, msg));
+    }
     let mut config_to_write = config.clone();
     // Accounts are never taken from the request. The hashes are redacted on
     // the way out, so a client saving the settings page would otherwise post
@@ -1879,6 +1884,15 @@ mod tests {
             display_override: None,
             cell_tracker: Arc::new(RwLock::new(CellTracker::new())),
             wifi_status: Arc::new(RwLock::new(wifi_station::WifiStatus::default())),
+            storage_status: Arc::new(RwLock::new(crate::storage::initial_status(
+                &crate::storage::StorageConfig {
+                    internal: std::path::PathBuf::from("/tmp/rayhunter-test"),
+                    removable: None,
+                    device: None,
+                },
+                std::path::Path::new("/tmp/rayhunter-test"),
+                crate::storage::RemovableState::NotConfigured,
+            ))),
             wifi_scan_lock: tokio::sync::Mutex::new(()),
             gps_state: Arc::new(RwLock::new(None)),
             update_status_lock: Arc::new(RwLock::new(UpdateStatus::default())),

@@ -33,6 +33,7 @@
     import Explainer from './Explainer.svelte';
     import CertificateTrust from './CertificateTrust.svelte';
     import StepUpPrompt from './StepUpPrompt.svelte';
+    import StorageLocationPicker from './StorageLocationPicker.svelte';
     import { HEURISTICS } from '../heuristics';
     import { theme, type ThemePreference } from '../theme.svelte';
     import { help } from '../helpVisibility.svelte';
@@ -1241,6 +1242,9 @@
                             <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
                                 Storage Management
                             </h3>
+                            <div class="mb-4">
+                                <StorageLocationPicker bind:value={config.removable_store_path} />
+                            </div>
 
                             <div>
                                 <label
@@ -1816,6 +1820,20 @@
                                             class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
                                         >
                                             Low Battery
+                                        </label>
+                                    </div>
+                                    <div class="flex items-center">
+                                        <input
+                                            type="checkbox"
+                                            id="enable_storage_notifications"
+                                            value="Storage"
+                                            bind:group={config.enabled_notifications}
+                                        />
+                                        <label
+                                            for="enable_storage_notifications"
+                                            class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                                        >
+                                            Storage (memory card missing or back)
                                         </label>
                                     </div>
                                     <div class="flex items-center">

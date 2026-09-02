@@ -27,6 +27,9 @@ pub enum NotificationType {
     Warning,
     LowBattery,
     Update,
+    /// The memory card went missing or came back, and where recordings are
+    /// going as a result.
+    Storage,
 }
 
 pub struct Notification {

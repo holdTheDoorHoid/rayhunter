@@ -79,8 +79,10 @@ enum Command {
 
 #[derive(Parser, Debug)]
 struct InstallTpLink {
-    /// Do not enforce use of SD card. All data will be stored in /mnt/card regardless, which means
-    /// that if an SD card is later added, your existing installation is shadowed!
+    /// Install for internal storage only: no card is mounted or used, and recordings stay on the
+    /// device's own flash. Without this flag a FAT32 card is required, Rayhunter still lives on
+    /// internal flash, and recordings go to the card's `qmdl` directory whenever the card is
+    /// present.
     #[arg(long)]
     skip_sdcard: bool,
 
@@ -103,9 +105,10 @@ struct InstallTpLink {
     #[arg(long)]
     reset_config: bool,
 
-    /// Override the data directory path. Defaults to /cache/rayhunter-data (or SD card path when
-    /// SD card is used). Must not be /data/rayhunter, which lives on a storage partition that's
-    ///  too small for normal Rayhunter operation.
+    /// Override the data directory path. Defaults to /cache/rayhunter-data, which holds Rayhunter
+    /// itself, its config, and the internal recording space used while no card is present. Must
+    /// not be /data/rayhunter, which lives on a storage partition that's too small for normal
+    /// Rayhunter operation.
     #[arg(long)]
     data_dir: Option<String>,
 }

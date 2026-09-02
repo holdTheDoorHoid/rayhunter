@@ -31,7 +31,18 @@ pub async fn file_exists<C: DeviceConnection>(conn: &mut C, path: &str) -> bool 
 /// ignores keys it does not know, it is dropped without any error at all. A
 /// top-level key has to go before the first table header.
 fn set_top_level_bool(config: &str, key: &str, value: bool) -> String {
-    let assignment = format!("{key} = {value}");
+    set_top_level(config, key, &value.to_string())
+}
+
+/// Set a top-level string key, quoted as TOML, replacing an existing one or
+/// inserting it above the first table.
+fn set_top_level_string(config: &str, key: &str, value: &str) -> String {
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    set_top_level(config, key, &format!("\"{escaped}\""))
+}
+
+fn set_top_level(config: &str, key: &str, rendered: &str) -> String {
+    let assignment = format!("{key} = {rendered}");
     let mut lines: Vec<String> = config.lines().map(str::to_string).collect();
 
     // Only look above the first table header: a matching name below one belongs
@@ -67,6 +78,7 @@ pub async fn install_config<C: DeviceConnection>(
     device_type: &str,
     reset_config: bool,
     enable_terminal: bool,
+    removable_store_path: Option<&str>,
 ) -> Result<()> {
     let config_path = "/data/rayhunter/config.toml";
     if reset_config || !file_exists(conn, config_path).await {
@@ -78,7 +90,12 @@ pub async fn install_config<C: DeviceConnection>(
         // root, so the terminal is the difference between an interface that
         // reads data and one that can do anything at all; turning it on should
         // take physical access to the device.
-        let config = set_top_level_bool(&config, "terminal_enabled", enable_terminal);
+        let mut config = set_top_level_bool(&config, "terminal_enabled", enable_terminal);
+        // Where the memory card is: recordings go there while it is present
+        // and to internal storage while it is not.
+        if let Some(path) = removable_store_path {
+            config = set_top_level_string(&config, "removable_store_path", path);
+        }
         conn.write_file(config_path, config.as_bytes()).await?;
     } else {
         println!("Config file already exists, skipping (use --reset-config to overwrite)");
@@ -88,7 +105,12 @@ pub async fn install_config<C: DeviceConnection>(
         // thrown away. Absent, it turns the terminal off — whether it is on
         // should always be what was asked for at the last flash.
         let existing = conn.run_command(&format!("cat '{config_path}'")).await?;
-        let updated = set_top_level_bool(&existing, "terminal_enabled", enable_terminal);
+        let mut updated = set_top_level_bool(&existing, "terminal_enabled", enable_terminal);
+        // Likewise the card: where it mounts is a fact about this flash, so
+        // the path given now wins over whatever an earlier install wrote.
+        if let Some(path) = removable_store_path {
+            updated = set_top_level_string(&updated, "removable_store_path", path);
+        }
         if updated != existing {
             conn.write_file(config_path, updated.as_bytes()).await?;
             println!(
@@ -302,6 +324,29 @@ impl DeviceConnection for TelnetConnection {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn set_top_level_string_quotes_and_places_the_key() {
+        use super::set_top_level_string;
+        let config = "qmdl_store_path = \"/data/rayhunter/qmdl\"\n# removable_store_path = \"/media/card\"\n[analyzers]\nimsi_requested = true\n";
+        let out = set_top_level_string(config, "removable_store_path", "/media/card/qmdl");
+        let lines: Vec<&str> = out.lines().collect();
+        // Inserted above the first table, the commented example left alone.
+        assert_eq!(lines[2], "removable_store_path = \"/media/card/qmdl\"");
+        assert_eq!(lines[3], "[analyzers]");
+        // A second call replaces rather than duplicates.
+        let again = set_top_level_string(&out, "removable_store_path", "/media/sdcard/qmdl");
+        let live = |text: &str| {
+            text.lines()
+                .filter(|l| l.starts_with("removable_store_path ="))
+                .count()
+        };
+        assert_eq!(live(&again), 1);
+        assert!(again.contains("removable_store_path = \"/media/sdcard/qmdl\""));
+        // Quotes in a path are escaped rather than breaking the file.
+        let odd = set_top_level_string(config, "removable_store_path", "/media/my\"card");
+        assert!(odd.contains("removable_store_path = \"/media/my\\\"card\""));
+    }
+
     use super::set_top_level_bool;
 
     /// The bug this exists to prevent: the template ends inside `[analyzers]`,

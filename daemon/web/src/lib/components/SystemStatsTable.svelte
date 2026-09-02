@@ -1,4 +1,19 @@
 <script lang="ts">
+    import type { StorageStatus } from '$lib/systemStats';
+
+    /** One line saying where recordings go and, if it is not the card, why. */
+    function storage_line(storage: StorageStatus): string {
+        const r = storage.removable;
+        if (r.state === 'not_configured') return `internal storage (${storage.active_path})`;
+        if (r.state === 'present' && !storage.using_fallback) {
+            return `memory card (${storage.active_path})`;
+        }
+        const why =
+            r.state === 'unusable'
+                ? `memory card cannot be used: ${r.reason}`
+                : 'memory card missing';
+        return `internal storage (${storage.active_path}); ${why}. Recordings move back when it returns.`;
+    }
     import {
         type SystemStats,
         cpu_state,
@@ -121,6 +136,20 @@
                         .disk_stats.available_size} available)
                 </td>
             </tr>
+            {#if stats.storage}
+                <tr class="border-b border-gray-200 dark:border-gray-700">
+                    <td class="py-1 pr-4 text-gray-500 dark:text-gray-400 font-medium"
+                        >Recording to</td
+                    >
+                    <td
+                        class="py-1 {stats.storage.using_fallback
+                            ? 'text-yellow-700 dark:text-yellow-300'
+                            : ''}"
+                    >
+                        {storage_line(stats.storage)}
+                    </td>
+                </tr>
+            {/if}
             {#if hoursLeft !== null}
                 <tr class="border-b border-gray-200 dark:border-gray-700">
                     <td class="py-1 pr-4 text-gray-500 dark:text-gray-400 font-medium"

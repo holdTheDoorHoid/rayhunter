@@ -27,6 +27,7 @@ mod server;
 mod sim_health;
 mod stats;
 mod stepup;
+mod storage;
 mod subscriber_id;
 mod timing_advance;
 mod tls;
@@ -58,6 +59,7 @@ use crate::server::{
     set_web_user, test_notification, trigger_demo_warning,
 };
 use crate::stats::{get_qmdl_manifest, get_system_stats, get_update_status};
+use crate::storage::get_storage_candidates;
 use crate::update::{UpdateStatus, run_update_check_worker};
 use crate::webdav::run_webdav_upload_worker;
 use crate::wifi_survey::{get_wifi_rules, set_wifi_rules, wifi_survey};
@@ -94,6 +96,7 @@ fn get_router() -> AppRouter {
         .route("/api/qmdl/{name}", get(get_qmdl))
         .route("/api/zip/{name}", get(get_zip))
         .route("/api/system-stats", get(get_system_stats))
+        .route("/api/storage/candidates", get(get_storage_candidates))
         .route("/api/update-status", get(get_update_status))
         .route("/api/qmdl-manifest", get(get_qmdl_manifest))
         .route("/api/log", get(get_log))
@@ -442,45 +445,26 @@ async fn run_server(
     });
 }
 
-// Loads a RecordingStore if one exists, and if not, only create one if we're
-// not in debug mode. If we fail to parse the manifest AND we're not in debug
-// mode, try to recover the manifest from the existing QMDL files
-async fn init_qmdl_store(config: &config::Config) -> Result<RecordingStore, RayhunterError> {
-    let path = &config.qmdl_store_path;
-    let dir_exists = tokio::fs::try_exists(path)
-        .await
-        .map_err(|e| RayhunterError::from(RecordingStoreError::OpenDirError(e)))?;
-    let manifest_exists = dir_exists
-        && tokio::fs::try_exists(std::path::Path::new(path).join("manifest.toml"))
+// Opens the recording store at `path`. In debug mode the store must already
+// exist; otherwise a missing or unreadable manifest is rebuilt from the
+// recordings on disk, and a missing directory is created.
+async fn init_qmdl_store(
+    config: &config::Config,
+    path: &std::path::Path,
+) -> Result<RecordingStore, RayhunterError> {
+    if config.debug_mode {
+        let manifest_exists = tokio::fs::try_exists(path.join("manifest.toml"))
             .await
             .map_err(|e| RayhunterError::from(RecordingStoreError::ReadManifestError(e)))?;
-
-    if config.debug_mode {
         if manifest_exists {
             Ok(RecordingStore::load(path).await?)
         } else {
-            Err(RayhunterError::NoStoreDebugMode(path.clone()))
+            Err(RayhunterError::NoStoreDebugMode(
+                path.to_string_lossy().into_owned(),
+            ))
         }
-    } else if manifest_exists {
-        match RecordingStore::load(path).await {
-            Ok(store) => Ok(store),
-            Err(RecordingStoreError::ParseManifestError(err)) => {
-                error!("failed to parse QMDL manifest: {err}");
-                info!("recovering manifest from existing QMDL files...");
-                Ok(RecordingStore::recover(path).await?)
-            }
-            Err(err) => Err(err.into()),
-        }
-    } else if dir_exists {
-        // The directory is there but the manifest is not. Reconstruct it from
-        // the QMDL files on disk rather than starting fresh, which would leave
-        // existing recordings physically present but invisible to Rayhunter.
-        warn!(
-            "recording directory exists but manifest.toml is missing; recovering from QMDL files"
-        );
-        Ok(RecordingStore::recover(path).await?)
     } else {
-        Ok(RecordingStore::create(path).await?)
+        Ok(RecordingStore::open_or_recover(path).await?)
     }
 }
 
@@ -571,7 +555,29 @@ async fn run_with_config(
     let task_tracker = TaskTracker::new();
     println!("R A Y H U N T E R 🐳");
 
-    let store = init_qmdl_store(&config).await?;
+    // Recordings go to the memory card when one is configured and usable,
+    // and to internal storage otherwise; the storage monitor moves them as
+    // the card comes and goes.
+    let mut storage_config = storage::StorageConfig::from_config(&config);
+    if let Err(msg) = config.validate_storage() {
+        // A bad card path must not stop the device recording at all.
+        warn!("ignoring removable_store_path: {msg}");
+        storage_config.removable = None;
+    }
+    let (active_path, removable_state) = if config.debug_mode {
+        (
+            storage_config.internal.clone(),
+            storage::RemovableState::NotConfigured,
+        )
+    } else {
+        storage::choose_active(&storage_config).await
+    };
+    let store = init_qmdl_store(&config, &active_path).await?;
+    let storage_status = storage::initial_status(&storage_config, &active_path, removable_state);
+    if let Some(event) = &storage_status.last_event {
+        info!("{event}");
+    }
+    let storage_status = Arc::new(RwLock::new(storage_status));
     let analysis_status = AnalysisStatus::new(&store);
     let qmdl_store_lock = Arc::new(RwLock::new(store));
     let (diag_tx, diag_rx) = mpsc::channel::<DiagDeviceCtrlMessage>(1);
@@ -820,6 +826,14 @@ async fn run_with_config(
             wifi_enabled,
             hardware.clone(),
         );
+        storage::run_storage_monitor(
+            &task_tracker,
+            storage_config.clone(),
+            storage_status.clone(),
+            diag_tx.clone(),
+            notification_service.new_handler(),
+            shutdown_token.clone(),
+        );
         info!("Starting UI");
 
         let update_ui = match &config.device {
@@ -973,6 +987,7 @@ async fn run_with_config(
         display_override: Some(display_override),
         cell_tracker: cell_tracker.clone(),
         wifi_status,
+        storage_status: storage_status.clone(),
         wifi_scan_lock: tokio::sync::Mutex::new(()),
         gps_state: Arc::new(tokio::sync::RwLock::new(initial_gps)),
         update_status_lock: update_status_lock.clone(),

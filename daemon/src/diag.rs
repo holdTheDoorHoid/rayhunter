@@ -13,6 +13,7 @@ use futures::{StreamExt, TryStreamExt, future};
 use log::{debug, error, info, warn};
 use rayhunter::Device;
 use rayhunter::recording_metadata::HardwareInfo;
+use std::path::PathBuf;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use wifi_station::WifiStatus;
@@ -51,6 +52,14 @@ pub enum DiagDeviceCtrlMessage {
     /// Only reachable when demo_mode is enabled in the config.
     InjectDemo,
     StopRecording,
+    /// Move recordings to the store at `path`: close what is being recorded
+    /// (noting the reason on it), open the store there, and carry on
+    /// recording unless the user had stopped.
+    SwitchStore {
+        path: PathBuf,
+        reason: String,
+        response_tx: oneshot::Sender<Result<(), RecordingStoreError>>,
+    },
     StartRecording {
         response_tx: Option<oneshot::Sender<Result<(), RecordingStoreError>>>,
     },
@@ -96,6 +105,9 @@ pub struct DiagTask {
     max_type_seen: EventType,
     bytes_since_space_check: usize,
     low_space_warned: bool,
+    /// Whether the last stop was asked for, as opposed to forced by a full or
+    /// vanished disk. A storage switch resumes recording unless it was.
+    stopped_by_user: bool,
     latest_packet_timestamp: Option<i64>,
     /// Shared with the server so the web UI can read what the radio sees.
     cell_tracker: Arc<RwLock<CellTracker>>,
@@ -201,6 +213,7 @@ impl DiagTask {
             max_type_seen: EventType::Informational,
             bytes_since_space_check: 0,
             low_space_warned: false,
+            stopped_by_user: false,
             latest_packet_timestamp: None,
         }
     }
@@ -410,6 +423,29 @@ impl DiagTask {
         }
         if let Err(e) = qmdl_store.close_current_entry().await {
             error!("couldn't close current entry: {e}");
+        }
+    }
+
+    /// Move to the store at `path`: finish what is being recorded, with the
+    /// reason noted on it, open the store there, and carry on recording
+    /// unless the user had stopped recording.
+    async fn switch_store(
+        &mut self,
+        qmdl_store: &mut RecordingStore,
+        path: &std::path::Path,
+        reason: String,
+    ) -> Result<(), RecordingStoreError> {
+        let was_recording = matches!(self.state, DiagState::Recording { .. });
+        if was_recording {
+            self.finish_current_entry(qmdl_store, Some(format!("storage changed: {reason}")))
+                .await;
+        }
+        *qmdl_store = RecordingStore::open_or_recover(path).await?;
+        info!("recordings now go to {}", path.display());
+        if was_recording || !self.stopped_by_user {
+            self.start(qmdl_store).await
+        } else {
+            Ok(())
         }
     }
 
@@ -1011,6 +1047,7 @@ pub fn run_diag_read_thread(
                     match msg {
                         Some(DiagDeviceCtrlMessage::StartRecording { response_tx }) => {
                             let mut qmdl_store = qmdl_store_lock.write().await;
+                            diag_task.stopped_by_user = false;
                             let result = diag_task.start(qmdl_store.deref_mut()).await;
                             // Logged whether or not anybody is waiting for the
                             // answer. Recording started at boot and by the
@@ -1026,7 +1063,16 @@ pub fn run_diag_read_thread(
                         },
                         Some(DiagDeviceCtrlMessage::StopRecording) => {
                             let mut qmdl_store = qmdl_store_lock.write().await;
+                            diag_task.stopped_by_user = true;
                             diag_task.stop(qmdl_store.deref_mut(), None).await;
+                        },
+                        Some(DiagDeviceCtrlMessage::SwitchStore { path, reason, response_tx }) => {
+                            let mut qmdl_store = qmdl_store_lock.write().await;
+                            let result = diag_task.switch_store(qmdl_store.deref_mut(), &path, reason).await;
+                            if let Err(err) = &result {
+                                error!("could not move recordings to {}: {err}", path.display());
+                            }
+                            response_tx.send(result).ok();
                         },
                         Some(DiagDeviceCtrlMessage::InjectDemo) => {
                             // Fed through exactly the path a real container

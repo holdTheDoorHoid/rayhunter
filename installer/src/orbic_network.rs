@@ -256,7 +256,7 @@ async fn setup_rayhunter(
 
     install_wifi_tools(&mut conn).await?;
 
-    install_config(&mut conn, "orbic", reset_config, enable_terminal).await?;
+    install_config(&mut conn, "orbic", reset_config, enable_terminal, None).await?;
 
     telnet_send_file(
         addr,

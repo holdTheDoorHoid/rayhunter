@@ -166,6 +166,15 @@ pub fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
 pub struct Config {
     /// Path to store QMDL files
     pub qmdl_store_path: String,
+    /// Where recordings go when a memory card (or other removable storage)
+    /// is mounted there. While it is missing, recordings fall back to
+    /// `qmdl_store_path`, and move back when it returns. `None` means
+    /// internal storage only.
+    pub removable_store_path: Option<String>,
+    /// The block device to mount at `removable_store_path` when the system
+    /// has not mounted it already. `None` looks for the first SD card
+    /// partition.
+    pub removable_store_device: Option<String>,
     /// Where the modem's diagnostic character device lives.
     ///
     /// `None` uses `/dev/diag`, which is right on every device Rayhunter
@@ -444,6 +453,8 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             qmdl_store_path: "/data/rayhunter/qmdl".to_string(),
+            removable_store_path: None,
+            removable_store_device: None,
             diag_device_path: None,
             port: 8080,
             debug_mode: false,
@@ -485,7 +496,11 @@ impl Default for Config {
             wifi_ap_off_minutes: 60,
             analyzers: AnalyzerConfig::default(),
             ntfy_url: None,
-            enabled_notifications: vec![NotificationType::Warning, NotificationType::LowBattery],
+            enabled_notifications: vec![
+                NotificationType::Warning,
+                NotificationType::LowBattery,
+                NotificationType::Storage,
+            ],
             auto_check_updates: true,
             clock_sync_mode: ClockSyncMode::Prompt,
             min_space_to_start_recording_mb: 1,
@@ -512,6 +527,27 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Check the storage settings make sense: a card path, when given, is
+    /// absolute and is not the internal storage path itself.
+    pub fn validate_storage(&self) -> Result<(), String> {
+        if let Some(removable) = self.removable_store_path.as_deref().map(str::trim)
+            && !removable.is_empty()
+        {
+            if !removable.starts_with('/') {
+                return Err(format!(
+                    "removable_store_path must be an absolute path, got {removable}"
+                ));
+            }
+            if removable.trim_end_matches('/') == self.qmdl_store_path.trim_end_matches('/') {
+                return Err(
+                    "removable_store_path must differ from qmdl_store_path (internal storage)"
+                        .to_string(),
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// Where to open the modem's diagnostic device.
     ///
     /// Falls back to the usual node when unset, so an existing config keeps

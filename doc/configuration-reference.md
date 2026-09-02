@@ -40,6 +40,8 @@ not have, and **(not in template)** marks a key absent from the shipped
 | Key | Type | Default | Effect and what breaks |
 |---|---|---|---|
 | `qmdl_store_path` | string | `/data/rayhunter/qmdl` | Where recordings are stored. A path on a read-only or missing mount means no recordings. |
+| `removable_store_path` | string or unset | unset | **Fork.** Where recordings go when a memory card is mounted there. While the card is missing or unusable, recordings go to `qmdl_store_path` and move back when it returns; a Storage notification says so each way. Must be absolute and differ from `qmdl_store_path`. Chosen on the settings page under Storage Management. |
+| `removable_store_device` | string or unset | unset | **Fork.** The block device Rayhunter mounts at `removable_store_path` when the system has not mounted it already. Unset looks for the first SD card partition (`/dev/mmcblk0p1`). |
 | `port` | integer | `8080` | Plain web interface port. While TLS is up it only redirects to `tls_port`; over USB (loopback) it serves as before. The daemon fails to start if it cannot bind this port. |
 | `tls_port` | integer | `8443` | The port the interface is served on over HTTPS, with the certificate the unit makes for itself. `0` switches TLS off, which also switches pairing off. **Fork, (not in template)** |
 | `front_door_address` | string | unset | The second address the unit takes on its hotspot so `rayhunter.local` works without a port. Unset means `.254` at the top of the hotspot's network; an address of your own choosing, or `off` to leave the hotspot address alone (the name then needs `:8443`). **Fork, (not in template)** |
@@ -86,7 +88,7 @@ not have, and **(not in template)** marks a key absent from the shipped
 | Key | Type | Default | Effect |
 |---|---|---|---|
 | `ntfy_url` | string | unset | If set, sends a push notification to this ntfy URL on a new warning. |
-| `enabled_notifications` | list | `["Warning", "LowBattery"]` | Which notification types fire (does nothing without `ntfy_url`). |
+| `enabled_notifications` | list | `["Warning", "LowBattery", "Storage"]` | Which notification types fire (does nothing without `ntfy_url`). `Storage` (**Fork**) reports the memory card going missing or coming back and where recordings are going as a result; configs written before it existed do not list it, so add it to receive those. |
 | `auto_check_updates` | boolean | see note | Periodically check GitHub for new releases and show a notice. **Note:** the code default is `true`, but the shipped template sets `false`, so a config missing the key gets update checks; this discrepancy is unresolved. |
 | `clock_sync_mode` | integer | `2` | Clock-drift handling: 0 off, 1 autosync silently, 2 prompt. The offset is kept in memory only and lost on restart. |
 

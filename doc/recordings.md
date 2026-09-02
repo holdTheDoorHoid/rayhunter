@@ -70,6 +70,30 @@ being asked is not something to do quietly, however good the reason.
 The practical rule: **if a recording matters, name it.** A name both labels it
 and shields it from cleanup.
 
+## Where recordings are stored
+
+Recordings go to the device's internal storage unless you choose a memory
+card on the settings page, under **Storage Management**. The page lists the
+internal storage and every card it can see, with the free space on each, and
+takes a path of your own for anything it cannot see. The TP-Link is the
+device this is for: its own flash holds an hour or two of recording, a card
+holds weeks.
+
+A card can be pulled at any moment, or not be there when the device starts.
+Rayhunter checks it every few seconds. While the card is missing, or is
+there but cannot be written, recordings go to internal storage; when it
+returns, they move back. Each change closes the recording in progress, noting
+the reason on it, opens a fresh one in the new place, and sends a **Storage**
+notification if you have notifications set up. The System Information panel
+says where recordings are going right now, and why, if it is not the card.
+
+Two things follow from this that are worth knowing. The recordings list shows
+what is in the place recordings are currently going: while the card is out,
+the recordings on it are not listed, and the ones made meanwhile stay on
+internal storage when the card comes back. And Rayhunter mounts the card
+itself if the system has not, so a card inserted after boot is picked up
+without a restart.
+
 ## Downloading and sharing
 
 Recordings download as a bundle containing the raw capture, its analysis, and

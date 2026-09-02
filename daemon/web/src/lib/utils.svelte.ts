@@ -23,6 +23,7 @@ export enum enabled_notifications {
     Warning = 'Warning',
     LowBattery = 'LowBattery',
     Update = 'Update',
+    Storage = 'Storage',
 }
 
 export interface WebdavConfig {
@@ -161,6 +162,10 @@ export interface Config {
     analyzers: AnalyzerConfig;
     min_space_to_start_recording_mb: number;
     min_space_to_continue_recording_mb: number;
+    /** Where recordings go when a memory card is mounted there; null for internal only. */
+    removable_store_path: string | null;
+    /** The block device to mount there when the system has not; null looks for the first SD card. */
+    removable_store_device: string | null;
     /** Remove recordings that found nothing when space runs low. */
     auto_delete_clean_recordings: boolean;
     /** Start a new recording at this size. Null or 0 keeps one running. */

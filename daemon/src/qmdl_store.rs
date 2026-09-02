@@ -12,7 +12,7 @@ static ENTRY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 use crate::config::GpsMode;
 use chrono::{DateTime, Local, TimeDelta};
-use log::{info, warn};
+use log::{error, info, warn};
 use rayhunter::util::RuntimeMetadata;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -261,6 +261,43 @@ impl RecordingStore {
     // QMDL files. We expect these files to be named like "<timestamp>.qmdl"
     // or "<timestamp>.qmdl.gz", and skip any files which don't match that
     // pattern.
+    /// Open the store at `path`: load its manifest, rebuild the manifest from
+    /// the recordings on disk when it is missing or unreadable, or create a
+    /// fresh store when there is nothing there yet.
+    pub async fn open_or_recover<P: AsRef<Path>>(path: P) -> Result<Self, RecordingStoreError> {
+        let path = path.as_ref();
+        let dir_exists = tokio::fs::try_exists(path)
+            .await
+            .map_err(RecordingStoreError::OpenDirError)?;
+        let manifest_exists = dir_exists
+            && tokio::fs::try_exists(path.join("manifest.toml"))
+                .await
+                .map_err(RecordingStoreError::ReadManifestError)?;
+        if manifest_exists {
+            match Self::load(path).await {
+                Ok(store) => Ok(store),
+                Err(RecordingStoreError::ParseManifestError(err)) => {
+                    error!("failed to parse QMDL manifest: {err}");
+                    info!("recovering manifest from existing QMDL files...");
+                    Self::recover(path).await
+                }
+                Err(err) => Err(err),
+            }
+        } else if dir_exists {
+            // The directory is there but the manifest is not. Reconstruct it
+            // from the QMDL files on disk rather than starting fresh, which
+            // would leave existing recordings physically present but
+            // invisible to Rayhunter.
+            warn!(
+                "recording directory {} exists but manifest.toml is missing; recovering from QMDL files",
+                path.display()
+            );
+            Self::recover(path).await
+        } else {
+            Self::create(path).await
+        }
+    }
+
     pub async fn recover<P>(path: P) -> Result<Self, RecordingStoreError>
     where
         P: AsRef<Path>,

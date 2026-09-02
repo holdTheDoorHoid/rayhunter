@@ -35,12 +35,19 @@ pub struct SystemStats {
     /// currently doing. The setting that asks for a change is separate, and
     /// only takes effect at the next restart.
     pub adb: crate::adb_control::AdbState,
+    /// Where recordings are going, and how the memory card is doing.
+    pub storage: crate::storage::StorageStatus,
 }
 
 impl SystemStats {
-    pub async fn new(qmdl_path: &str, device: &Device) -> Result<Self, String> {
+    pub async fn new(
+        qmdl_path: &str,
+        device: &Device,
+        storage: crate::storage::StorageStatus,
+    ) -> Result<Self, String> {
         Ok(Self {
             adb: crate::adb_control::current_state(),
+            storage,
             disk_stats: DiskStats::new(qmdl_path)?,
             memory_stats: MemoryStats::new(device).await?,
             runtime_metadata: RuntimeMetadata::new(),
@@ -428,7 +435,14 @@ pub async fn get_system_stats(
     State(state): State<Arc<ServerState>>,
 ) -> Result<Json<SystemStats>, (StatusCode, String)> {
     let qmdl_store = state.qmdl_store_lock.read().await;
-    match SystemStats::new(qmdl_store.path.to_str().unwrap(), &state.config.device).await {
+    let storage = state.storage_status.read().await.clone();
+    match SystemStats::new(
+        qmdl_store.path.to_str().unwrap(),
+        &state.config.device,
+        storage,
+    )
+    .await
+    {
         Ok(stats) => Ok(Json(stats)),
         Err(err) => {
             error!("error getting system stats: {err}");
