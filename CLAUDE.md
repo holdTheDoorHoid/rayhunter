@@ -330,6 +330,13 @@ exploit and must be repeated after every boot; the port-trigger persistence
 that keeps telnet up on the v8.0 does not exist there. Rayhunter itself does
 start at boot on it.
 
+Its firmware unmounts the card about 90 s after boot (the daemon remounts it
+and restarts recording), and its admin HTTP server answers only on the LAN
+address, never on 127.0.0.1, which is why the hardware detection tries every
+own address for the status call. Busybox `wget --post-data` percent-encodes
+the body, so it cannot be used to test that CGI from the device; use curl
+from the host instead.
+
 ## Simulating a card removal on the TP-Link
 
 The slot is under the battery, so the card cannot be pulled while running.
