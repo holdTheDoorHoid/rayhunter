@@ -308,7 +308,9 @@ ten seconds before `kill -9`. `pidof rayhunter-daemon | wc -w` should be 1.
 Its root shell is telnet on 192.168.0.1:23 with no login. A runner that
 returns just the command's output lives in the session scratchpad as
 `tp.py`; the trick is to send `echo __BE""G__; <cmd>; echo __EN""D__ $?` so
-the echoed command line does not contain the markers the output does. Since
+the echoed command line does not contain the markers the output does. Keep
+each command under about 800 characters: the shell's line editing wraps and
+mangles longer ones, and the runner then prints the raw echo instead. Since
 the fork's pairing landed, `http://192.168.0.1:8080/api/...` from the host is
 refused until a browser is paired; go through the device's own loopback
 instead: `wget -q -O - http://127.0.0.1:8080/api/system-stats`.
