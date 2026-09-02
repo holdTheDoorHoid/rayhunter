@@ -43,6 +43,7 @@ pub enum StepUpError {
     WrongCode { attempts_left: u8 },
     #[error("too many wrong codes; start again")]
     TooManyWrong,
+    #[allow(dead_code)]
     #[error("this browser did not start the step-up")]
     NotYours,
 }
@@ -73,7 +74,9 @@ pub struct StepUpDisplay {
 }
 
 pub struct StepUp {
-    pending: Mutex<Option<Pending>>,
+    /// One waiting code per browser, so one person starting a step-up does
+    /// not throw away another's. A button press confirms the newest.
+    pending: Mutex<HashMap<String, Pending>>,
     windows: Mutex<HashMap<String, Window>>,
     display: Option<StepUpDisplay>,
 }
@@ -90,7 +93,7 @@ fn new_code() -> String {
 impl StepUp {
     pub fn new(display: Option<StepUpDisplay>) -> Self {
         Self {
-            pending: Mutex::new(None),
+            pending: Mutex::new(HashMap::new()),
             windows: Mutex::new(HashMap::new()),
             display,
         }
@@ -109,12 +112,16 @@ impl StepUp {
         }
         {
             let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
-            *pending = Some(Pending {
-                device_id: device_id.to_string(),
-                code: code.clone(),
-                started: Instant::now(),
-                wrong: 0,
-            });
+            pending.retain(|_, p| p.started.elapsed() < CODE_TTL);
+            pending.insert(
+                device_id.to_string(),
+                Pending {
+                    device_id: device_id.to_string(),
+                    code: code.clone(),
+                    started: Instant::now(),
+                    wrong: 0,
+                },
+            );
         }
         match &self.display {
             Some(d) => {
@@ -126,26 +133,34 @@ impl StepUp {
         Ok(CODE_TTL)
     }
 
+    /// Apply `check` to the pending request for `device_id` (or, with
+    /// `None`, the newest one) and consume it on success or after too many
+    /// wrong codes.
     fn take_pending_if(
         &self,
+        device_id: Option<&str>,
         check: impl FnOnce(&mut Pending) -> Result<(), StepUpError>,
     ) -> Result<String, StepUpError> {
         let mut guard = self.pending.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(p) = guard.as_mut() else {
+        guard.retain(|_, p| p.started.elapsed() < CODE_TTL);
+        let key = match device_id {
+            Some(id) => id.to_string(),
+            None => guard
+                .values()
+                .max_by_key(|p| p.started)
+                .map(|p| p.device_id.clone())
+                .ok_or(StepUpError::NoPending)?,
+        };
+        let Some(p) = guard.get_mut(&key) else {
             return Err(StepUpError::NoPending);
         };
-        if p.started.elapsed() >= CODE_TTL {
-            *guard = None;
-            return Err(StepUpError::Expired);
-        }
         match check(p) {
             Ok(()) => {
-                let id = p.device_id.clone();
-                *guard = None;
-                Ok(id)
+                guard.remove(&key);
+                Ok(key)
             }
             Err(StepUpError::TooManyWrong) => {
-                *guard = None;
+                guard.remove(&key);
                 Err(StepUpError::TooManyWrong)
             }
             Err(e) => Err(e),
@@ -174,10 +189,7 @@ impl StepUp {
     /// The code typed at the browser. Three wrong ones end the attempt.
     pub fn confirm(&self, device_id: &str, code: &str) -> Result<Duration, StepUpError> {
         let code: String = code.chars().filter(|c| c.is_ascii_digit()).collect();
-        let owner = self.take_pending_if(|p| {
-            if p.device_id != device_id {
-                return Err(StepUpError::NotYours);
-            }
+        let owner = self.take_pending_if(Some(device_id), |p| {
             if crate::pairing::ct_eq(p.code.as_bytes(), code.as_bytes()) {
                 return Ok(());
             }
@@ -197,7 +209,7 @@ impl StepUp {
     /// This is the whole path on a unit with no screen, and works on the
     /// others too.
     pub fn button_pressed(&self) -> bool {
-        match self.take_pending_if(|_| Ok(())) {
+        match self.take_pending_if(None, |_| Ok(())) {
             Ok(owner) => {
                 self.open_window(owner);
                 true
@@ -285,7 +297,8 @@ mod tests {
         s.pending
             .lock()
             .unwrap()
-            .as_ref()
+            .values()
+            .max_by_key(|p| p.started)
             .map(|p| p.code.clone())
             .unwrap()
     }
@@ -302,9 +315,12 @@ mod tests {
 
         assert_eq!(
             s.confirm("laptop", &code),
-            Err(StepUpError::NotYours),
-            "another browser cannot claim it"
+            Err(StepUpError::NoPending),
+            "another browser has nothing waiting and cannot claim it"
         );
+        // Another browser starting its own does not disturb the first.
+        s.start("laptop").unwrap();
+        assert_eq!(s.pending.lock().unwrap().len(), 2);
         assert!(matches!(
             s.confirm("phone", "wrong"),
             Err(StepUpError::WrongCode { attempts_left: 2 })

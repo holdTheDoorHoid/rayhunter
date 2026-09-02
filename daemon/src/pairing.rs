@@ -22,7 +22,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
@@ -155,6 +155,10 @@ pub enum PairError {
     NoCode,
     #[error("nobody pressed the button in time")]
     NotPressed,
+    #[error("another pairing request is already waiting for the button; try again in {0} seconds")]
+    PressPending(u64),
+    #[error("this unit already trusts {MAX_DEVICES} devices; remove one first")]
+    TooManyDevices,
     #[error("could not save: {0}")]
     Storage(String),
 }
@@ -230,6 +234,15 @@ pub struct Pairing {
     display: Option<SetupDisplay>,
     pair_code: Mutex<Option<PairCode>>,
     press: Mutex<Option<PressRequest>>,
+    /// Held for the whole of first contact, from checking the token to the
+    /// record being saved, so two requests with the same token cannot both
+    /// finish: the second waits, then finds the unit owned.
+    setup_lock: tokio::sync::Mutex<()>,
+    /// Where the server certificate's fingerprint comes from, for showing
+    /// on the screen beside the code. Set once TLS is up.
+    fingerprint: Mutex<Option<Arc<dyn Fn() -> String + Send + Sync>>>,
+    /// Whether the screen is showing the fingerprint rather than the code.
+    showing_fingerprint: Mutex<bool>,
 }
 
 /// A code minted from a trusted browser for adding another.
@@ -238,6 +251,12 @@ pub const MAX_CODE_ATTEMPTS: u8 = 5;
 /// How long a "press the button" request waits for the press, and how long
 /// an approved one stays good for finishing setup.
 pub const PRESS_WINDOW: Duration = Duration::from_secs(30);
+/// The most browsers a unit will trust at once. Plenty for a household;
+/// a bound on what a leaked passphrase can fill the store with.
+pub const MAX_DEVICES: usize = 32;
+/// How long the certificate fingerprint stays on the screen after a button
+/// press, before the setup code comes back.
+pub const FINGERPRINT_VIEW: Duration = Duration::from_secs(15);
 
 struct PairCode {
     code: String,
@@ -397,7 +416,15 @@ impl Pairing {
             display,
             pair_code: Mutex::new(None),
             press: Mutex::new(None),
+            setup_lock: tokio::sync::Mutex::new(()),
+            fingerprint: Mutex::new(None),
+            showing_fingerprint: Mutex::new(false),
         })
+    }
+
+    /// Tell the pairing side where the certificate fingerprint comes from.
+    pub fn set_fingerprint_source(&self, source: Arc<dyn Fn() -> String + Send + Sync>) {
+        *self.fingerprint.lock().unwrap_or_else(|e| e.into_inner()) = Some(source);
     }
 
     /// A store that is never written. For tests, and for a unit that cannot
@@ -412,6 +439,9 @@ impl Pairing {
             display,
             pair_code: Mutex::new(None),
             press: Mutex::new(None),
+            setup_lock: tokio::sync::Mutex::new(()),
+            fingerprint: Mutex::new(None),
+            showing_fingerprint: Mutex::new(false),
         }
     }
 
@@ -566,11 +596,64 @@ impl Pairing {
         device_name: Option<&str>,
         user_agent: &str,
     ) -> Result<IssuedDevice, PairError> {
+        let _one_at_a_time = self.setup_lock.lock().await;
         if self.state.read().await.setup_complete {
             return Err(PairError::AlreadyComplete);
         }
         self.check_setup_token(token)?;
         self.finish_setup(passphrase, device_name, user_agent).await
+    }
+
+    /// Put the server certificate's fingerprint on the screen for a moment,
+    /// for anyone who wants to compare it with what their browser shows
+    /// before typing anything. The code comes back by itself.
+    fn show_fingerprint(self: &Arc<Self>) -> bool {
+        let Some(display) = &self.display else {
+            return false;
+        };
+        let source = self
+            .fingerprint
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let Some(source) = source else {
+            return false;
+        };
+        let fp = source();
+        // Sixteen bytes in four lines is enough to compare by eye; the
+        // browser shows all thirty-two.
+        let bytes: Vec<&str> = fp.split(':').collect();
+        let line = |from: usize| {
+            bytes
+                .get(from..from + 4)
+                .map(|b| format!("{}{} {}{}", b[0], b[1], b[2], b[3]))
+                .unwrap_or_default()
+        };
+        let lines = [
+            ("CERTIFICATE".to_string(), 1u32),
+            (line(0), 2),
+            (line(4), 2),
+            (line(8), 2),
+            (line(12), 2),
+        ];
+        let refs: Vec<(&str, u32)> = lines.iter().map(|(s, sc)| (s.as_str(), *sc)).collect();
+        let px = qr::text_screen(&refs, display.screen);
+        display.override_.show(px, FINGERPRINT_VIEW);
+        *self
+            .showing_fingerprint
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = true;
+        let me = self.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(FINGERPRINT_VIEW).await;
+            *me.showing_fingerprint
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = false;
+            if let Some((token, _)) = me.setup_window() {
+                me.show_code(&token);
+            }
+        });
+        true
     }
 
     /// Ask to be paired by a press of the unit's button, for a unit with no
@@ -586,6 +669,17 @@ impl Pairing {
         let id = hex(&raw);
         {
             let mut press = self.press.lock().unwrap_or_else(|e| e.into_inner());
+            // One at a time. A request that is still waiting for the press
+            // is not replaced by a newer one, so nobody on the WiFi can keep
+            // the screen flashing or shove the real request aside.
+            if let Some(p) = press.as_ref() {
+                let age = p.created.elapsed();
+                if age < PRESS_WINDOW {
+                    return Err(PairError::PressPending(
+                        (PRESS_WINDOW - age).as_secs().max(1),
+                    ));
+                }
+            }
             *press = Some(PressRequest {
                 id: id.clone(),
                 created: Instant::now(),
@@ -622,8 +716,10 @@ impl Pairing {
     ///
     /// Approves a waiting press request, and on a unit with no owner opens
     /// the setup window again. Both are the same statement: whoever pressed
-    /// the button is holding the unit.
-    pub async fn button_pressed(&self) {
+    /// the button is holding the unit. While the window is already open, a
+    /// press shows the certificate fingerprint for a moment instead, so the
+    /// person can check the browser is talking to this unit.
+    pub async fn button_pressed(self: &Arc<Self>) {
         let approved = {
             let mut press = self.press.lock().unwrap_or_else(|e| e.into_inner());
             match press.as_mut() {
@@ -643,8 +739,31 @@ impl Pairing {
             }
             return;
         }
+        let window_open = self.setup_window().is_some();
+        let showing = *self
+            .showing_fingerprint
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if window_open && !showing && self.show_fingerprint() {
+            info!("button press: showing the certificate fingerprint");
+            // The window's clock restarts too, as any press would.
+            let _ = self.open_setup_window_silently().await;
+            return;
+        }
         if self.open_setup_window().await.is_ok() {
             info!("button press re-armed the setup window");
+        }
+    }
+
+    /// Give an open window its full time again without touching the screen.
+    async fn open_setup_window_silently(&self) -> Result<(), PairError> {
+        let mut guard = self.setup.lock().unwrap_or_else(|e| e.into_inner());
+        match guard.as_mut() {
+            Some(w) if !w.expired() => {
+                w.opened = Instant::now();
+                Ok(())
+            }
+            _ => Err(PairError::WindowClosed),
         }
     }
 
@@ -656,6 +775,7 @@ impl Pairing {
         device_name: Option<&str>,
         user_agent: &str,
     ) -> Result<IssuedDevice, PairError> {
+        let _one_at_a_time = self.setup_lock.lock().await;
         if self.state.read().await.setup_complete {
             return Err(PairError::AlreadyComplete);
         }
@@ -694,7 +814,7 @@ impl Pairing {
         if new.chars().count() < MIN_PASSPHRASE_LEN || new.len() > web_auth::MAX_PASSWORD_LEN {
             return Err(PairError::PassphraseTooShort);
         }
-        let hash = hash_off_thread(new.to_string()).await;
+        let hash = hash_off_thread(new.to_string()).await?;
         let mut state = self.state.write().await;
         state.owner_passphrase_hash = Some(hash);
         self.save(&state).await?;
@@ -773,9 +893,14 @@ impl Pairing {
         if passphrase.len() > web_auth::MAX_PASSWORD_LEN {
             return Err(PairError::PassphraseTooShort);
         }
-        let hash = hash_off_thread(passphrase.to_string()).await;
+        let hash = hash_off_thread(passphrase.to_string()).await?;
 
         let mut state = self.state.write().await;
+        // Checked again with the lock held: the answer above was a moment
+        // ago, and first contact must happen exactly once.
+        if state.setup_complete || !state.devices.is_empty() {
+            return Err(PairError::AlreadyComplete);
+        }
         let issued = add_device(&mut state, device_name, user_agent)?;
         state.owner_passphrase_hash = Some(hash);
         state.setup_complete = true;
@@ -824,7 +949,7 @@ impl Pairing {
         let users = users.to_vec();
         let users_for_check = users.clone();
         let (username_owned, password_owned) = (username.to_string(), password.to_string());
-        let valid = tokio::task::spawn_blocking(move || {
+        let valid = web_auth::kdf(move || {
             web_auth::credentials_are_valid(&users_for_check, &username_owned, &password_owned)
         })
         .await
@@ -971,6 +1096,9 @@ fn add_device(
     device_name: Option<&str>,
     user_agent: &str,
 ) -> Result<IssuedDevice, PairError> {
+    if state.devices.len() >= MAX_DEVICES {
+        return Err(PairError::TooManyDevices);
+    }
     let (cookie_value, token_sha256, id) = issue_token()?;
     let name = device_name
         .map(str::trim)
@@ -995,14 +1123,14 @@ fn add_device(
 
 /// PBKDF2 is slow by design and this runtime has one thread; hashing inline
 /// would stall every other request for the duration.
-async fn hash_off_thread(passphrase: String) -> String {
-    tokio::task::spawn_blocking(move || web_auth::hash_password(&passphrase))
+async fn hash_off_thread(passphrase: String) -> Result<String, PairError> {
+    web_auth::kdf(move || web_auth::hash_password(&passphrase))
         .await
-        .expect("hashing does not panic")
+        .ok_or_else(|| PairError::Storage("hashing was interrupted".into()))
 }
 
 async fn verify_off_thread(passphrase: String, hash: String) -> bool {
-    tokio::task::spawn_blocking(move || web_auth::verify_password(&passphrase, &hash))
+    web_auth::kdf(move || web_auth::verify_password(&passphrase, &hash))
         .await
         .unwrap_or(false)
 }
@@ -1066,6 +1194,79 @@ mod tests {
             Err(PairError::AlreadyComplete)
         );
         assert_eq!(p.open_setup_window().await, Err(PairError::AlreadyComplete));
+    }
+
+    /// First contact happens exactly once, whatever arrives at the same
+    /// moment: a double tap, a retry, or somebody racing the owner with the
+    /// same token. One device, one passphrase, the rest refused.
+    #[tokio::test]
+    async fn concurrent_completions_yield_exactly_one_owner() {
+        let p = std::sync::Arc::new(fresh());
+        let token = p.open_setup_window().await.unwrap();
+        let mut tasks = Vec::new();
+        for i in 0..20 {
+            let p = p.clone();
+            let token = token.clone();
+            tasks.push(tokio::spawn(async move {
+                p.complete_setup(&token, &format!("passphrase number {i}"), None, UA)
+                    .await
+            }));
+        }
+        let mut winners = 0;
+        for t in tasks {
+            if let Ok(Ok(_)) = t.await {
+                winners += 1;
+            }
+        }
+        assert_eq!(winners, 1, "exactly one completion may succeed");
+        assert_eq!(p.device_count().await, 1);
+        let mut working = 0;
+        for i in 0..20 {
+            p.note_success();
+            if p.pair_with_passphrase(&format!("passphrase number {i}"), None, UA)
+                .await
+                .is_ok()
+            {
+                working += 1;
+            }
+        }
+        assert_eq!(working, 1, "only the winner's passphrase is in force");
+    }
+
+    #[tokio::test]
+    async fn a_press_request_is_not_replaced_while_it_waits() {
+        let p = fresh();
+        let first = p.request_press().await.unwrap();
+        assert!(matches!(
+            p.request_press().await,
+            Err(PairError::PressPending(_))
+        ));
+        assert_eq!(
+            p.press_status(&first),
+            Some(false),
+            "the first is still the one"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_unit_stops_trusting_new_devices_at_the_cap() {
+        let p = fresh();
+        let token = p.open_setup_window().await.unwrap();
+        p.complete_setup(&token, "correct horse", None, UA)
+            .await
+            .unwrap();
+        // Codes rather than the passphrase: no key derivation per device,
+        // so the test stays quick.
+        for _ in 1..MAX_DEVICES {
+            let (code, _) = p.mint_code().unwrap();
+            p.pair_with_code(&code, None, UA).await.unwrap();
+        }
+        let (code, _) = p.mint_code().unwrap();
+        assert_eq!(
+            p.pair_with_code(&code, None, UA).await,
+            Err(PairError::TooManyDevices)
+        );
+        assert_eq!(p.device_count().await, MAX_DEVICES);
     }
 
     #[tokio::test]
@@ -1389,7 +1590,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_button_press_pairs_the_browser_that_asked_and_nobody_later() {
-        let p = fresh();
+        let p = std::sync::Arc::new(fresh());
         assert_eq!(
             p.complete_setup_by_press("nope", "correct horse", None, UA)
                 .await,

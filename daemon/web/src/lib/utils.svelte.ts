@@ -319,6 +319,7 @@ export async function set_config(config: Config): Promise<void> {
         body: JSON.stringify(config),
     });
 
+    if (response.status === 428) throw new StepUpRequired();
     if (!response.ok) {
         const error = await response.text();
         throw new Error(error);

@@ -25,6 +25,34 @@ use tokio::process::Command;
 /// the Qualcomm mobileap units), and .255 is the broadcast address.
 pub const ALIAS_HOST: u8 = 254;
 
+/// What the setting asks for: the automatic address, one of the owner's
+/// choosing, or none at all.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FrontDoorChoice {
+    Automatic,
+    Fixed(Ipv4Addr),
+    Off,
+}
+
+/// Read the `front_door_address` setting. Anything unparseable is treated
+/// as automatic, with a warning, rather than silently leaving the name
+/// pointing at the hotspot's admin page.
+pub fn choice(setting: Option<&str>) -> FrontDoorChoice {
+    match setting.map(str::trim) {
+        None | Some("") | Some("auto") => FrontDoorChoice::Automatic,
+        Some(s) if s.eq_ignore_ascii_case("off") || s.eq_ignore_ascii_case("none") => {
+            FrontDoorChoice::Off
+        }
+        Some(s) => match s.parse::<Ipv4Addr>() {
+            Ok(ip) => FrontDoorChoice::Fixed(ip),
+            Err(_) => {
+                warn!("front_door_address {s:?} is not an IPv4 address; using the automatic one");
+                FrontDoorChoice::Automatic
+            }
+        },
+    }
+}
+
 /// The address Rayhunter takes beside a hotspot address.
 pub fn alias_for(hotspot: Ipv4Addr) -> Ipv4Addr {
     let [a, b, c, d] = hotspot.octets();
@@ -97,8 +125,22 @@ impl FrontDoor {
     ///
     /// `None`, with the reason logged, if any of it fails; the caller then
     /// carries on with the hotspot address alone.
-    pub async fn open(iface: &str, hotspot: Ipv4Addr, port: u16, tls_port: u16) -> Option<Self> {
-        let alias = alias_for(hotspot);
+    pub async fn open(
+        iface: &str,
+        hotspot: Ipv4Addr,
+        chosen: FrontDoorChoice,
+        port: u16,
+        tls_port: u16,
+    ) -> Option<Self> {
+        let alias = match chosen {
+            FrontDoorChoice::Off => return None,
+            FrontDoorChoice::Automatic => alias_for(hotspot),
+            FrontDoorChoice::Fixed(ip) if ip == hotspot => {
+                warn!("front_door_address is the hotspot's own address; using the automatic one");
+                alias_for(hotspot)
+            }
+            FrontDoorChoice::Fixed(ip) => ip,
+        };
         let cidr = format!("{alias}/24");
         match run("ip", &args(&["addr", "add", &cidr, "dev", iface])).await {
             Ok(_) => {}
@@ -168,6 +210,18 @@ mod tests {
             alias_for(Ipv4Addr::new(10, 0, 0, 254)),
             Ipv4Addr::new(10, 0, 0, 253)
         );
+    }
+
+    #[test]
+    fn the_setting_is_read_forgivingly() {
+        assert_eq!(choice(None), FrontDoorChoice::Automatic);
+        assert_eq!(choice(Some("")), FrontDoorChoice::Automatic);
+        assert_eq!(choice(Some(" off ")), FrontDoorChoice::Off);
+        assert_eq!(
+            choice(Some("192.168.1.250")),
+            FrontDoorChoice::Fixed(Ipv4Addr::new(192, 168, 1, 250))
+        );
+        assert_eq!(choice(Some("not an address")), FrontDoorChoice::Automatic);
     }
 
     #[test]

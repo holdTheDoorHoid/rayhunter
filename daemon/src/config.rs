@@ -223,6 +223,23 @@ pub struct Config {
     /// Not 443: the hotspot's own admin pages own 80 and 443 on every
     /// supported device.
     pub tls_port: u16,
+    /// The second address the unit takes on its hotspot so that
+    /// `rayhunter.local` reaches Rayhunter without a port.
+    ///
+    /// Unset means the top of the hotspot's network, `.254`, which sits
+    /// above the DHCP pool on every supported unit. An address of your own
+    /// choosing goes here as text; `"off"` leaves the hotspot address alone,
+    /// after which the name needs the TLS port.
+    #[serde(default)]
+    pub front_door_address: Option<String>,
+    /// Whether the interface is also served on the address the unit gets
+    /// as a WiFi client of another network, when it has one.
+    ///
+    /// Paired browsers only, as everywhere. On by default because reaching
+    /// a unit across a home network is what WiFi client mode is for; off
+    /// keeps the interface to the hotspot and USB.
+    #[serde(default = "default_true")]
+    pub serve_wifi_client_address: bool,
     /// Whether the web interface may run commands on the device.
     ///
     /// Deliberately not settable from the web interface: it can only be turned
@@ -407,6 +424,10 @@ impl WebdavConfig {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
 fn default_wifi_ap_toggle_presses() -> u8 {
     5
 }
@@ -439,6 +460,8 @@ impl Default for Config {
             web_users: Vec::new(),
             auth_store_path: "/data/rayhunter/auth".to_string(),
             tls_port: 8443,
+            front_door_address: None,
+            serve_wifi_client_address: true,
             terminal_enabled: false,
             // Off by default. It holds a backlight on, which is a real cost
             // to a device that may be running on battery.

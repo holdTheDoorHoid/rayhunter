@@ -46,6 +46,12 @@ pub struct ServerState {
     pub pairing: Arc<crate::pairing::Pairing>,
     /// The terminal's second gate.
     pub stepup: Arc<crate::stepup::StepUp>,
+    /// Every address the unit serves the interface on, including loopback
+    /// and the front-door alias. What a `Host` header is checked against.
+    pub own_addresses: Vec<std::net::IpAddr>,
+    /// The front-door alias, when there is one: the one address, besides
+    /// `rayhunter.local`, that reaches Rayhunter without a port.
+    pub front_door_alias: Option<std::net::Ipv4Addr>,
     pub config: Config,
     /// The accounts as they stand now, rather than as they were at startup.
     ///
@@ -194,6 +200,8 @@ fn pair_error(e: crate::pairing::PairError) -> (StatusCode, String) {
         Backoff(_) => StatusCode::TOO_MANY_REQUESTS,
         NoSuchDevice => StatusCode::NOT_FOUND,
         NoCode | NotPressed => StatusCode::GONE,
+        PressPending(_) => StatusCode::TOO_MANY_REQUESTS,
+        TooManyDevices => StatusCode::CONFLICT,
         Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
     };
     (status, e.to_string())
@@ -277,15 +285,19 @@ pub async fn mint_pair_code(
     headers: axum::http::HeaderMap,
 ) -> Result<Json<PairCodeResponse>, (StatusCode, String)> {
     let (code, ttl) = state.pairing.mint_code().map_err(pair_error)?;
-    let host = headers
-        .get(header::HOST)
-        .and_then(|v| v.to_str().ok())
-        .map(|h| h.split(':').next().unwrap_or(h))
-        .filter(|h| !h.is_empty())
-        .unwrap_or("192.168.1.1");
-    let url = state
-        .pairing
-        .code_url(&format!("{host}:{}", state.config.tls_port), &code);
+    // Only one of the unit's own names goes into a link shown on its screen.
+    let host = crate::web_auth::canonical_host(
+        &state,
+        headers.get(header::HOST).and_then(|v| v.to_str().ok()),
+    )
+    .await;
+    // Through the front door the link needs no port.
+    let authority = if crate::web_auth::is_front_door_host(&state, &host) {
+        host
+    } else {
+        format!("{host}:{}", state.config.tls_port)
+    };
+    let url = state.pairing.code_url(&authority, &code);
     let svg = crate::display::qr::encode(&url)
         .map(|c| crate::display::qr::svg(&c, 2))
         .unwrap_or_default();
@@ -423,10 +435,13 @@ pub async fn complete_setup_by_press(
         )
         .await
         .map_err(pair_error)?;
-    if let Some(browser_ms) = req.browser_unix_ms {
-        let offset =
-            chrono::TimeDelta::milliseconds(browser_ms - chrono::Utc::now().timestamp_millis());
+    // A time that is not believable is ignored rather than applied.
+    if let Some(offset) = req.browser_unix_ms.and_then(offset_from_browser) {
         rayhunter::clock::set_offset(offset);
+        log::info!(
+            "clock offset set from a pairing browser: {}s",
+            offset.num_seconds()
+        );
         clock_changed(&state);
     }
     Ok(paired(issued))
@@ -671,15 +686,14 @@ pub async fn complete_setup(
         .await
         .map_err(pair_error)?;
     // The phone knows what time it is and the unit very likely does not.
-    if let Some(browser_ms) = req.browser_unix_ms {
-        let now_ms = chrono::Utc::now().timestamp_millis();
-        let offset = chrono::TimeDelta::milliseconds(browser_ms - now_ms);
+    // A time that is not believable is ignored rather than applied.
+    if let Some(offset) = req.browser_unix_ms.and_then(offset_from_browser) {
         rayhunter::clock::set_offset(offset);
-        clock_changed(&state);
         log::info!(
-            "clock offset set from the setup browser: {}s",
+            "clock offset set from a pairing browser: {}s",
             offset.num_seconds()
         );
+        clock_changed(&state);
     }
     Ok(paired(issued))
 }
@@ -983,8 +997,19 @@ pub async fn get_config(
 ))]
 pub async fn set_config(
     State(state): State<Arc<ServerState>>,
+    current: Option<axum::Extension<crate::web_auth::CurrentDevice>>,
     Json(mut config): Json<Config>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
+    // Turning ADB on opens a root shell on the USB port, which is a bigger
+    // change than any other setting on this page. It takes the same proof
+    // of holding the unit as the terminal does: a step-up first.
+    let turning_adb_on = config.adb_enabled == Some(true) && state.config.adb_enabled != Some(true);
+    if turning_adb_on && !state.stepup.active(&device_id_of(&current)) {
+        return Err((
+            StatusCode::PRECONDITION_REQUIRED,
+            r#"{"stepup":"required","for":"adb_enabled"}"#.to_string(),
+        ));
+    }
     if config.gps_mode != GpsMode::Fixed {
         config.gps_fixed_latitude = None;
         config.gps_fixed_longitude = None;
@@ -1382,7 +1407,15 @@ pub async fn set_time_offset(
     State(state): State<Arc<ServerState>>,
     Json(req): Json<SetTimeOffsetRequest>,
 ) -> StatusCode {
-    rayhunter::clock::set_offset(chrono::TimeDelta::seconds(req.offset_seconds));
+    // Bounded, and built with a checked constructor, so an absurd value is
+    // refused rather than applied or allowed to overflow.
+    if req.offset_seconds.abs() > MAX_CLOCK_OFFSET_SECS {
+        return StatusCode::BAD_REQUEST;
+    }
+    let Some(offset) = chrono::TimeDelta::try_seconds(req.offset_seconds) else {
+        return StatusCode::BAD_REQUEST;
+    };
+    rayhunter::clock::set_offset(offset);
     clock_changed(&state);
     StatusCode::OK
 }
@@ -1805,6 +1838,8 @@ mod tests {
                 None,
             )),
             stepup: Arc::new(crate::stepup::StepUp::new(None)),
+            own_addresses: vec![std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)],
+            front_door_alias: None,
             config_path: "/tmp/test_config.toml".to_string(),
             config: Config::default(),
             web_users: Arc::new(RwLock::new(Vec::new())),
@@ -2278,6 +2313,23 @@ pub async fn get_ca_mobileconfig(
         |id| id.mobileconfig().into_bytes(),
     )
     .await
+}
+
+/// The most the clock may be moved in one request, either way: twenty
+/// years, which covers a unit that booted thinking it is 2020, without
+/// letting a value overflow the arithmetic behind it.
+const MAX_CLOCK_OFFSET_SECS: i64 = 20 * 365 * 24 * 3600;
+
+/// The offset that makes the unit's clock read `browser_ms`, if that is a
+/// time worth believing: between 2024 and 2100, and within reach.
+fn offset_from_browser(browser_ms: i64) -> Option<chrono::TimeDelta> {
+    use chrono::Datelike;
+    let browser = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(browser_ms)?;
+    if browser.year() < 2024 || browser.year() > 2100 {
+        return None;
+    }
+    let offset = browser - chrono::Utc::now();
+    (offset.num_seconds().abs() <= MAX_CLOCK_OFFSET_SECS).then_some(offset)
 }
 
 /// The unit has just learnt the time; a server certificate issued without

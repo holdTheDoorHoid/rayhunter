@@ -2,6 +2,7 @@
     import {
         get_config,
         set_config,
+        StepUpRequired,
         test_notification,
         get_wifi_status,
         get_system_stats,
@@ -31,6 +32,7 @@
     import DeviceGifSettings from './DeviceGifSettings.svelte';
     import Explainer from './Explainer.svelte';
     import CertificateTrust from './CertificateTrust.svelte';
+    import StepUpPrompt from './StepUpPrompt.svelte';
     import { HEURISTICS } from '../heuristics';
     import { theme, type ThemePreference } from '../theme.svelte';
     import { help } from '../helpVisibility.svelte';
@@ -334,12 +336,21 @@
                 'Config saved successfully! Rayhunter is restarting now. Reload the page in a few seconds.';
             messageType = 'success';
         } catch (error) {
+            if (error instanceof StepUpRequired) {
+                // Turning ADB on wants proof of holding the unit first. Ask,
+                // then save again once the unit has agreed.
+                needStepUp = true;
+                message = '';
+                return;
+            }
             message = `Failed to save config: ${error}`;
             messageType = 'error';
         } finally {
             saving = false;
         }
     }
+
+    let needStepUp = $state(false);
 
     async function poll_wifi_status() {
         if (wifiStatusTimer) clearInterval(wifiStatusTimer);
@@ -2235,6 +2246,16 @@
                     </p>
                 </div>
             </form>
+            {#if needStepUp}
+                <StepUpPrompt
+                    reason="Turning ADB on opens a root shell on the USB port, so the unit wants proof you are holding it."
+                    onopened={() => {
+                        needStepUp = false;
+                        save_config();
+                    }}
+                    oncancel={() => (needStepUp = false)}
+                />
+            {/if}
             {#if message}
                 <div
                     class="mt-4 p-3 rounded-sm {messageType === 'error'

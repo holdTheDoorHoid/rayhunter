@@ -322,6 +322,7 @@ async fn run_server(
             state.clone(),
             web_auth::redirect_to_tls,
         ))
+        .layer(axum::middleware::from_fn(web_auth::security_headers))
         .with_state(state.clone());
 
     // The same interface again, over TLS, on every address the plain one
@@ -376,6 +377,10 @@ async fn run_server(
     // served at all: reaching a unit on a home LAN was a race with its
     // startup. Watch for it, serve it while it lasts, and tell the mDNS
     // responder about it.
+    if !state.config.serve_wifi_client_address {
+        info!("not serving the WiFi client address (serve_wifi_client_address is off)");
+        return;
+    }
     let tracker = task_tracker.clone();
     let watcher_state = state.clone();
     task_tracker.spawn(async move {
@@ -591,7 +596,14 @@ async fn run_with_config(
             });
             match iface {
                 Some(iface) => {
-                    frontdoor::FrontDoor::open(&iface, hotspot, config.port, config.tls_port).await
+                    frontdoor::FrontDoor::open(
+                        &iface,
+                        hotspot,
+                        frontdoor::choice(config.front_door_address.as_deref()),
+                        config.port,
+                        config.tls_port,
+                    )
+                    .await
                 }
                 None => None,
             }
@@ -658,21 +670,32 @@ async fn run_with_config(
         }),
         _ => None,
     };
+    let mut store_damaged = false;
     let pairing =
         match pairing::Pairing::load(Path::new(&config.auth_store_path), setup_display.clone())
             .await
         {
             Ok(pairing) => Arc::new(pairing),
             Err(e) => {
-                // Not overwritten and not fatal: the unit runs, pairs only for
-                // this session, and the file is left for somebody to look at.
-                error!("the pairing store is unusable ({e}); pairing will not persist this run");
+                // Not overwritten and not fatal: the unit runs, but it does not
+                // open its setup window on its own. A damaged store must not
+                // turn into an open invitation; whoever is holding the unit
+                // presses the button, which is the same proof as ever. The file
+                // is left for somebody to look at.
+                error!(
+                    "the pairing store is unusable ({e}); press the button to pair for this run"
+                );
+                store_damaged = true;
                 Arc::new(pairing::Pairing::ephemeral(
                     pairing::AuthState::default(),
                     setup_display,
                 ))
             }
         };
+    if let Some(tls) = &tls_identity {
+        let tls = tls.clone();
+        pairing.set_fingerprint_source(Arc::new(move || tls.leaf_fingerprint_hex()));
+    }
     // The terminal's second gate uses the same screen.
     let stepup = Arc::new(stepup::StepUp::new(
         display::qr::screen_geometry(&config.device).map(|screen| stepup::StepUpDisplay {
@@ -680,7 +703,16 @@ async fn run_with_config(
             screen,
         }),
     ));
-    if tls_identity.is_some()
+    let forever = std::time::Duration::from_secs(3600 * 24 * 365);
+    if store_damaged {
+        display_override.show_banner("PAIRING STORE DAMAGED", forever);
+    } else if tls_identity.is_none() && config.tls_port != 0 {
+        // Said on the unit itself, since a reachable interface and a
+        // protected one look the same from a browser.
+        display_override.show_banner("WEB OPEN: NO TLS", forever);
+    }
+    if !store_damaged
+        && tls_identity.is_some()
         && !pairing.setup_complete().await
         && pairing.device_count().await == 0
     {
@@ -873,8 +905,14 @@ async fn run_with_config(
         mdns::run(&task_tracker, mdns_addrs.clone(), shutdown_token.clone());
     }
 
+    let mut own_addresses = listen_addrs.clone();
+    if let Some(door) = &front_door {
+        own_addresses.push(IpAddr::V4(door.alias));
+    }
     let state = Arc::new(ServerState {
         config_path: args.config_path.clone(),
+        own_addresses,
+        front_door_alias: front_door.as_ref().map(|d| d.alias),
         tls: tls_identity,
         pairing,
         stepup,

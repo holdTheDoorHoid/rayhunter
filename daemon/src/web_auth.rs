@@ -93,11 +93,30 @@ fn pbkdf2(password: &[u8], salt: &[u8], iterations: u32, out: &mut [u8]) {
     }
 }
 
+/// One PBKDF2 at a time, whoever asks.
+///
+/// Each verification costs real time on a single slow core, and it runs on
+/// the blocking pool, so a burst of guesses could otherwise hold several
+/// threads and starve the capture. Guesses are already slowed per attempt
+/// by the pairing backoff; this bounds what they can cost in parallel.
+static KDF_GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+
+/// Run a key derivation on the blocking pool, one at a time.
+pub async fn kdf<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    let _permit = KDF_GATE.acquire().await.ok()?;
+    tokio::task::spawn_blocking(work).await.ok()
+}
+
 /// Hash a password for storage, with a fresh random salt.
 pub fn hash_password(password: &str) -> String {
     let mut salt = [0u8; SALT_LEN];
-    for byte in salt.iter_mut() {
-        *byte = fastrand::u8(..);
+    // From the OS, like every other secret here. A salt need not be secret,
+    // but it must be unpredictable and unrepeated, and the fast generator
+    // used before is neither by construction.
+    if crate::tls::random_bytes(&mut salt).is_err() {
+        for byte in salt.iter_mut() {
+            *byte = fastrand::u8(..);
+        }
     }
     let mut hash = [0u8; HASH_LEN];
     pbkdf2(password.as_bytes(), &salt, ITERATIONS, &mut hash);
@@ -203,6 +222,14 @@ pub enum ListenerKind {
 #[derive(Debug, Clone)]
 pub struct CurrentDevice(pub String);
 
+/// `/<prefix>/<one segment>` and nothing deeper, so a route added under a
+/// pairing prefix later is not open by accident.
+fn one_segment_under(path: &str, prefix: &str) -> bool {
+    path.strip_prefix(prefix)
+        .map(|rest| !rest.is_empty() && !rest.contains('/'))
+        .unwrap_or(false)
+}
+
 /// Paths a browser that is not yet trusted may reach: the pairing page and
 /// what it needs, and nothing that reads or changes anything.
 pub fn is_exempt_from_pairing(path: &str) -> bool {
@@ -223,11 +250,88 @@ pub fn is_exempt_from_pairing(path: &str) -> bool {
             | "/favicon.png"
             | "/rayhunter_orca_only.png"
             | "/rayhunter_text.png"
-    ) || path.starts_with("/s/")
-        || path.starts_with("/S/")
-        || path.starts_with("/p/")
-        || path.starts_with("/P/")
-        || path.starts_with("/api/setup/press-status/")
+    ) || one_segment_under(path, "/s/")
+        || one_segment_under(path, "/S/")
+        || one_segment_under(path, "/p/")
+        || one_segment_under(path, "/P/")
+        || one_segment_under(path, "/api/setup/press-status/")
+}
+
+/// The host a link or redirect may point at, from what the request said.
+///
+/// A `Host` header is whatever the client sent. Reflected into a redirect
+/// it would send a browser wherever the sender liked, with the path, token
+/// included, along for the ride; reflected into a pairing link it would put
+/// a stranger's address on the unit's own screen. So it is honoured only
+/// when it is one of the unit's own names: `rayhunter.local`, or an address
+/// the unit is serving on. Anything else becomes the hotspot address.
+pub async fn canonical_host(state: &crate::server::ServerState, raw_host: Option<&str>) -> String {
+    let fallback = state
+        .own_addresses
+        .iter()
+        .find(|ip| !ip.is_loopback())
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|| crate::tls::LOCAL_NAME.to_string());
+    let Some(raw) = raw_host else {
+        return fallback;
+    };
+    let host = host_without_port(raw);
+    if host.eq_ignore_ascii_case(crate::tls::LOCAL_NAME) {
+        return crate::tls::LOCAL_NAME.to_string();
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        if state.own_addresses.contains(&ip) {
+            return host.to_string();
+        }
+        let sta = state
+            .wifi_status
+            .read()
+            .await
+            .ip
+            .as_deref()
+            .and_then(|s| s.parse::<std::net::IpAddr>().ok());
+        if sta == Some(ip) {
+            return host.to_string();
+        }
+    }
+    fallback
+}
+
+/// Whether `host` reaches Rayhunter without a port: `rayhunter.local`, or
+/// the front-door alias. Everything else needs the TLS port spelled out.
+pub fn is_front_door_host(state: &crate::server::ServerState, host: &str) -> bool {
+    host.eq_ignore_ascii_case(crate::tls::LOCAL_NAME)
+        || state
+            .front_door_alias
+            .map(|a| a.to_string() == host)
+            .unwrap_or(false)
+}
+
+/// Axum middleware adding the browser policy headers every response should
+/// carry: no sniffing, no framing, no referrers (a setup link carries its
+/// token in the path), and no caching of anything the API says.
+pub async fn security_headers(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::HeaderValue;
+    let is_api = request.uri().path().starts_with("/api/");
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    headers.insert(
+        "content-security-policy",
+        HeaderValue::from_static("frame-ancestors 'none'"),
+    );
+    headers.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
+    if is_api && !headers.contains_key("cache-control") {
+        headers.insert("cache-control", HeaderValue::from_static("no-store"));
+    }
+    response
 }
 
 fn basic_challenge() -> axum::response::Response {
@@ -310,14 +414,9 @@ pub async fn require_auth(
             .and_then(|v| v.to_str().ok())
             .and_then(parse_basic_auth);
         if let Some((username, password)) = supplied {
-            // PBKDF2 is deliberately slow, and this runtime is
-            // single-threaded, so verifying inline would stall every other
-            // request for the duration. Run it on the blocking pool instead.
-            let valid = tokio::task::spawn_blocking(move || {
-                credentials_are_valid(&users, &username, &password)
-            })
-            .await
-            .unwrap_or(false);
+            let valid = kdf(move || credentials_are_valid(&users, &username, &password))
+                .await
+                .unwrap_or(false);
             if valid {
                 return next.run(request).await;
             }
@@ -380,19 +479,24 @@ pub async fn redirect_to_tls(
     if kind != ListenerKind::Plain || state.tls.is_none() {
         return next.run(request).await;
     }
-    let Some(raw_host) = request
+    let raw_host = request
         .headers()
         .get(header::HOST)
         .and_then(|v| v.to_str().ok())
         .filter(|h| !h.is_empty())
-    else {
-        return next.run(request).await;
-    };
-    let host = host_without_port(raw_host);
-    // A request that arrived with no port came through the front door
-    // (`rayhunter.local`, or the alias address) on port 80, where 443 is
-    // Rayhunter's too; keep it portless. Anything else names the TLS port.
-    let had_port = host_had_port(raw_host);
+        .map(str::to_string);
+    let raw_host = raw_host.as_deref().unwrap_or("");
+    // Only the unit's own names are reflected; anything else goes to the
+    // hotspot address, with the port that implies.
+    let checked = canonical_host(&state, Some(raw_host)).await;
+    let reflected = host_without_port(raw_host).eq_ignore_ascii_case(&checked);
+    let host = checked.as_str();
+    // A request that arrived with no port at one of the two front-door
+    // names came in on port 80, where 443 is Rayhunter's too; keep it
+    // portless. Anything else, including a host that had to be replaced,
+    // names the TLS port: on the hotspot address itself, 443 is the
+    // hotspot's admin page, not Rayhunter.
+    let had_port = !reflected || host_had_port(raw_host) || !is_front_door_host(&state, host);
     let host = if host.contains(':') {
         format!("[{host}]")
     } else {
@@ -408,8 +512,10 @@ pub async fn redirect_to_tls(
     } else {
         format!("https://{host}{rest}")
     };
+    // Temporary and method-preserving: the right address can change with
+    // the network, and a permanent answer would be cached past that.
     (
-        StatusCode::MOVED_PERMANENTLY,
+        StatusCode::TEMPORARY_REDIRECT,
         [(header::LOCATION, target.clone())],
         format!("Rayhunter is served over HTTPS now: {target}\n"),
     )
@@ -726,6 +832,19 @@ mod tests {
             "/favicon.png",
         ] {
             assert!(is_exempt_from_pairing(open), "{open} should be open");
+        }
+        // Only one segment under a pairing prefix; nothing deeper, nothing
+        // empty, so a later route under the prefix is not open by accident.
+        for closed in [
+            "/s/",
+            "/s/abc/def",
+            "/p/123456/extra",
+            "/api/setup/press-status/",
+        ] {
+            assert!(
+                !is_exempt_from_pairing(closed),
+                "{closed} should need pairing"
+            );
         }
         for closed in [
             "/",

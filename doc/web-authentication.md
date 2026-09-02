@@ -83,7 +83,8 @@ more step each time: the passphrase, and then a four-digit code that the
 Rayhunter shows on its own screen (or a press of its button, on a unit with no
 screen). This proves the person at the browser can also see the unit. The
 terminal then stays open for five minutes, longer while it is being used,
-and the unit's screen says **TERMINAL ACTIVE** the whole time.
+and the unit's screen says **TERMINAL ACTIVE** the whole time. Turning ADB
+on from the settings page asks for the same step-up, for the same reason.
 
 ## Why the browser warns
 

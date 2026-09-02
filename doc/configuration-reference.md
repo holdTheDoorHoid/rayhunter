@@ -42,6 +42,8 @@ not have, and **(not in template)** marks a key absent from the shipped
 | `qmdl_store_path` | string | `/data/rayhunter/qmdl` | Where recordings are stored. A path on a read-only or missing mount means no recordings. |
 | `port` | integer | `8080` | Plain web interface port. While TLS is up it only redirects to `tls_port`; over USB (loopback) it serves as before. The daemon fails to start if it cannot bind this port. |
 | `tls_port` | integer | `8443` | The port the interface is served on over HTTPS, with the certificate the unit makes for itself. `0` switches TLS off, which also switches pairing off. **Fork, (not in template)** |
+| `front_door_address` | string | unset | The second address the unit takes on its hotspot so `rayhunter.local` works without a port. Unset means `.254` at the top of the hotspot's network; an address of your own choosing, or `off` to leave the hotspot address alone (the name then needs `:8443`). **Fork, (not in template)** |
+| `serve_wifi_client_address` | boolean | `true` | Also serve the interface, to paired browsers only, on the address the unit gets as a WiFi client of another network. `false` keeps it to the hotspot and USB. **Fork, (not in template)** |
 | `auth_store_path` | string | `/data/rayhunter/auth` | Where the unit keeps its TLS key and certificate and the pairing records (`auth.toml`). Mode 0700. Never in a support bundle. **Fork, (not in template)** |
 | `debug_mode` | boolean | `false` | Runs without the diagnostic thread, display, or recording; the store must already exist. For development, not normal use. |
 | `device` | enum | `orbic` | Selects the display driver and device-specific paths. Written by the installer. A wrong value gives a broken display and wrong system paths. **(not in template)** |

@@ -67,6 +67,11 @@ const PLAUSIBLE_YEAR: i32 = 2025;
 /// from the start so that adding the responder later costs no new warning.
 pub const LOCAL_NAME: &str = "rayhunter.local";
 
+/// Handshakes in flight at once. Each costs real arithmetic on a slow core;
+/// beyond this, new connections wait in the kernel's backlog rather than
+/// pile up as tasks.
+const MAX_HANDSHAKES: usize = 8;
+
 /// How long a client gets to finish its handshake.
 ///
 /// Generous for a phone on a bad link, and short enough that a connection
@@ -749,6 +754,9 @@ pub struct TlsRenewer {
     addresses: Vec<IpAddr>,
     identity: tokio::sync::Mutex<TlsIdentity>,
     pub resolver: Arc<RotatingCert>,
+    /// The leaf's fingerprint as browsers show it, readable without
+    /// waiting: the button handler wants it from a plain thread.
+    leaf_fingerprint: std::sync::RwLock<String>,
 }
 
 impl TlsRenewer {
@@ -761,8 +769,17 @@ impl TlsRenewer {
             dir: dir.to_path_buf(),
             addresses,
             resolver: Arc::new(RotatingCert::new(&identity)?),
+            leaf_fingerprint: std::sync::RwLock::new(identity.fingerprint_hex()),
             identity: tokio::sync::Mutex::new(identity),
         })
+    }
+
+    /// The server certificate's fingerprint, `AB:CD:…`.
+    pub fn leaf_fingerprint_hex(&self) -> String {
+        self.leaf_fingerprint
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// A copy of the identity as it stands.
@@ -810,6 +827,10 @@ impl TlsRenewer {
         identity.key_pkcs8_der = issued.1;
         match self.resolver.replace(&identity) {
             Ok(()) => {
+                *self
+                    .leaf_fingerprint
+                    .write()
+                    .unwrap_or_else(|e| e.into_inner()) = identity.fingerprint_hex();
                 info!(
                     "new server certificate in service until {}",
                     identity.leaf_not_after().unwrap_or_default()
@@ -856,8 +877,12 @@ impl TlsListener {
         let local_addr = tcp.local_addr()?;
         let acceptor = TlsAcceptor::from(config);
         let (tx, ready) = mpsc::channel(16);
+        let in_flight = Arc::new(tokio::sync::Semaphore::new(MAX_HANDSHAKES));
         let accept_task = tokio::spawn(async move {
             loop {
+                let Ok(permit) = in_flight.clone().acquire_owned().await else {
+                    break;
+                };
                 let (stream, peer) = match tcp.accept().await {
                     Ok(pair) => pair,
                     Err(e) => {
@@ -871,6 +896,7 @@ impl TlsListener {
                 let acceptor = acceptor.clone();
                 let tx = tx.clone();
                 tokio::spawn(async move {
+                    let _permit = permit;
                     match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
                         Ok(Ok(tls)) => {
                             let _ = tx.send((tls, peer)).await;
