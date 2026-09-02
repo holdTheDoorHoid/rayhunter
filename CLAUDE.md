@@ -315,6 +315,21 @@ the fork's pairing landed, `http://192.168.0.1:8080/api/...` from the host is
 refused until a browser is paired; go through the device's own loopback
 instead: `wget -q -O - http://127.0.0.1:8080/api/system-stats`.
 
+## Two TP-Links on one host
+
+Both M7350s answer on 192.168.0.1 over their own USB interface, so the host
+ends up with two routes to the same address and commands land on whichever
+NetworkManager ranks first. `nmcli con modify <conn> ipv4.route-metric N`
+works without root here; the session scratchpad's `tpsel.sh v8|old` flips
+the metrics and reapplies the connections. An interface is renamed on every
+reboot of its device, so re-check `ip -4 -br addr` after one.
+
+The **v3.0** unit (M7350(EU) v3.0, firmware 1.1.1, 42 MB RAM, kernel 3.4)
+gets telnet only from `installer util tplink-start-telnet`, which uses the v3
+exploit and must be repeated after every boot; the port-trigger persistence
+that keeps telnet up on the v8.0 does not exist there. Rayhunter itself does
+start at boot on it.
+
 ## Simulating a card removal on the TP-Link
 
 The slot is under the battery, so the card cannot be pulled while running.
