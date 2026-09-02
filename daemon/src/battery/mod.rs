@@ -52,7 +52,10 @@ async fn get_level_from_percentage_file(path: &Path) -> Result<u8, RayhunterErro
 
 pub async fn get_battery_status(device: &Device) -> Result<BatteryState, RayhunterError> {
     Ok(match device {
-        Device::Orbic => orbic::get_battery_state().await?,
+        // The Moxee's battery files are in the same places with the same
+        // meanings, checked on both devices side by side, so it shares this
+        // rather than having a copy that would drift.
+        Device::Orbic | Device::Moxee => orbic::get_battery_state().await?,
         Device::Wingtech => wingtech::get_battery_state().await?,
         Device::Tmobile => tmobile::get_battery_state().await?,
         Device::Tplink => tplink::get_battery_state().await?,

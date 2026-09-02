@@ -47,7 +47,17 @@ pub async fn get_home_plmn(port: &str) -> Result<BTreeSet<String>, SimError> {
 
     if !is_normal_ending(sw1, sw2) {
         return Err(SimError::AtCommandError(format!(
-            "reading EF_HPLMNwAcT failed with status {sw1},{sw2}"
+            // Status words are conventionally written in hex, and the common
+            // ones are recognisable that way: 6982 is "security status not
+            // satisfied", which is what an unprovisioned SIM answers. Decimal
+            // hides that.
+            "reading EF_HPLMNwAcT failed with status {sw1:02X}{sw2:02X}{}",
+            match (sw1, sw2) {
+                (0x69, 0x82) =>
+                    " (security status not satisfied, which is what an unactivated SIM returns)",
+                (0x6A, 0x82) => " (file not found)",
+                _ => "",
+            }
         )));
     }
 

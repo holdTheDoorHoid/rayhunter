@@ -21,7 +21,13 @@ pub enum SimError {
 /// failure, which callers must treat as "unknown".
 pub async fn home_plmn(device: &Device) -> BTreeSet<String> {
     let result = match device {
-        Device::Tplink | Device::Orbic => generic_at::get_home_plmn("/dev/smd7").await,
+        // The Moxee has the same /dev/smd7 with the same AT interface, checked
+        // side by side with an Orbic. Without it here a Moxee reports the
+        // reading as unsupported, when in fact it works and any failure is the
+        // SIM's own answer.
+        Device::Tplink | Device::Orbic | Device::Moxee => {
+            generic_at::get_home_plmn("/dev/smd7").await
+        }
         _ => Err(SimError::UnsupportedDevice),
     };
 

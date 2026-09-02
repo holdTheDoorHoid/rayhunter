@@ -258,7 +258,18 @@ impl DiagTask {
             self.min_space_to_start_mb,
             self.min_space_to_continue_mb,
         ) {
-            DiskSpaceCheck::Critical(mb) | DiskSpaceCheck::Warning(mb) => {
+            // Report the limit that actually stopped it. Critical means below
+            // the continue limit, Warning below the start limit; naming the
+            // start limit for both produced messages like "10MB available, 1MB
+            // required", which reads as a contradiction to anyone trying to
+            // work out what to free up.
+            DiskSpaceCheck::Critical(mb) => {
+                return Err(RecordingStoreError::InsufficientDiskSpace(
+                    mb,
+                    self.min_space_to_continue_mb,
+                ));
+            }
+            DiskSpaceCheck::Warning(mb) => {
                 return Err(RecordingStoreError::InsufficientDiskSpace(
                     mb,
                     self.min_space_to_start_mb,
@@ -959,6 +970,14 @@ pub fn run_diag_read_thread(
                         Some(DiagDeviceCtrlMessage::StartRecording { response_tx }) => {
                             let mut qmdl_store = qmdl_store_lock.write().await;
                             let result = diag_task.start(qmdl_store.deref_mut()).await;
+                            // Logged whether or not anybody is waiting for the
+                            // answer. Recording started at boot and by the
+                            // button gesture passes no channel, so a refusal
+                            // used to be dropped here and the device simply sat
+                            // there not recording with nothing said anywhere.
+                            if let Err(err) = &result {
+                                error!("could not start recording: {err}");
+                            }
                             if let Some(tx) = response_tx {
                                 tx.send(result).ok();
                             }

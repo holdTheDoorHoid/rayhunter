@@ -6,7 +6,17 @@ use crate::{
 };
 
 const BATTERY_LEVEL_FILE: &str = "/sys/kernel/chg_info/level";
-const PLUGGED_IN_STATE_FILE: &str = "/sys/kernel/chg_info/chg_en";
+
+/// Whether the device is on external power.
+///
+/// Not `/sys/kernel/chg_info/chg_en`, which this used to read. That means
+/// "currently charging", so a device sitting on USB with a full battery reads
+/// zero and was reported as unplugged. Measured on an Orbic with the cable in:
+/// `chg_en` 0, `usb/online` 1.
+///
+/// The display's keep-screen-on already used this file for the same reason;
+/// the battery indicator did not, so the two disagreed about the same device.
+const PLUGGED_IN_STATE_FILE: &str = "/sys/class/power_supply/usb/online";
 
 pub async fn get_battery_state() -> Result<BatteryState, RayhunterError> {
     Ok(BatteryState {
