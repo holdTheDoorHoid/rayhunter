@@ -145,6 +145,17 @@ export const HEURISTICS: HeuristicInfo[] = [
         noise: 'Moving sets this off honestly: if you carry the device any real distance, the towers around you genuinely change distance, and this will say so. It is reported gently for that reason. Many devices never report this measurement at all, including the Orbic, and on those this check stays silent rather than guessing.',
     },
     {
+        key: 'flash_catch',
+        title: 'Identity taken, then forged authentication (FlashCatch)',
+        summary:
+            'Watches for a tower that keeps failing your phone\u2019s authentication check: a fake tower that took your identity and then made your phone walk away.',
+        detects:
+            'When a tower wants to prove it is real, it sends your phone a challenge signed with a key only your carrier and your SIM know. A fake tower does not have that key, so your phone rejects the challenge as forged. This check counts those rejections. Two in a row raises a warning; if the tower had asked for your permanent identity (IMSI) just before, it is raised as a high warning, because that is the whole sequence of the attack.',
+        matters:
+            'A conventional fake tower holds your phone after taking its identity, and you lose service until the phone gives up, which you might notice. The FlashCatch attack, described by researchers in 2025, avoids that: it takes the identity and then deliberately fails authentication three times, so your phone treats the tower as broken, leaves within a second, and reconnects to the real network with no visible interruption. Nothing on the phone shows it happened. The rejections are the one trace it leaves, and they are something a real network essentially never produces.',
+        noise: 'A SIM with a mismatched key, such as a badly provisioned or test SIM, fails this check on every connection and would trip it constantly, but such a phone also has no service, so the situation is obvious. A single rejection, or a sequence-number mismatch on its own, is normal housekeeping and is not counted. The pattern comes from the published description of the attack; it has not yet been confirmed against a recording of the attack itself.',
+    },
+    {
         key: 'diagnostic_analyzer',
         title: 'Identity exposure diary',
         summary:

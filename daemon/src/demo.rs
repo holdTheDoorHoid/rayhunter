@@ -92,6 +92,39 @@ pub fn scenarios() -> Vec<Scenario> {
             raises_high: true,
         },
         Scenario {
+            name: "tower took the identity, then failed authentication (FlashCatch)",
+            messages: {
+                // 48 = Tracking Area Update Request, the phone checking in:
+                // update type 0, key set 0, then its old GUTI (f6) on the test
+                // network 001-01. 55 = Identity Request, 01 asks for the IMSI.
+                // 52 = Authentication Request: key set 0, a 16-byte RAND, then
+                // a 16-byte AUTN whose signature the phone cannot verify.
+                // 5c 14 = Authentication Failure, cause 20, "MAC failure": the
+                // phone rejecting the challenge as forged. Three rounds, as in
+                // the attack.
+                let tau_request = vec![
+                    0x07, 0x48, 0x00, 0x0b, 0xf6, 0x00, 0xf1, 0x10, 0x00, 0x01, 0x01, 0xc0, 0x00,
+                    0x00, 0x01,
+                ];
+                let identity_request = vec![0x07, 0x55, 0x01];
+                let mut auth_request = vec![0x07, 0x52, 0x00];
+                auth_request.extend([0x11; 16]);
+                auth_request.push(0x10);
+                auth_request.extend([0x22; 16]);
+                let auth_failure = vec![0x07, 0x5c, 0x14];
+                let mut messages = vec![
+                    DemoMessage::Nas(tau_request),
+                    DemoMessage::Nas(identity_request),
+                ];
+                for _ in 0..3 {
+                    messages.push(DemoMessage::Nas(auth_request.clone()));
+                    messages.push(DemoMessage::Nas(auth_failure.clone()));
+                }
+                messages
+            },
+            raises_high: true,
+        },
+        Scenario {
             name: "tower switched encryption off (RRC null cipher)",
             messages: vec![DemoMessage::Rrc {
                 // DL-DCCH securityModeCommand selecting EEA0. Bit by bit:

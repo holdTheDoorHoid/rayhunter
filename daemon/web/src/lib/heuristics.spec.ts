@@ -17,6 +17,7 @@ const EXPECTED_ANALYZERS: AnalyzerKey[] = [
     'lpp_location_tracking',
     'rrlp_location_request',
     'timing_advance',
+    'flash_catch',
     'diagnostic_analyzer',
     'test_analyzer',
 ];

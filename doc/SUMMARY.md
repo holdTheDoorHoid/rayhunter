@@ -71,6 +71,7 @@
   - [Location Requested (LPP)](./detectors/lpp.md)
   - [Location Requested on 2G (RRLP)](./detectors/rrlp.md)
   - [A Tower That Seems to Have Moved](./detectors/timing-advance.md)
+  - [Identity Taken, Then Forged Authentication (FlashCatch)](./detectors/flash-catch.md)
 - [Writing a New Detector](./detectors/writing-a-detector.md)
 - [How We Validate Detectors](./detectors/validation.md)
 

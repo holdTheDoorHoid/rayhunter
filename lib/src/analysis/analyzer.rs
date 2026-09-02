@@ -13,6 +13,7 @@ use crate::util::RuntimeMetadata;
 
 use super::{
     connection_redirect_downgrade::ConnectionRedirect2GDowngradeAnalyzer,
+    flash_catch::FlashCatchAnalyzer,
     imsi_requested::ImsiRequestedAnalyzer,
     incomplete_sib::IncompleteSibAnalyzer,
     information_element::InformationElement,
@@ -42,6 +43,7 @@ pub struct AnalyzerConfig {
     pub lpp_location_tracking: bool,
     pub rrlp_location_request: bool,
     pub timing_advance: bool,
+    pub flash_catch: bool,
 }
 
 impl Default for AnalyzerConfig {
@@ -59,6 +61,7 @@ impl Default for AnalyzerConfig {
             lpp_location_tracking: true,
             rrlp_location_request: true,
             timing_advance: true,
+            flash_catch: true,
         }
     }
 }
@@ -428,6 +431,10 @@ impl Harness {
 
         if analyzer_config.timing_advance {
             harness.add_analyzer(Box::new(TimingAdvanceAnalyzer::new()))
+        }
+
+        if analyzer_config.flash_catch {
+            harness.add_analyzer(Box::new(FlashCatchAnalyzer::new()))
         }
 
         if analyzer_config.test_analyzer {

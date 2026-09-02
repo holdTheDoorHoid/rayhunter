@@ -103,6 +103,14 @@ This matters because being forced down to 2G is itself a known surveillance step
 
 False positives: legitimate on emergency calls placed over 2G. On a device that never uses 2G, it stays silent.
 
+### FlashCatch: identity taken, then forged authentication (v1)
+
+A conventional IMSI catcher holds the phone after taking its identity, and the phone loses service until it gives up. The FlashCatch attack (Paci, Bologna, Palamà and Bianchi, ACM WiSec 2025) avoids that: posing as a tower of the phone's own network, it asks for the IMSI the moment the phone checks in, then sends three authentication challenges it has signed wrongly. The phone rejects each as forged (**AUTHENTICATION FAILURE**, cause "MAC failure", TS 24.301 §9.9.3.9), treats the tower as having failed authentication after the third (§5.4.2.6), bars the cell and returns to the real network with its keys intact, all in under a second and with no visible interruption.
+
+This analyzer counts those rejections. Two in a row within one exchange raise a **medium** warning; when an **IDENTITY REQUEST** for the IMSI arrived shortly before, the warning is **high**, because that is the whole attack. Three "Synch failure" rejections in a row also raise a medium warning. An identity request during a tracking area update is noted at informational level only. A passed authentication, security mode command, or any accept message clears the count, and a new attach, tracking area update or service request starts afresh.
+
+False positives: a SIM whose key does not match the network (a badly provisioned or test SIM) fails authentication on every connection and would trip this constantly, but such a phone has no service, so the situation is obvious. A single rejection is not counted. The pattern comes from the paper's description; it has not yet been checked against a recording of the attack. See the [detector page](./detectors/flash-catch.md).
+
 ### Diagnostic Information 
 This analyzer displays some diagnostic information about when your device connects and disconnects from certain towers. It is helpful for analysis of suspicious PCAPs. The informational warnings in here can safely be ignored until there is a low, medium, or high severity warning. 
 

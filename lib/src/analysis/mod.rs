@@ -1,6 +1,7 @@
 pub mod analyzer;
 pub mod connection_redirect_downgrade;
 pub mod diagnostic;
+pub mod flash_catch;
 pub mod imsi_requested;
 pub mod incomplete_sib;
 pub mod information_element;
