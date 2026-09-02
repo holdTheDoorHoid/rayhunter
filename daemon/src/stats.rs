@@ -307,6 +307,8 @@ pub struct DiskStats {
     mounted_on: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub available_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_bytes: Option<u64>,
 }
 
 impl DiskStats {
@@ -342,6 +344,7 @@ impl DiskStats {
             used_percent,
             mounted_on: qmdl_path.to_string(),
             available_bytes: Some(stat.f_bavail as u64 * block_size),
+            total_bytes: Some(stat.f_blocks as u64 * block_size),
         })
     }
 }

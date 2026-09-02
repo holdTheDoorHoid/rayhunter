@@ -181,11 +181,13 @@ async fn perform_analysis(
     device_metadata: &DeviceMetadata,
 ) -> Result<(), String> {
     info!("Opening QMDL and analysis file for {name}...");
-    let (analysis_file, mut qmdl_reader) = {
+    let (analysis_file, mut qmdl_reader, meta_path) = {
         let mut qmdl_store = qmdl_store_lock.write().await;
-        let (entry_index, _) = qmdl_store
+        let (entry_index, entry) = qmdl_store
             .entry_for_name(name)
             .ok_or(format!("failed to find QMDL store entry for {name}"))?;
+        let meta_path =
+            FileKind::Meta.get_filepath(&entry.name, &qmdl_store.path, entry.compressed);
         let analysis_file = qmdl_store
             .clear_and_open_entry_analysis(entry_index)
             .await
@@ -199,7 +201,21 @@ async fn perform_analysis(
             .await
             .map_err(|e| format!("{e:?}"))?;
 
-        (analysis_file, qmdl_reader)
+        (analysis_file, qmdl_reader, meta_path)
+    };
+
+    // The home network saved with the recording beats the SIM that happens to
+    // be in the device now, which may not be the one that made it.
+    let recorded = crate::recording_metadata::read(&meta_path)
+        .await
+        .map(|sidecar| sidecar.device_metadata())
+        .filter(|metadata| !metadata.home_plmn.is_empty());
+    let device_metadata = match &recorded {
+        Some(recorded) => {
+            info!("{name}: using the home network saved with the recording");
+            recorded
+        }
+        None => device_metadata,
     };
 
     let mut analysis_writer = AnalysisWriter::new(analysis_file, analyzer_config, device_metadata)

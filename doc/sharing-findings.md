@@ -46,6 +46,24 @@ The sidecar deliberately contains **no identifiers**: no IMSI, IMEI or temporary
 identity, and no passwords or WiFi details. It is meant to be the safe part of
 the bundle. The capture next to it is not, which is the rest of this page.
 
+Beside it sits a second file, `<recording>-meta.json`, written by the device
+**when the recording started** rather than when it was exported. It records
+what the device was and knew at that moment: the hardware (model, revision and
+chipset, as far as the firmware states them), the Rayhunter build, the
+subscriber's **home network** as read from the SIM, the device's clock and the
+correction Rayhunter was applying to it, how much storage and memory were
+free, and whether the device's WiFi client was joined to a network. The home
+network is what lets analysis tell a foreign tower from one's own, so keeping
+it with the recording means the recording can be re-analysed later, on
+another machine or after the SIM has changed, and still be judged correctly.
+The clock section is there because these devices have no battery-backed clock:
+a reader can see both what the clock said and how far it was being corrected.
+The web interface shows the same details under **Device details** on each
+recording.
+
+Two of those fields say something about *you* rather than about the device,
+and the shareable download treats them accordingly, see below.
+
 ## The shareable download
 
 Every recording offers two downloads. The ordinary **zip** is the full evidence
@@ -61,6 +79,12 @@ somebody:
   have taken out.
 - A `redaction-report.json` says how many identifiers were removed and how many
   messages were examined.
+- The device details file (`<recording>-meta.json`) is included with the
+  **home network and WiFi details removed**, and lists which fields were
+  removed. The home network narrows down who the subscriber is, and the WiFi
+  block names the network the device was on; the rest, which build ran on
+  what hardware and what its clock read, is what a reader needs to judge the
+  capture and identifies no one.
 
 Your original recording is never modified. Redaction happens as the download is
 built, because a recording is evidence and evidence that got quietly rewritten

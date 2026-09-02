@@ -22,6 +22,7 @@ pub mod log_codes;
 pub mod pcap;
 pub mod plmn;
 pub mod qmdl;
+pub mod recording_metadata;
 #[cfg(test)]
 mod test_util;
 pub mod util;

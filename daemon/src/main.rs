@@ -12,6 +12,7 @@ mod error;
 mod export_metadata;
 mod frontdoor;
 mod gps;
+mod hardware;
 mod http_client;
 mod key_input;
 mod mdns;
@@ -20,6 +21,7 @@ mod packet_explorer;
 mod pairing;
 mod pcap;
 mod qmdl_store;
+mod recording_metadata;
 mod redact;
 mod server;
 mod sim_health;
@@ -47,6 +49,7 @@ use crate::notifications::{NotificationService, run_notification_worker};
 use crate::packet_explorer::{get_packet, list_packets};
 use crate::pcap::get_pcap;
 use crate::qmdl_store::RecordingStore;
+use crate::recording_metadata::get_recording_metadata;
 use crate::server::{
     MAX_GIF_BYTES, ServerState, annotate_recording, complete_setup, debug_clear_qr, debug_keypress,
     debug_set_display_state, debug_show_qr, delete_display_gif, delete_web_user, get_cell_info,
@@ -100,6 +103,10 @@ fn get_router() -> AppRouter {
         .route("/api/annotate-recording/{name}", post(annotate_recording))
         .route("/api/delete-all-recordings", post(delete_all_recordings))
         .route("/api/analysis-report/{name}", get(get_analysis_report))
+        .route(
+            "/api/recording-metadata/{name}",
+            get(get_recording_metadata),
+        )
         .route("/api/analysis", get(get_analysis_status))
         .route("/api/analysis/{name}", post(start_analysis))
         .route("/api/cell-info", get(get_cell_info))
@@ -736,6 +743,15 @@ async fn run_with_config(
         );
     }
 
+    // Shared between the WiFi client and the recording task, which notes the
+    // client's state in each recording's device details.
+    let wifi_status = Arc::new(RwLock::new(WifiStatus::default()));
+    let wifi_enabled = config
+        .wifi_ssid
+        .as_deref()
+        .is_some_and(|ssid| !ssid.is_empty());
+    let hardware = hardware::detect(&config.device).await;
+
     if !config.debug_mode {
         // Reconcile ADB with what the settings ask for, before anything else
         // starts. It only takes effect at the next restart, since the USB
@@ -780,6 +796,9 @@ async fn run_with_config(
             config.gps_mode,
             gps_fixed_coords,
             cell_tracker.clone(),
+            wifi_status.clone(),
+            wifi_enabled,
+            hardware.clone(),
         );
         info!("Starting UI");
 
@@ -856,7 +875,6 @@ async fn run_with_config(
         config.enabled_notifications.clone(),
     );
 
-    let wifi_status = Arc::new(RwLock::new(WifiStatus::default()));
     if !config.debug_mode {
         wifi_station::run_wifi_client(
             &task_tracker,

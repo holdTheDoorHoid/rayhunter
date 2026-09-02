@@ -2,6 +2,7 @@ use chrono::{DateTime, FixedOffset};
 use clap::Parser;
 use log::{debug, error, info, warn};
 use pcap_file_tokio::pcapng::{Block, PcapNgReader};
+use rayhunter::recording_metadata::{RecordingSidecar, sidecar_path_beside};
 use rayhunter::{
     DeviceMetadata,
     analysis::analyzer::{AnalysisRow, AnalyzerConfig, Event, EventType, Harness},
@@ -10,7 +11,10 @@ use rayhunter::{
     qmdl::QmdlMessageReader,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 use tokio::fs::File;
 use walkdir::WalkDir;
 
@@ -106,13 +110,65 @@ impl Report {
     }
 }
 
+/// The device details Rayhunter saved beside the capture, when they are there.
+///
+/// A recording exported from a device comes with `<name>-meta.json`, which
+/// records the subscriber's home network among other things. Analysis uses
+/// that to tell a foreign tower from one's own; without it, the home network
+/// is unknown and those checks stay quiet rather than guess.
+async fn recorded_device_metadata(capture_path: &str) -> DeviceMetadata {
+    let Some(sidecar_path) = sidecar_path_beside(Path::new(capture_path)) else {
+        return DeviceMetadata::default();
+    };
+    let bytes = match tokio::fs::read(&sidecar_path).await {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return DeviceMetadata::default(),
+        Err(e) => {
+            warn!("{}: couldn't read: {e}", sidecar_path.display());
+            return DeviceMetadata::default();
+        }
+    };
+    match serde_json::from_slice::<RecordingSidecar>(&bytes) {
+        Ok(sidecar) => {
+            let metadata = sidecar.device_metadata();
+            if metadata.home_plmn.is_empty() {
+                info!(
+                    "{}: recorded on {} with no home network known",
+                    sidecar_path.display(),
+                    sidecar.hardware.device
+                );
+            } else {
+                info!(
+                    "{}: recorded on {} with home network {}",
+                    sidecar_path.display(),
+                    sidecar.hardware.device,
+                    metadata
+                        .home_plmn
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            metadata
+        }
+        Err(e) => {
+            warn!(
+                "{}: ignoring unreadable metadata: {e}",
+                sidecar_path.display()
+            );
+            DeviceMetadata::default()
+        }
+    }
+}
+
 async fn analyze_pcap(
     pcap_path: &str,
     show_skipped: bool,
     json_writer: Option<&mut IncrementalJsonWriter<File>>,
 ) {
-    let mut harness =
-        Harness::new_with_config(&AnalyzerConfig::default(), &DeviceMetadata::default());
+    let device_metadata = recorded_device_metadata(pcap_path).await;
+    let mut harness = Harness::new_with_config(&AnalyzerConfig::default(), &device_metadata);
     let pcap_file = &mut File::open(&pcap_path).await.expect("failed to open file");
     let mut pcap_reader = PcapNgReader::new(pcap_file)
         .await
@@ -142,8 +198,8 @@ async fn analyze_qmdl(
     show_skipped: bool,
     json_writer: Option<&mut IncrementalJsonWriter<File>>,
 ) {
-    let mut harness =
-        Harness::new_with_config(&AnalyzerConfig::default(), &DeviceMetadata::default());
+    let device_metadata = recorded_device_metadata(qmdl_path).await;
+    let mut harness = Harness::new_with_config(&AnalyzerConfig::default(), &device_metadata);
     let qmdl_file = &mut File::open(&qmdl_path).await.expect("failed to open file");
     let mut qmdl_reader = QmdlMessageReader::new(qmdl_file)
         .await

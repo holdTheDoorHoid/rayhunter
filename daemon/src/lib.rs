@@ -12,6 +12,7 @@ pub mod error;
 pub mod export_metadata;
 pub mod frontdoor;
 pub mod gps;
+pub mod hardware;
 pub mod http_client;
 pub mod key_input;
 pub mod mdns;
@@ -20,6 +21,7 @@ pub mod packet_explorer;
 pub mod pairing;
 pub mod pcap;
 pub mod qmdl_store;
+pub mod recording_metadata;
 pub mod redact;
 pub mod server;
 pub mod sim_health;
@@ -61,6 +63,7 @@ use utoipa::OpenApi;
         diag::delete_recording,
         diag::delete_all_recordings,
         diag::get_analysis_report,
+        recording_metadata::get_recording_metadata,
         analysis::get_analysis_status,
         analysis::start_analysis,
         server::get_config,

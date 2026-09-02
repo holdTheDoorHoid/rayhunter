@@ -55,6 +55,53 @@ export class Manifest {
     }
 }
 
+/**
+ * What Rayhunter knew about the device when a recording was made, as saved
+ * in `<name>-meta.json` beside it. Every field but the version and name is
+ * best effort and may be missing.
+ */
+export type RecordingSidecar = {
+    sidecar_version: number;
+    recording: string;
+    software: {
+        rayhunter_version: string;
+        system_os: string;
+        arch: string;
+        kernel?: string;
+    };
+    hardware: {
+        device: string;
+        model?: string;
+        hardware_version?: string;
+        soc?: string;
+        firmware_build?: string;
+    };
+    home_plmn: string[];
+    clock: {
+        system_time_at_start?: string;
+        offset_seconds_at_start: number;
+        corrected_time_at_start?: string;
+        uptime_seconds_at_start?: number;
+        system_time_at_end?: string;
+        offset_seconds_at_end?: number;
+        uptime_seconds_at_end?: number;
+        offset_changed_during_recording?: boolean;
+    };
+    resources: {
+        storage_path?: string;
+        disk_total_bytes?: number;
+        disk_available_bytes?: number;
+        memory_total_kb?: number;
+        memory_available_kb?: number;
+    };
+    wifi: {
+        client_enabled: boolean;
+        client_state: string;
+        connected_network?: string;
+    } | null;
+    redacted_fields?: string[];
+};
+
 export class ManifestEntry {
     public name = $state('');
     public start_time: Date;
@@ -136,6 +183,14 @@ export class ManifestEntry {
 
     get_analysis_report_url(): string {
         return `/api/analysis-report/${this.name}`;
+    }
+
+    /**
+     * The device details saved beside the recording. 404 for recordings
+     * made before Rayhunter saved them.
+     */
+    get_metadata_url(): string {
+        return `/api/recording-metadata/${this.name}`;
     }
 
     get_delete_url(): string {

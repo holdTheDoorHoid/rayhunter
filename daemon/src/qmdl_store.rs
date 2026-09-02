@@ -56,11 +56,19 @@ pub enum FileKind {
     Qmdl,
     Analysis,
     Gps,
+    /// The device details saved beside the recording, see
+    /// [`rayhunter::recording_metadata`].
+    Meta,
 }
 
 impl FileKind {
     // List of all possible physical files on disk.
-    pub const ALL: &'static [FileKind] = &[FileKind::Qmdl, FileKind::Analysis, FileKind::Gps];
+    pub const ALL: &'static [FileKind] = &[
+        FileKind::Qmdl,
+        FileKind::Analysis,
+        FileKind::Gps,
+        FileKind::Meta,
+    ];
 
     pub fn get_filename(&self, entry_name: &str, qmdl_compressed: bool) -> String {
         match self {
@@ -68,6 +76,7 @@ impl FileKind {
             FileKind::Qmdl => format!("{}.qmdl", entry_name),
             FileKind::Analysis => format!("{}.ndjson", entry_name),
             FileKind::Gps => format!("{}-gps.ndjson", entry_name),
+            FileKind::Meta => rayhunter::recording_metadata::sidecar_filename(entry_name),
         }
     }
 
@@ -89,6 +98,7 @@ impl Display for FileKind {
             FileKind::Qmdl => write!(f, "QMDL"),
             FileKind::Analysis => write!(f, "analysis"),
             FileKind::Gps => write!(f, "GPS"),
+            FileKind::Meta => write!(f, "metadata"),
         }
     }
 }
@@ -469,8 +479,19 @@ impl RecordingStore {
     // Unsets the current entry
     pub async fn close_current_entry(&mut self) -> Result<(), RecordingStoreError> {
         match self.current_entry {
-            Some(_) => {
+            Some(entry_index) => {
                 self.current_entry = None;
+                // Add the closing clock readings to the recording's device
+                // details. Not having them is no reason to fail the close.
+                let entry = &self.manifest.entries[entry_index];
+                let meta_path =
+                    FileKind::Meta.get_filepath(&entry.name, &self.path, entry.compressed);
+                if let Err(e) = crate::recording_metadata::finish(&meta_path).await {
+                    warn!(
+                        "couldn't finish recording metadata {}: {e}",
+                        meta_path.display()
+                    );
+                }
                 Ok(())
             }
             None => Err(RecordingStoreError::NoCurrentEntry),

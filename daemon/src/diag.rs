@@ -3,6 +3,7 @@ use std::pin::pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::recording_metadata;
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -11,8 +12,10 @@ use axum::response::{IntoResponse, Response};
 use futures::{StreamExt, TryStreamExt, future};
 use log::{debug, error, info, warn};
 use rayhunter::Device;
+use rayhunter::recording_metadata::HardwareInfo;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use wifi_station::WifiStatus;
 
 use crate::cell_info::{
     CellTracker, NeighborCell, SignalMeasurements, identity_from_information_element,
@@ -96,6 +99,11 @@ pub struct DiagTask {
     latest_packet_timestamp: Option<i64>,
     /// Shared with the server so the web UI can read what the radio sees.
     cell_tracker: Arc<RwLock<CellTracker>>,
+    /// The WiFi client's state, noted in each recording's device details.
+    wifi_status: Arc<RwLock<WifiStatus>>,
+    wifi_enabled: bool,
+    /// What hardware this is, read once at startup.
+    hardware: HardwareInfo,
 }
 
 enum DiagState {
@@ -166,6 +174,9 @@ impl DiagTask {
         gps_mode: GpsMode,
         gps_fixed_coords: Option<(f64, f64)>,
         cell_tracker: Arc<RwLock<CellTracker>>,
+        wifi_status: Arc<RwLock<WifiStatus>>,
+        wifi_enabled: bool,
+        hardware: HardwareInfo,
     ) -> Self {
         Self {
             ui_update_sender,
@@ -183,6 +194,9 @@ impl DiagTask {
             gps_mode,
             gps_fixed_coords,
             cell_tracker,
+            wifi_status,
+            wifi_enabled,
+            hardware,
             state: DiagState::Stopped,
             max_type_seen: EventType::Informational,
             bytes_since_space_check: 0,
@@ -323,6 +337,28 @@ impl DiagTask {
         let device_metadata = DeviceMetadata {
             home_plmn: rayhunter::sim::home_plmn(&self.device).await,
         };
+        // Save what this device is and knows, beside the recording, so the
+        // recording can be judged and re-analysed without the device.
+        if let Some((_, entry)) = qmdl_store.get_current_entry() {
+            let wifi =
+                Some(recording_metadata::wifi_info(self.wifi_enabled, &self.wifi_status).await);
+            let sidecar = recording_metadata::collect(
+                &entry.name,
+                &self.hardware,
+                device_metadata.home_plmn.clone(),
+                wifi,
+                &qmdl_store.path,
+            )
+            .await;
+            let meta_path =
+                FileKind::Meta.get_filepath(&entry.name, &qmdl_store.path, entry.compressed);
+            if let Err(e) = recording_metadata::write(&meta_path, &sidecar).await {
+                warn!(
+                    "couldn't save recording metadata {}: {e}",
+                    meta_path.display()
+                );
+            }
+        }
         let analysis_writer =
             AnalysisWriter::new(analysis_file, &self.analyzer_config, &device_metadata)
                 .await
@@ -934,6 +970,9 @@ pub fn run_diag_read_thread(
     gps_mode: GpsMode,
     gps_fixed_coords: Option<(f64, f64)>,
     cell_tracker: Arc<RwLock<CellTracker>>,
+    wifi_status: Arc<RwLock<WifiStatus>>,
+    wifi_enabled: bool,
+    hardware: HardwareInfo,
 ) {
     task_tracker.spawn(async move {
         info!("Using configuration for device: {0:?}", device);
@@ -958,6 +997,9 @@ pub fn run_diag_read_thread(
             gps_mode,
             gps_fixed_coords,
             cell_tracker,
+            wifi_status,
+            wifi_enabled,
+            hardware,
         );
         qmdl_file_tx
             .send(DiagDeviceCtrlMessage::StartRecording { response_tx: None })

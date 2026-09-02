@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize};
 use std::pin::pin;
 use std::sync::Arc;
 use tokio::fs::write;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 use tokio::io::copy;
 use tokio::io::duplex;
 use tokio::sync::RwLock;
@@ -36,6 +38,7 @@ use crate::notifications::DEFAULT_NOTIFICATION_TIMEOUT;
 use crate::pcap::{generate_pcap_data, generate_redacted_pcap_data, load_gps_records_for_entry};
 use crate::qmdl_store::{FileKind, RecordingStore};
 use crate::update::UpdateStatus;
+use rayhunter::recording_metadata::RecordingSidecar;
 
 pub struct ServerState {
     pub config_path: String,
@@ -1524,6 +1527,26 @@ pub async fn get_zip(
                 let Some(mut file) = file_opt else {
                     continue;
                 };
+
+                // The device details go into a shareable bundle with the
+                // identifying parts removed, and say which those were.
+                if redact && file_kind == FileKind::Meta {
+                    let mut bytes = Vec::new();
+                    file.read_to_end(&mut bytes).await?;
+                    let Ok(sidecar) = serde_json::from_slice::<RecordingSidecar>(&bytes) else {
+                        warn!("redacted export of {qmdl_idx}: leaving out unreadable device details");
+                        continue;
+                    };
+                    let json = serde_json::to_vec_pretty(&sidecar.redacted())?;
+                    let zip_entry = ZipEntryBuilder::new(
+                        file_kind.get_filename(&qmdl_idx, false).into(),
+                        Compression::Stored,
+                    );
+                    let mut entry_writer = zip.write_entry_stream(zip_entry).await?.compat_write();
+                    entry_writer.write_all(&json).await?;
+                    entry_writer.into_inner().close().await?;
+                    continue;
+                }
 
                 /*
                  * `qmdl_compressed` is always false here because even if the

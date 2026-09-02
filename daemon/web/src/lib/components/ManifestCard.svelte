@@ -7,6 +7,7 @@
     import RecordingNotes from './RecordingNotes.svelte';
     import AnalysisView from './AnalysisView.svelte';
     import RecordingControls from './RecordingControls.svelte';
+    import RecordingDetails from './RecordingDetails.svelte';
     let {
         entry,
         current,
@@ -93,6 +94,7 @@
                 'N/A'}</span
         >
     </div>
+    <RecordingDetails {entry} />
     <RecordingNotes {entry} />
     {#if entry.stop_reason}
         <div

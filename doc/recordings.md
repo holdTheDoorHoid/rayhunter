@@ -72,10 +72,17 @@ and shields it from cleanup.
 
 ## Downloading and sharing
 
-Recordings download as a bundle containing the raw capture and its analysis. What
-that bundle contains, including identifiers that should be removed before you
-show it to anyone, is the subject of [Sharing What You Find](./sharing-findings.md).
-Read that before sending a recording anywhere.
+Recordings download as a bundle containing the raw capture, its analysis, and
+the device details saved when the recording started: what hardware and
+Rayhunter build made it, the home network it was analysed against, the
+device's clock and its correction, and how much room the device had. The
+same details are shown under **Device details** on each recording's card.
+What that bundle contains, including identifiers that should be removed before
+you show it to anyone, is the subject of [Sharing What You
+Find](./sharing-findings.md). Read that before sending a recording anywhere.
+
+Recordings made before this version have no device details; their card says
+so.
 
 ## Where to next
 
