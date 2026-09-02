@@ -497,11 +497,31 @@ fn run_shutdown_thread(
     info!("create shutdown thread");
 
     task_tracker.spawn(async move {
+        // SIGTERM is what the init script's stop, and a reboot, send. Without
+        // handling it the process just dies, and the recording that was open
+        // is left for recovery at the next start instead of being closed with
+        // its manifest entry and device details complete.
+        let mut terminate =
+            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                Ok(signal) => Some(signal),
+                Err(err) => {
+                    error!("Unable to listen for SIGTERM: {err}");
+                    None
+                }
+            };
         select! {
             res = tokio::signal::ctrl_c() => {
                 if let Err(err) = res {
                     error!("Unable to listen for shutdown signal: {err}");
                 }
+            }
+            _ = async {
+                match terminate.as_mut() {
+                    Some(signal) => { signal.recv().await; }
+                    None => std::future::pending::<()>().await,
+                }
+            } => {
+                info!("SIGTERM received, shutting down");
             }
             _ = shutdown_token.cancelled() => {}
         }
