@@ -303,6 +303,37 @@ thread had already given up, so the analysis task was never told to exit).
 The init script now checks the pidfile itself and, on `stop`, waits up to
 ten seconds before `kill -9`. `pidof rayhunter-daemon | wc -w` should be 1.
 
+## A `tokio::fs::File` read of a device node outlives its task
+
+Dropping the runtime at the end of `main` waits for every job on the
+blocking pool, and `tokio::fs::File` runs each read there. A read of
+`/dev/input/event0` returns only when a button is pressed, so when the
+`select!` in `key_input.rs` gave up on it at shutdown it left a `read(2)`
+behind in `evdev_read`. The task tracker emptied, "see you space cowboy"
+was logged, and the pid stayed in state S until `kill -9` or the next
+press. Seen on the Orbic on 2026-09-03 with `main` and `display-menu`
+builds alike; the menu thread polls with a timeout and was not involved.
+Each in-process restart (`POST /api/config`) abandoned one more read: a
+unit restarted twice showed three pool threads in `evdev_read` and three
+open descriptors for the node.
+
+Wait on a device node through `AsyncFd` with `O_NONBLOCK` (what
+`key_input.rs` does now) or on a thread that polls with a timeout (what
+`display/menu.rs` does). Confirm with a thread dump, not the log:
+
+```
+P=$(cat /tmp/rayhunter.pid); for t in /proc/$P/task/*; do echo "$(cat $t/comm) $(cat $t/wchan)"; done
+```
+
+A `tokio-runtime-w` thread in `evdev_read`, or any driver's read, after
+"see you space cowboy" is this. `/proc/<pid>/task/*/stack` is empty on the
+Orbic's kernel; `wchan` is enough. Writing an `input_event` to the node
+releases the read, which is how the diagnosis was confirmed.
+
+`/dev/diag` is read the same way (`lib/src/diag_device.rs`), but the modem
+sends log packets continuously, so its abandoned read returns at once; it
+would only show on a unit whose diag stream is quiet.
+
 ## Talking to the TP-Link from a script
 
 Its root shell is telnet on 192.168.0.1:23 with no login. A runner that
