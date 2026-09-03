@@ -62,13 +62,28 @@ pub fn subcommand_modifiers() -> Vec<SubcommandModifier<'static>> {
         gui_label: "Reset config.toml",
         advanced: true,
     };
+    // Root command execution from the web interface. Advanced, and only ever
+    // switched on here: the web interface cannot turn it on by design.
+    let enable_terminal = ArgumentModifier {
+        clap_id: "enable_terminal",
+        gui_label: "Enable the web terminal (runs commands as root)",
+        advanced: true,
+    };
+    let persist_adb = ArgumentModifier {
+        clap_id: "persist_adb",
+        gui_label: "Keep ADB on after installing",
+        advanced: true,
+    };
     let orbic_and_moxee_args = vec![
         admin_password,
         admin_ip,
         admin_username,
         reset_config,
         data_dir,
+        enable_terminal,
     ];
+    let mut moxee_args = orbic_and_moxee_args.clone();
+    moxee_args.push(persist_adb);
 
     vec![
         SubcommandModifier {
@@ -79,7 +94,7 @@ pub fn subcommand_modifiers() -> Vec<SubcommandModifier<'static>> {
         SubcommandModifier {
             command: "orbic-usb",
             gui_label: "Orbic/Kajeet (via legacy USB+ADB installer)",
-            arg_modifiers: vec![reset_config],
+            arg_modifiers: vec![reset_config, enable_terminal],
         },
         SubcommandModifier {
             command: "tplink",
@@ -103,7 +118,12 @@ pub fn subcommand_modifiers() -> Vec<SubcommandModifier<'static>> {
         SubcommandModifier {
             command: "moxee",
             gui_label: "Moxee",
-            arg_modifiers: orbic_and_moxee_args,
+            arg_modifiers: moxee_args,
+        },
+        SubcommandModifier {
+            command: "moxee-adb",
+            gui_label: "Moxee (over ADB, no password)",
+            arg_modifiers: vec![reset_config, data_dir, enable_terminal],
         },
         SubcommandModifier {
             command: "pinephone",

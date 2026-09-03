@@ -118,6 +118,17 @@ struct InstallOrbic {
     /// Overwrite config.toml even if it already exists on the device.
     #[arg(long)]
     reset_config: bool,
+
+    /// Let the web interface run commands on the device.
+    ///
+    /// Off unless given here, and deliberately not settable from the web
+    /// interface: the daemon runs as root, so this is the difference between an
+    /// interface that reads data and one that can do anything at all. Requiring
+    /// it at flash time means enabling it takes physical access to the device.
+    /// Using it takes the owner passphrase and a code shown on the device's
+    /// screen, every time.
+    #[arg(long)]
+    enable_terminal: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -148,7 +159,8 @@ struct OrbicNetworkArgs {
     /// interface: the daemon runs as root, so this is the difference between an
     /// interface that reads data and one that can do anything at all. Requiring
     /// it at flash time means enabling it takes physical access to the device.
-    /// Set a password under Configuration if you use this.
+    /// Using it takes the owner passphrase and a code shown on the device's
+    /// screen, every time.
     #[arg(long)]
     enable_terminal: bool,
 }
@@ -181,7 +193,8 @@ struct MoxeeArgs {
     /// interface: the daemon runs as root, so this is the difference between an
     /// interface that reads data and one that can do anything at all. Requiring
     /// it at flash time means enabling it takes physical access to the device.
-    /// Set a password under Configuration if you use this.
+    /// Using it takes the owner passphrase and a code shown on the device's
+    /// screen, every time.
     #[arg(long)]
     enable_terminal: bool,
     /// Also make ADB persist, so later installs need no password.
@@ -391,7 +404,7 @@ async fn run(args: Args) -> Result<(), Error> {
         Command::Pinephone(_) => pinephone::install().await
             .context("Failed to install rayhunter on the Pinephone's Quectel modem")?,
         #[cfg(not(target_os = "android"))]
-        Command::OrbicUsb(args) => orbic::install(args.reset_config).await.context("\nFailed to install rayhunter on the Orbic RC400L (USB installer)")?,
+        Command::OrbicUsb(args) => orbic::install(args.reset_config, args.enable_terminal).await.context("\nFailed to install rayhunter on the Orbic RC400L (USB installer)")?,
         Command::Orbic(args) => orbic_network::install(args.admin_ip, args.admin_username, args.admin_password, args.reset_config, args.data_dir, args.enable_terminal).await.context("\nFailed to install rayhunter on the Orbic RC400L")?,
         Command::Moxee(args) => moxee::install(args).await.context("\nFailed to install rayhunter on the Moxee Hotspot")?,
         #[cfg(not(target_os = "android"))]

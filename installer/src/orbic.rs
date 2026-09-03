@@ -84,7 +84,7 @@ async fn confirm() -> Result<bool> {
     Ok(input.trim() == "yes")
 }
 
-pub async fn install(reset_config: bool) -> Result<()> {
+pub async fn install(reset_config: bool, enable_terminal: bool) -> Result<()> {
     println!(
         "WARNING: The orbic USB installer is not recommended for most usecases. Consider using ./installer orbic instead, unless you want ADB access for other purposes."
     );
@@ -103,7 +103,7 @@ pub async fn install(reset_config: bool) -> Result<()> {
     setup_rootshell(&mut adb_device).await?;
     println!("done");
     print!("Installing rayhunter... ");
-    let mut adb_device = setup_rayhunter(adb_device, reset_config).await?;
+    let mut adb_device = setup_rayhunter(adb_device, reset_config, enable_terminal).await?;
     println!("done");
     print!("Testing rayhunter... ");
     test_rayhunter(&mut adb_device).await?;
@@ -150,7 +150,11 @@ async fn setup_rootshell(adb_device: &mut ADBUSBDevice) -> Result<()> {
     Ok(())
 }
 
-async fn setup_rayhunter(mut adb_device: ADBUSBDevice, reset_config: bool) -> Result<ADBUSBDevice> {
+async fn setup_rayhunter(
+    mut adb_device: ADBUSBDevice,
+    reset_config: bool,
+    enable_terminal: bool,
+) -> Result<ADBUSBDevice> {
     let rayhunter_daemon_bin = crate::get_file!("FILE_RAYHUNTER_DAEMON");
 
     adb_at_syscmd(
@@ -169,7 +173,7 @@ async fn setup_rayhunter(mut adb_device: ADBUSBDevice, reset_config: bool) -> Re
         let mut conn = AdbConnection {
             device: &mut adb_device,
         };
-        install_config(&mut conn, "orbic", reset_config, false, None).await?;
+        install_config(&mut conn, "orbic", reset_config, enable_terminal, None).await?;
         install_wifi_tools(&mut conn).await?;
     }
 

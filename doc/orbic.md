@@ -65,6 +65,11 @@ To get started, follow the [release installation guide](./installing-from-releas
    * ***Note:*** If you have changed the device username, password, or IP address from their default values, these must be provided as arguments to the installer command above.
 * On Verizon Orbic, the default password is the WiFi password.
 * On Kajeet/Smartspot devices, the default password is `$m@rt$p0tc0nf!g`
+* Both installers accept `--enable-terminal`, which lets the web interface run
+  commands on the device as root. It can only be switched on here, never from
+  the web interface, and using it takes the owner passphrase and a code from
+  the device's screen each time; see [The terminal](./web-authentication.md#the-terminal).
+  Running the installer again without the flag switches it off.
 
 The Rayhunter UI will be available at <http://192.168.1.1:8080>.
 

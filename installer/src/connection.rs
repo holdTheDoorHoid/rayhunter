@@ -125,7 +125,7 @@ pub async fn install_config<C: DeviceConnection>(
     }
     if enable_terminal {
         println!(
-            "  the web terminal is ENABLED on this device. Anyone who can reach the web\n  interface can run commands as root. Set a password under Configuration."
+            "  the web terminal is ENABLED on this device. It runs commands as root. Using it\n  takes a paired browser, the owner passphrase, and a code shown on the device's\n  screen (or a press of its button on a unit with no screen), every time."
         );
     }
     Ok(())
