@@ -257,6 +257,24 @@ pub fn is_exempt_from_pairing(path: &str) -> bool {
         || one_segment_under(path, "/api/setup/press-status/")
 }
 
+/// Whether a request is a GPS position being submitted while the operator
+/// has opened that one request to unpaired devices.
+///
+/// Only the submitting side, only by POST, and only while the API GPS mode
+/// is on: a switch left on with GPS off must not leave a hole behind.
+/// Reading positions back stays behind pairing, since where the unit is
+/// belongs to its owner.
+pub fn is_open_gps_post(
+    config: &crate::config::Config,
+    method: &axum::http::Method,
+    path: &str,
+) -> bool {
+    config.gps_api_open
+        && config.gps_mode == crate::config::GpsMode::Api
+        && *method == axum::http::Method::POST
+        && path == "/api/gps"
+}
+
 /// The host a link or redirect may point at, from what the request said.
 ///
 /// A `Host` header is whatever the client sent. Reflected into a redirect
@@ -379,6 +397,9 @@ pub async fn require_auth(
     if is_exempt_from_pairing(&path) {
         return next.run(request).await;
     }
+    if is_open_gps_post(&state.config, request.method(), &path) {
+        return next.run(request).await;
+    }
     let kind = request
         .extensions()
         .get::<ListenerKind>()
@@ -477,6 +498,12 @@ pub async fn redirect_to_tls(
         .copied()
         .unwrap_or(ListenerKind::Plain);
     if kind != ListenerKind::Plain || state.tls.is_none() {
+        return next.run(request).await;
+    }
+    // A GPS app posting positions cannot follow a redirect to a certificate
+    // it does not trust, so the one request the operator opened is served
+    // where it arrived.
+    if is_open_gps_post(&state.config, request.method(), request.uri().path()) {
         return next.run(request).await;
     }
     let raw_host = request
@@ -864,6 +891,30 @@ mod tests {
                 "{closed} should need pairing"
             );
         }
+    }
+
+    #[test]
+    fn the_gps_submission_opens_only_when_asked_and_only_for_posting() {
+        use crate::config::{Config, GpsMode};
+        use axum::http::Method;
+        let mut config = Config {
+            gps_mode: GpsMode::Api,
+            ..Config::default()
+        };
+        // Off by default, whatever the mode.
+        assert!(!is_open_gps_post(&config, &Method::POST, "/api/gps"));
+        config.gps_api_open = true;
+        assert!(is_open_gps_post(&config, &Method::POST, "/api/gps"));
+        // Reading positions back stays paired-only.
+        assert!(!is_open_gps_post(&config, &Method::GET, "/api/gps"));
+        // Nothing else under the API opens with it.
+        assert!(!is_open_gps_post(&config, &Method::POST, "/api/gps/"));
+        assert!(!is_open_gps_post(&config, &Method::POST, "/api/config"));
+        // A switch left on with the API mode off leaves no hole behind.
+        config.gps_mode = GpsMode::Fixed;
+        assert!(!is_open_gps_post(&config, &Method::POST, "/api/gps"));
+        config.gps_mode = GpsMode::Disabled;
+        assert!(!is_open_gps_post(&config, &Method::POST, "/api/gps"));
     }
 
     #[test]

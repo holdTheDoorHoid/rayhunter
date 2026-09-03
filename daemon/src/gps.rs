@@ -92,7 +92,7 @@ pub async fn load_gps_records(file: tokio::fs::File) -> Vec<GpsRecord> {
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to send GPS update")
     ),
     summary = "Submit GPS coordinates",
-    description = "Submit GPS coordinates from an external source (e.g. a phone app). Requires gps_mode to be set to 'Api' in configuration. latitude is in decimal degrees from -90 to 90, longitude is in decimal degrees from -180 to 180. The timestamp is derived from the most recent packet's modem timestamp."
+    description = "Submit GPS coordinates from an external source (e.g. a phone app). Requires gps_mode to be set to 'Api' in configuration, and, from a device that is not paired, gps_api_open as well. latitude is in decimal degrees from -90 to 90, longitude is in decimal degrees from -180 to 180. The timestamp is derived from the most recent packet's modem timestamp."
 ))]
 pub async fn post_gps(
     State(state): State<Arc<ServerState>>,

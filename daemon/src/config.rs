@@ -350,6 +350,17 @@ pub struct Config {
     pub gps_fixed_latitude: Option<f64>,
     /// Fixed longitude used when gps_mode=1
     pub gps_fixed_longitude: Option<f64>,
+    /// Whether positions may be submitted to `POST /api/gps` without pairing.
+    ///
+    /// Off by default. Pairing closes the whole API to anyone but paired
+    /// browsers and USB, which also shuts out the GPS apps the API mode
+    /// exists for. Turning this on opens that one request, and only for
+    /// submitting: reading positions back stays paired-only, and it does
+    /// nothing unless `gps_mode` is the API. The cost is that anyone on the
+    /// hotspot's WiFi can then write positions into recordings, in the clear
+    /// on the plain port, which is why it is a deliberate switch.
+    #[serde(default)]
+    pub gps_api_open: bool,
     /// Wifi client SSID
     pub wifi_ssid: Option<String>,
     /// Wifi client password
@@ -515,6 +526,7 @@ impl Default for Config {
             gps_mode: GpsMode::Disabled,
             gps_fixed_latitude: None,
             gps_fixed_longitude: None,
+            gps_api_open: false,
             wifi_ssid: None,
             wifi_password: None,
             wifi_security: None,

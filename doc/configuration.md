@@ -95,7 +95,7 @@ The modes are:
 
 - *Fixed*, for hardcoding latitude (-90 to 90) and longitude (-180 to 180) for devices that don't move very often or at all. Every packet in the recording will have that location.
 
-- *API Endpoint*, enables the `POST /api/gps` endpoint so that third-party tools (i.e. your own scripts) can update location info continuously. Since pairing, the endpoint answers only paired browsers and connections over USB, so a tool on the WiFi needs a paired browser's cookie. Please refer to the [API documentation](api-docs.md) for more info.
+- *API Endpoint*, enables the `POST /api/gps` endpoint so that third-party tools (i.e. your own scripts) can update location info continuously. Since pairing, the endpoint answers only paired browsers and connections over USB. To let a GPS app on the WiFi feed it, turn on **Accept positions from unpaired devices** under the mode (`gps_api_open`): that opens submitting only, on the plain port as well, so anyone on the WiFi can then post positions into recordings; reading positions back stays paired-only. Please refer to the [API documentation](api-docs.md) for more info.
 
 The GPS data is stored as a separate JSON file next to QMDL captures, and contains its own timestamps. These timestamps are meant to be compared during analysis with the packet timestamp so we know the time difference between the packet capture from the GPS capture, if there is any, since GPS data and packet data may come from two entirely separate devices.
 

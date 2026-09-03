@@ -1019,6 +1019,11 @@ pub async fn set_config(
         config.gps_fixed_latitude = None;
         config.gps_fixed_longitude = None;
     }
+    // The open switch only means something with the API mode, and a config
+    // carrying it on with GPS off would be a puzzle for whoever reads it.
+    if config.gps_mode != GpsMode::Api {
+        config.gps_api_open = false;
+    }
     // Reject out-of-range durations before anything is written. A value that a
     // runtime constructor cannot represent would otherwise be persisted and
     // then crash the daemon on the next start, over and over.

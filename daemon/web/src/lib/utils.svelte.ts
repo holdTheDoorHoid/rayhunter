@@ -185,6 +185,8 @@ export interface Config {
     gps_mode: GpsMode;
     gps_fixed_latitude: number | null;
     gps_fixed_longitude: number | null;
+    /** Answer POST /api/gps without pairing. Only meaningful in API mode. */
+    gps_api_open: boolean;
 }
 
 export interface WifiStatus {

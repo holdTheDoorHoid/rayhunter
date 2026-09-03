@@ -106,6 +106,7 @@ not have, and **(not in template)** marks a key absent from the shipped
 |---|---|---|---|
 | `gps_mode` | integer | `0` | 0 off, 1 fixed coordinates, 2 fed through the API. When off, `/api/gps` returns 404 (normal; the interface tolerates it). **(not in template)** |
 | `gps_fixed_latitude` / `gps_fixed_longitude` | number | unset | Used when `gps_mode` is 1. A missing pair logs a warning and records no coordinates. **(not in template)** |
+| `gps_api_open` | boolean | `false` | Answer `POST /api/gps` without pairing, on the plain port too, so a GPS app on the WiFi can submit positions. Only with `gps_mode` 2 and only for submitting; `GET /api/gps` stays paired-only. Anyone on the WiFi can then write positions into recordings. Saved as `false` whenever the mode is not 2. **Fork, (not in template)** |
 
 ## WebDAV upload
 

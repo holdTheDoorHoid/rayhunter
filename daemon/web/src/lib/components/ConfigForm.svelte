@@ -1197,8 +1197,8 @@
                                         Location is accepted by POST to <code>/api/gps</code>,
                                         stamped with the time of the latest captured packet. Since
                                         pairing, the API answers only paired browsers and
-                                        connections over USB, so a separate GPS app on the WiFi
-                                        cannot feed it on its own.
+                                        connections over USB; a separate GPS app on the WiFi needs
+                                        the switch below.
                                     {:else if config.gps_mode === GpsMode.Fixed}
                                         GPS coordinates are fixed to the values below.
                                     {:else}
@@ -1206,6 +1206,38 @@
                                     {/if}
                                 </p>
                             </div>
+                            {#if config.gps_mode === GpsMode.Api}
+                                <div>
+                                    <div class="flex items-center">
+                                        <input
+                                            id="gps_api_open"
+                                            type="checkbox"
+                                            bind:checked={config.gps_api_open}
+                                            class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
+                                        />
+                                        <label
+                                            for="gps_api_open"
+                                            class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                                        >
+                                            Accept positions from unpaired devices
+                                        </label>
+                                    </div>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        Off by default. On, this one request is answered without
+                                        pairing, on the plain port too, so a GPS app on this
+                                        device's WiFi can post positions. Only submitting opens;
+                                        reading positions back still needs pairing.
+                                    </p>
+                                    {#if config.gps_api_open}
+                                        <p class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                                            Anyone on this device's WiFi can now write positions
+                                            into your recordings, and they travel in the clear. A
+                                            false trail is as easy to post as a true one, so keep
+                                            that in mind when reading a location back later.
+                                        </p>
+                                    {/if}
+                                </div>
+                            {/if}
                             {#if config.gps_mode === GpsMode.Fixed}
                                 <div>
                                     <label
