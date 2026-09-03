@@ -152,6 +152,31 @@ pub struct ManifestEntry {
     /// Free text about the circumstances of the recording.
     #[serde(default)]
     pub notes: Option<String>,
+    /// What happened when this recording was contributed to a community
+    /// dataset, if it was. See `telemetry/DESIGN.md`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telemetry_submission: Option<TelemetrySubmission>,
+    /// The owner asked for this recording never to be contributed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub telemetry_excluded: bool,
+}
+
+/// The record of one recording having been contributed: enough to show on
+/// the history page, and to withdraw it later.
+#[derive(Deserialize, Serialize, Clone, PartialEq, Debug)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct TelemetrySubmission {
+    pub submission_id: String,
+    pub tier: telemetry_format::manifest::Tier,
+    #[cfg_attr(feature = "apidocs", schema(value_type = String))]
+    pub submitted_at: DateTime<Local>,
+    /// Which of the unit's signing keys signed it, so a withdrawal can be
+    /// signed by the same one after rotation.
+    pub key_id: String,
+    pub server_url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "apidocs", schema(value_type = Option<String>))]
+    pub withdrawn_at: Option<DateTime<Local>>,
 }
 
 /// Longest display name accepted, matching the length in EFForg/rayhunter#501.
@@ -211,6 +236,8 @@ impl ManifestEntry {
             compressed: true,
             display_name: None,
             notes: None,
+            telemetry_submission: None,
+            telemetry_excluded: false,
         }
     }
 
@@ -368,6 +395,8 @@ impl RecordingStore {
                 // A recovered entry has no manifest to take these from.
                 display_name: None,
                 notes: None,
+                telemetry_submission: None,
+                telemetry_excluded: false,
             });
         }
 
@@ -649,6 +678,52 @@ impl RecordingStore {
             .position(|entry| entry.name == name)
             .ok_or(RecordingStoreError::NoSuchEntryError)?;
         self.manifest.entries[entry_index].upload_time = Some(upload_time);
+        self.write_manifest().await?;
+        Ok(())
+    }
+
+    /// Note that a recording was contributed.
+    pub async fn mark_entry_submitted(
+        &mut self,
+        name: &str,
+        submission: TelemetrySubmission,
+    ) -> Result<(), RecordingStoreError> {
+        let (entry_index, _) = self
+            .entry_for_name(name)
+            .ok_or(RecordingStoreError::NoSuchEntryError)?;
+        self.manifest.entries[entry_index].telemetry_submission = Some(submission);
+        self.write_manifest().await?;
+        Ok(())
+    }
+
+    /// Note that a contribution was withdrawn. The record stays, marked, so
+    /// the recording is not contributed again.
+    pub async fn mark_entry_withdrawn(
+        &mut self,
+        name: &str,
+        withdrawn_at: DateTime<Local>,
+    ) -> Result<(), RecordingStoreError> {
+        let (entry_index, _) = self
+            .entry_for_name(name)
+            .ok_or(RecordingStoreError::NoSuchEntryError)?;
+        match &mut self.manifest.entries[entry_index].telemetry_submission {
+            Some(submission) => submission.withdrawn_at = Some(withdrawn_at),
+            None => return Err(RecordingStoreError::NoSuchEntryError),
+        }
+        self.write_manifest().await?;
+        Ok(())
+    }
+
+    /// Keep a recording out of, or let it back into, the contribution queue.
+    pub async fn set_entry_telemetry_excluded(
+        &mut self,
+        name: &str,
+        excluded: bool,
+    ) -> Result<(), RecordingStoreError> {
+        let (entry_index, _) = self
+            .entry_for_name(name)
+            .ok_or(RecordingStoreError::NoSuchEntryError)?;
+        self.manifest.entries[entry_index].telemetry_excluded = excluded;
         self.write_manifest().await?;
         Ok(())
     }

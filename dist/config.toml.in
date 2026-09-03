@@ -95,6 +95,30 @@ wifi_enabled = false
 # # Delete the entry locally after a successful upload (default false).
 # delete_on_upload = false
 
+# Contributing recordings to a community-run dataset
+# Off unless you turn it on, and best set up from the web interface, which
+# fetches the service's keys for you and shows their fingerprints. The
+# "summary" tier is the shareable zip: identifiers zeroed, raw capture left
+# out, location rounded to about 10 km. The "full" tier adds the raw capture,
+# encrypted to a key the service keeps offline, and needs your acknowledgement
+# in the interface. See doc/community-dataset.md.
+#
+# [telemetry]
+# enabled = false
+# server_url = "https://data.example.org"
+# ingest_public_key = "..."      # pinned from the service's description
+# archive_public_key = "..."     # only for the full tier
+# tier = "summary"               # or "full"
+# min_severity = "low"           # low, medium or high
+# include_clean_recordings = false
+# location = "coarse"            # none, coarse (~10 km), neighborhood (~1 km), exact
+# network = "wifi_only"          # or "any" to also use the cellular modem
+# allowed_networks = []          # WiFi names to upload from; empty means any
+# poll_interval_secs = 900
+# min_age_secs = 3600            # never upload from where the warning happened
+# upload_timeout_secs = 600
+# key_rotation_days = 30
+
 # Analyzer Configuration
 # Enable/disable specific IMSI catcher detection heuristics
 # See https://github.com/EFForg/rayhunter/blob/main/doc/heuristics.md for details

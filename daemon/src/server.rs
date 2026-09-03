@@ -85,6 +85,8 @@ pub struct ServerState {
     pub wifi_scan_lock: tokio::sync::Mutex<()>,
     pub gps_state: Arc<RwLock<Option<GpsData>>>,
     pub update_status_lock: Arc<RwLock<UpdateStatus>>,
+    /// Contributing recordings to a community dataset: its status and keys.
+    pub telemetry: Arc<crate::telemetry::TelemetryState>,
 }
 
 #[cfg_attr(feature = "apidocs", utoipa::path(
@@ -1028,6 +1030,9 @@ pub async fn set_config(
     if let Err(msg) = config.validate_storage() {
         return Err((StatusCode::BAD_REQUEST, msg));
     }
+    if let Err(msg) = config.telemetry.validate() {
+        return Err((StatusCode::BAD_REQUEST, msg));
+    }
     let mut config_to_write = config.clone();
     // Accounts are never taken from the request. The hashes are redacted on
     // the way out, so a client saving the settings page would otherwise post
@@ -1896,6 +1901,10 @@ mod tests {
             wifi_scan_lock: tokio::sync::Mutex::new(()),
             gps_state: Arc::new(RwLock::new(None)),
             update_status_lock: Arc::new(RwLock::new(UpdateStatus::default())),
+            telemetry: Arc::new(crate::telemetry::TelemetryState::new(
+                crate::config::TelemetryConfig::default(),
+                std::path::PathBuf::from("/tmp/rayhunter-test-auth"),
+            )),
         })
     }
 

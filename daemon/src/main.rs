@@ -30,6 +30,7 @@ mod stats;
 mod stepup;
 mod storage;
 mod subscriber_id;
+mod telemetry;
 mod timing_advance;
 mod tls;
 mod update;
@@ -174,6 +175,18 @@ fn get_router() -> AppRouter {
         )
         .route("/api/gps", get(get_gps))
         .route("/api/gps", post(post_gps))
+        .route("/api/telemetry/status", get(telemetry::get_status))
+        .route("/api/telemetry/probe", post(telemetry::probe_server))
+        .route("/api/telemetry/send-now", post(telemetry::send_now))
+        .route("/api/telemetry/rotate-key", post(telemetry::rotate_key))
+        .route(
+            "/api/telemetry/withdraw/{name}",
+            post(telemetry::withdraw_submission),
+        )
+        .route(
+            "/api/telemetry/exclude/{name}",
+            post(telemetry::set_excluded),
+        )
         .route("/", get(|| async { Redirect::permanent("/index.html") }))
         .route("/{*path}", get(serve_static))
 }
@@ -964,6 +977,29 @@ async fn run_with_config(
             config.webdav.clone().into(),
         );
     }
+    let telemetry_state = Arc::new(telemetry::TelemetryState::new(
+        config.telemetry.clone(),
+        std::path::PathBuf::from(&config.auth_store_path),
+    ));
+    if config.telemetry.enabled && !config.debug_mode {
+        match config.telemetry.validate() {
+            Ok(()) => telemetry::worker::run_telemetry_worker(
+                &task_tracker,
+                shutdown_token.clone(),
+                telemetry::worker::WorkerDeps {
+                    config: config.telemetry.clone(),
+                    device: config.device.clone(),
+                    store: qmdl_store_lock.clone(),
+                    wifi_status: wifi_status.clone(),
+                    state: telemetry_state.clone(),
+                },
+            ),
+            Err(reason) => {
+                warn!("not contributing recordings: {reason}");
+                telemetry_state.status.blocking_write().last_error = Some(reason);
+            }
+        }
+    }
     let initial_gps = if config.gps_mode == GpsMode::Fixed {
         match (config.gps_fixed_latitude, config.gps_fixed_longitude) {
             (Some(lat), Some(lon)) => Some(gps::GpsData {
@@ -1029,6 +1065,7 @@ async fn run_with_config(
         wifi_scan_lock: tokio::sync::Mutex::new(()),
         gps_state: Arc::new(tokio::sync::RwLock::new(initial_gps)),
         update_status_lock: update_status_lock.clone(),
+        telemetry: telemetry_state,
     });
     run_server(
         &task_tracker,

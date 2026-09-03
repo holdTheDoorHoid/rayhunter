@@ -30,6 +30,7 @@ pub mod stats;
 pub mod stepup;
 pub mod storage;
 pub mod subscriber_id;
+pub mod telemetry;
 pub mod timing_advance;
 pub mod tls;
 pub mod update;
@@ -114,7 +115,13 @@ use utoipa::OpenApi;
         gps::get_gps,
         wifi_survey::wifi_survey,
         wifi_survey::get_wifi_rules,
-        wifi_survey::set_wifi_rules
+        wifi_survey::set_wifi_rules,
+        telemetry::get_status,
+        telemetry::probe_server,
+        telemetry::send_now,
+        telemetry::rotate_key,
+        telemetry::withdraw_submission,
+        telemetry::set_excluded
     ),
     servers(
         (

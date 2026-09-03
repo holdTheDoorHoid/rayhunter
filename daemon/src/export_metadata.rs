@@ -171,6 +171,8 @@ mod tests {
             compressed: false,
             display_name: Some("market-square".to_string()),
             notes: Some("a note".to_string()),
+            telemetry_submission: None,
+            telemetry_excluded: false,
         }
     }
 

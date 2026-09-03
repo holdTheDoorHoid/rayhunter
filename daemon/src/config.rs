@@ -363,6 +363,9 @@ pub struct Config {
     pub dns_servers: Option<Vec<String>>,
     /// WebDAV upload configuration. The upload worker runs whenever `webdav.url` is non-empty.
     pub webdav: WebdavConfig,
+    /// Contributing recordings to a community dataset. Off unless the owner
+    /// turns it on; see `telemetry/DESIGN.md`.
+    pub telemetry: TelemetryConfig,
 }
 
 /// Configuration for uploading finished QMDL recordings to a WebDAV server.
@@ -428,6 +431,198 @@ impl WebdavConfig {
                 "webdav min_age_secs must be between 0 and 315360000, got {}",
                 self.min_age_secs
             ));
+        }
+        Ok(())
+    }
+}
+
+/// Which network a unit may upload contributions over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub enum TelemetryNetwork {
+    /// Only while the unit's WiFi client is joined to a network. The default:
+    /// a unit that uploads from where a warning happened, through the tower
+    /// that raised it, announces itself to whoever runs that tower.
+    #[default]
+    WifiOnly,
+    /// Over WiFi or the cellular modem, whichever the unit has.
+    Any,
+}
+
+/// The lowest severity a recording must have raised to be contributed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub enum TelemetrySeverity {
+    #[default]
+    Low,
+    Medium,
+    High,
+}
+
+impl TelemetrySeverity {
+    pub fn as_event_type(&self) -> rayhunter::analysis::analyzer::EventType {
+        use rayhunter::analysis::analyzer::EventType;
+        match self {
+            TelemetrySeverity::Low => EventType::Low,
+            TelemetrySeverity::Medium => EventType::Medium,
+            TelemetrySeverity::High => EventType::High,
+        }
+    }
+}
+
+/// Contributing recordings to a community-run dataset.
+///
+/// Everything here is the owner's choice and defaults to the least that
+/// leaves the device: off, summary tier, no location finer than ten
+/// kilometres, WiFi only, warnings only. The keys are the service's public
+/// keys as pinned when the owner checked the server; the worker refuses to
+/// upload if the service presents different ones.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+#[cfg_attr(feature = "apidocs", derive(utoipa::ToSchema))]
+pub struct TelemetryConfig {
+    pub enabled: bool,
+    /// The collection service, for example `https://data.example.org`.
+    pub server_url: String,
+    /// The service's name as it described itself, for the settings page.
+    pub server_name: Option<String>,
+    /// Base64 SEC1 P-256 point, pinned from the service's description.
+    pub ingest_public_key: Option<String>,
+    /// Base64 SEC1 P-256 point, pinned the same way. Needed for the full tier.
+    pub archive_public_key: Option<String>,
+    pub tier: telemetry_format::manifest::Tier,
+    /// When the owner acknowledged what the full tier contains. The full
+    /// tier is refused, here and by the service, without it.
+    pub full_tier_acknowledged_at: Option<String>,
+    pub min_severity: TelemetrySeverity,
+    /// Also contribute recordings that raised no warning, as baseline data.
+    pub include_clean_recordings: bool,
+    /// Full tier only: include the recording's name and notes.
+    pub include_notes: bool,
+    pub location: telemetry_format::summary::LocationPrecision,
+    pub network: TelemetryNetwork,
+    /// WiFi networks (by name) the unit may upload from. Empty means any
+    /// network the client joins.
+    pub allowed_networks: Vec<String>,
+    /// How often the worker looks for recordings to contribute.
+    pub poll_interval_secs: u64,
+    /// How long a recording must have been closed before it is contributed.
+    /// An hour by default, so the upload never happens where the warning did.
+    pub min_age_secs: i64,
+    /// Timeout for each upload request.
+    pub upload_timeout_secs: u64,
+    /// How often the unit's signing key is replaced. Zero never rotates.
+    pub key_rotation_days: u32,
+}
+
+impl Default for TelemetryConfig {
+    fn default() -> Self {
+        TelemetryConfig {
+            enabled: false,
+            server_url: String::new(),
+            server_name: None,
+            ingest_public_key: None,
+            archive_public_key: None,
+            tier: telemetry_format::manifest::Tier::Summary,
+            full_tier_acknowledged_at: None,
+            min_severity: TelemetrySeverity::Low,
+            include_clean_recordings: false,
+            include_notes: false,
+            location: telemetry_format::summary::LocationPrecision::Coarse,
+            network: TelemetryNetwork::WifiOnly,
+            allowed_networks: Vec::new(),
+            poll_interval_secs: 900,
+            min_age_secs: 3600,
+            upload_timeout_secs: 600,
+            key_rotation_days: 30,
+        }
+    }
+}
+
+impl TelemetryConfig {
+    /// Whether `url` is somewhere this will upload to: HTTPS, or plain HTTP
+    /// to the local machine for testing. Contributions are encrypted and
+    /// signed before they leave, so TLS is transport rather than the
+    /// boundary, but plain HTTP across the internet still shows an observer
+    /// which recordings exist and when.
+    pub fn acceptable_server_url(url: &str) -> Result<(), String> {
+        let parsed = url::Url::parse(url.trim()).map_err(|e| format!("server_url: {e}"))?;
+        match parsed.scheme() {
+            "https" => Ok(()),
+            "http" => {
+                let host = parsed.host_str().unwrap_or("");
+                if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+                    Ok(())
+                } else {
+                    Err(
+                        "server_url must use https (plain http is allowed only to localhost)"
+                            .into(),
+                    )
+                }
+            }
+            other => Err(format!("server_url: unsupported scheme {other:?}")),
+        }
+    }
+
+    /// Everything that must hold before this is written to disk.
+    pub fn validate(&self) -> Result<(), String> {
+        use telemetry_format::keys::RecipientPublicKey;
+        use telemetry_format::manifest::Tier;
+
+        if !(1..=3600 * 4).contains(&self.upload_timeout_secs) {
+            return Err(format!(
+                "telemetry upload_timeout_secs must be between 1 and 14400, got {}",
+                self.upload_timeout_secs
+            ));
+        }
+        if !(30..=604_800).contains(&self.poll_interval_secs) {
+            return Err(format!(
+                "telemetry poll_interval_secs must be between 30 and 604800, got {}",
+                self.poll_interval_secs
+            ));
+        }
+        if !(0..=315_360_000).contains(&self.min_age_secs) {
+            return Err(format!(
+                "telemetry min_age_secs must be between 0 and 315360000, got {}",
+                self.min_age_secs
+            ));
+        }
+        if self.key_rotation_days > 3650 {
+            return Err("telemetry key_rotation_days must be at most 3650".into());
+        }
+        for name in &self.allowed_networks {
+            if name.trim().is_empty() || name.len() > 64 {
+                return Err("telemetry allowed_networks entries must be 1 to 64 characters".into());
+            }
+        }
+        if let Some(key) = &self.ingest_public_key {
+            RecipientPublicKey::from_base64(key)
+                .map_err(|e| format!("telemetry ingest_public_key: {e}"))?;
+        }
+        if let Some(key) = &self.archive_public_key {
+            RecipientPublicKey::from_base64(key)
+                .map_err(|e| format!("telemetry archive_public_key: {e}"))?;
+        }
+        if !self.enabled {
+            return Ok(());
+        }
+        Self::acceptable_server_url(&self.server_url)?;
+        if self.ingest_public_key.is_none() {
+            return Err(
+                "telemetry needs the service's ingest key: check the server before enabling".into(),
+            );
+        }
+        if self.tier == Tier::Full {
+            if self.archive_public_key.is_none() {
+                return Err("the full tier needs the service's archive key, which this service does not offer".into());
+            }
+            if self.full_tier_acknowledged_at.is_none() {
+                return Err(
+                    "the full tier needs the owner's acknowledgement of what it sends".into(),
+                );
+            }
         }
         Ok(())
     }
@@ -522,6 +717,7 @@ impl Default for Config {
             wifi_enabled: false,
             dns_servers: None,
             webdav: WebdavConfig::default(),
+            telemetry: TelemetryConfig::default(),
         }
     }
 }

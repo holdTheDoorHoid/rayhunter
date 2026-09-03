@@ -47,7 +47,7 @@ pub struct GpsData {
     pub longitude: f64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct GpsRecord {
     /// Packet timestamp (modem clock) for correlation with captured packets.
     /// None if no packets have been received yet.

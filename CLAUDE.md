@@ -595,3 +595,35 @@ the first v0.12.3 tag push:
 
 A failed release run leaves no release; delete and re-push the tag after the
 fix (`git tag -d vX; git push origin :refs/tags/vX; git tag -a vX; git push origin vX`).
+
+## Community dataset (telemetry-testing branch)
+
+- The pieces: `telemetry/format` (envelope: keys, streamed HPKE, signed
+  manifests), `daemon/src/telemetry/` (config, eligibility, bundle, worker,
+  API), `telemetry/collector` (ingest service, triage CLI, static site).
+  `telemetry/DESIGN.md` is the argument; read it before changing what is
+  sent.
+- **The worker does not run in `debug_mode`**, so a laptop-hosted daemon
+  shows the Community tab, probes and pins a collector, but never uploads.
+  The upload path is covered by the end-to-end test in
+  `daemon/src/telemetry/worker.rs`, which stands up a fake collector.
+- To try the whole thing locally: `rayhunter-collector keygen --out K`,
+  move `K/archive.key` elsewhere (serve refuses to start with it present),
+  `rayhunter-collector serve --data D --keys K --bind 127.0.0.1:8090 --name
+  Test`, and point a unit's `telemetry.server_url` at
+  `http://127.0.0.1:8090`. Plain http is accepted only for localhost;
+  anywhere else must be https.
+- The bundle hands the PCAP writer the **reduced** GPS track, never the
+  recorded one: the writer embeds fixes in the capture, so passing the raw
+  track would leak the exact location inside a "coarse" bundle.
+- `GpsRecord.latest_packet_timestamp` is unix seconds (compared against
+  `timestamp.to_datetime().timestamp()` in `pcap.rs`); the location point
+  is the fix nearest the first warning.
+- Collector tests need a rustls crypto provider installed even though the
+  collector itself has no TLS: workspace feature unification hands its
+  dev-dependency reqwest the daemon's rustls backend. `cargo test -p
+  rayhunter-collector` alone passes without it, `cargo test --workspace`
+  does not. Hence the `rustls-rustcrypto` dev-dependency.
+- A cargo `cd` into a subdirectory persists for the rest of a Bash session
+  here; `mdbook build` from `daemon/web` fails looking for
+  `daemon/web/src/SUMMARY.md`. Run it from the repo root.
