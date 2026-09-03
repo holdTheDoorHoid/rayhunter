@@ -112,6 +112,7 @@ timing_advance = true
 flash_catch = true
 test_analyzer = false
 diagnostic_analyzer = true
+no_nas_messages = false
 
 # Switching this device's own WiFi off from the buttons.
 #

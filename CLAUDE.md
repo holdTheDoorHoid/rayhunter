@@ -137,6 +137,16 @@ V8 RRC packet has `earfcn` and `sib_mask` as **32 bit** fields.
 `AnalysisRow::is_empty`), so a detector that only emits informational events can
 never appear in the UI.
 
+**Analyzers receive each packet's timestamp**, and packets that produce no
+element (undecodable, or a kind Rayhunter never claimed to read) still reach
+every analyzer through `report_skipped_packet`, so a detector that watches the
+clock sees time pass. Both came from upstream (EFForg#1132, merged 2026-09-03
+along with everything up to b869b81). Use the recording's timestamps, never the
+system clock, so re-analysis is reproducible. `rust-toolchain.toml` now pins
+1.98.0; rustup installs it on first use, and the armv7 musl target has to be
+added to that toolchain too (`rustup target add armv7-unknown-linux-musleabihf`
+from the repo root picks the pinned one).
+
 For a protocol whose ASN.1 is **not** in `telcom-parser` (LPP and RRLP were
 two), derive the layout by hand but verify against an independent reference
 encoder before trusting it — hand-derivation from memory of the spec missed the

@@ -29,7 +29,8 @@ Notice](./differences.md).
   them, and jump to the ones that raised a warning. See [The Packet
   Explorer](../packet-explorer.md).
 - **A cell-site panel.** The serving cell, its neighbours, the encryption in
-  use, and detection health, shown live. See [The Web Interface, Panel by
+  use, detection health, whether the SIM is working and whether the modem is
+  saying anything at all, shown live. See [The Web Interface, Panel by
   Panel](../web-interface.md).
 - **This device's own identity.** Optionally shows your device's own IMSI, IMEI
   and temporary identity, off by default, because the interface has no

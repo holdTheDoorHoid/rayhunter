@@ -1,5 +1,7 @@
 <script lang="ts">
     import Explainer from './Explainer.svelte';
+    import NoDiagMessagesAlert from './NoDiagMessagesAlert.svelte';
+    import type { ManifestEntry } from '../manifest.svelte';
     import { help } from '../helpVisibility.svelte';
     import {
         rsrp_quality,
@@ -26,7 +28,11 @@
         timing_advance_metres,
     } from '../lteBands';
 
-    let { info, recording }: { info: CellInfo | null; recording: boolean } = $props();
+    let {
+        info,
+        recording,
+        entry,
+    }: { info: CellInfo | null; recording: boolean; entry?: ManifestEntry } = $props();
 
     const QUALITY_CLASS = {
         excellent: 'text-green-700 dark:text-green-300',
@@ -177,6 +183,10 @@
             {/if}
         </div>
     {/if}
+
+    <!-- Whether the modem is saying anything at all. The SIM verdict above
+         judges from traffic; this is for when there is none to judge from. -->
+    <NoDiagMessagesAlert {entry} />
 
     <!-- Only when a cell's distance actually changed. "Still where it was" is
          not news, and most modems do not report this at all. -->

@@ -25,15 +25,22 @@ A detector is a safety claim. Two things are worth settling first:
 ## The Analyzer trait
 
 Every detector implements one trait, `Analyzer`, defined in
-`lib/src/analysis/analyzer.rs`. It has four methods:
+`lib/src/analysis/analyzer.rs`. It has four required methods and one optional
+one:
 
 - `get_name`, a short, human name.
 - `get_description`, what it looks for, the events it can raise, and its
   false-positive conditions.
 - `analyze_information_element`, the heart of it: given one parsed message (an
-  `InformationElement`) and its packet number, optionally return an `Event`.
+  `InformationElement`), its packet number and its timestamp, optionally
+  return an `Event`.
 - `get_version`, a number you increase whenever you materially change the
   heuristic, so old and new reports can be told apart.
+- `report_skipped_packet`, optional: called with the timestamp of every packet
+  that produced nothing to analyze, so a detector that watches the clock (the
+  [no-NAS detector](./no-nas-messages.md) is one) still sees time pass. The
+  default does nothing. Use the recording's timestamps, never the system
+  clock, so re-analysing a recording gives the same answer.
 
 An `Event` carries a severity (`EventType`: `Informational`, `Low`, `Medium`,
 `High`) and a message string. Keep any per-message state small: an analyzer may

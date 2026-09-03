@@ -39,6 +39,8 @@
 
 use std::borrow::Cow;
 
+use chrono::{DateTime, FixedOffset};
+
 use pycrate_rs::nas::NASMessage;
 use pycrate_rs::nas::emm::EMMMessage;
 use pycrate_rs::nas::generated::emm::emm_authentication_failure::EMMCauseEMMCause;
@@ -230,6 +232,7 @@ impl Analyzer for FlashCatchAnalyzer {
         &mut self,
         ie: &InformationElement,
         packet_num: usize,
+        _timestamp: DateTime<FixedOffset>,
     ) -> Option<Event> {
         let InformationElement::LTE(lte) = ie else {
             return None;
@@ -286,6 +289,11 @@ impl Analyzer for FlashCatchAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Any fixed time will do: none of these detectors read the clock.
+    fn ts() -> DateTime<FixedOffset> {
+        DateTime::parse_from_rfc3339("2025-01-01T00:00:00+00:00").unwrap()
+    }
 
     // Plain NAS messages, 3GPP TS 24.301. Each begins 0x07: security header
     // type 0 (no protection) in the high nibble, protocol discriminator 7
@@ -346,7 +354,7 @@ mod tests {
         messages
             .iter()
             .enumerate()
-            .map(|(i, bytes)| analyzer.analyze_information_element(&nas(bytes), first + i))
+            .map(|(i, bytes)| analyzer.analyze_information_element(&nas(bytes), first + i, ts()))
             .collect()
     }
 
@@ -505,7 +513,7 @@ mod tests {
         let mut analyzer = FlashCatchAnalyzer::new();
         assert!(
             analyzer
-                .analyze_information_element(&nas(IDENTITY_REQUEST_IMSI), 0)
+                .analyze_information_element(&nas(IDENTITY_REQUEST_IMSI), 0, ts())
                 .is_none()
         );
         let events = run(
@@ -641,7 +649,7 @@ mod tests {
                 let mut analyzer = FlashCatchAnalyzer::new();
                 if let Ok(message) = NASMessage::parse(&bytes[..len]) {
                     let ie = InformationElement::LTE(Box::new(LteInformationElement::NAS(message)));
-                    let _ = analyzer.analyze_information_element(&ie, 0);
+                    let _ = analyzer.analyze_information_element(&ie, 0, ts());
                 }
             }
         }

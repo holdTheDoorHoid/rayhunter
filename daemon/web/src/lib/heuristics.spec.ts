@@ -18,6 +18,7 @@ const EXPECTED_ANALYZERS: AnalyzerKey[] = [
     'rrlp_location_request',
     'timing_advance',
     'flash_catch',
+    'no_nas_messages',
     'diagnostic_analyzer',
     'test_analyzer',
 ];

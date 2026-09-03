@@ -12,6 +12,7 @@ import {
     health_verdict,
     tracking_area_changes,
     sim_health_summary,
+    diag_silence_minutes,
     timing_advance_alert,
     type SimHealth,
 } from './cellInfo';
@@ -312,5 +313,24 @@ describe('timing_advance_alert', () => {
             metres: 6245,
         });
         expect(a?.detail).toContain('If you have moved');
+    });
+});
+
+describe('diag_silence_minutes', () => {
+    const t0 = new Date('2026-09-03T16:00:00Z');
+    const later = (minutes: number) => new Date(t0.getTime() + minutes * 60_000);
+
+    it('says nothing while the gap is short', () => {
+        expect(diag_silence_minutes(t0, later(0))).toBeNull();
+        expect(diag_silence_minutes(t0, later(4.99))).toBeNull();
+    });
+
+    it('reports whole minutes once the gap is long enough', () => {
+        expect(diag_silence_minutes(t0, later(5))).toBe(5);
+        expect(diag_silence_minutes(t0, later(12.5))).toBe(12);
+    });
+
+    it('treats a clock that has gone backwards as not silent', () => {
+        expect(diag_silence_minutes(t0, later(-30))).toBeNull();
     });
 });

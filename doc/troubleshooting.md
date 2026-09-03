@@ -122,6 +122,19 @@ for data may register without a data bearer, which the panel still counts as
 working. Seeing towers in the panel is not enough on its own, since a modem with
 no usable SIM still decodes the towers around it.
 
+### The Cell Site panel says "Nothing from the modem for N minutes"
+
+**Cause:** a recording is running, but the modem's diagnostic stream has sent
+Rayhunter nothing at all in that time. An idle device still produces a trickle
+of messages, so a complete silence of five minutes or more usually means the
+stream has stalled, not that the network has gone quiet. This is judged against
+the device's own clock, so a wrong clock on your computer does not cause it.
+
+**Fix:** it clears by itself when messages resume. If it does not, stop and
+start the recording; if that does not help either, power the device off and on.
+A recording that ends with a long silence is worth treating as incomplete for
+that stretch.
+
 ### Warnings are flooding in on every tower
 
 **Cause:** the test analyzer is on. It fires on every tower by design, to prove

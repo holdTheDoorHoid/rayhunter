@@ -26,6 +26,8 @@
 //! thousands of identical rows.
 
 use std::borrow::Cow;
+
+use chrono::{DateTime, FixedOffset};
 use std::collections::HashMap;
 
 use pycrate_rs::nas::NASMessage;
@@ -562,6 +564,7 @@ impl Analyzer for LppLocationRequestAnalyzer {
         &mut self,
         ie: &InformationElement,
         _packet_num: usize,
+        _timestamp: DateTime<FixedOffset>,
     ) -> Option<Event> {
         let InformationElement::LTE(lte) = ie else {
             return None;
@@ -805,6 +808,7 @@ impl Analyzer for LppLocationTrackingAnalyzer {
         &mut self,
         ie: &InformationElement,
         _packet_num: usize,
+        _timestamp: DateTime<FixedOffset>,
     ) -> Option<Event> {
         let (container, direction) = lpp_container(ie)?;
         // Undecodable LPP is left to the basic analyzer to note; adding depth
@@ -817,6 +821,11 @@ impl Analyzer for LppLocationTrackingAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Any fixed time will do: none of these detectors read the clock.
+    fn ts() -> DateTime<FixedOffset> {
+        DateTime::parse_from_rfc3339("2025-01-01T00:00:00+00:00").unwrap()
+    }
 
     /// Test bytes were produced with pycrate's reference implementation of
     /// 3GPP TS 36.355 (`pycrate_asn1dir.LPP`), each round-tripped through its
@@ -1072,7 +1081,7 @@ mod tests {
     fn a_location_request_raises_a_low_warning() {
         let mut analyzer = LppLocationRequestAnalyzer::new();
         let event = analyzer
-            .analyze_information_element(&nas_transport(true, &from_hex(REQUEST_LOCATION)), 1)
+            .analyze_information_element(&nas_transport(true, &from_hex(REQUEST_LOCATION)), 1, ts())
             .expect("must produce an event");
         assert_eq!(event.event_type, EventType::Low);
         assert!(
@@ -1087,7 +1096,11 @@ mod tests {
     fn a_location_report_raises_a_low_warning() {
         let mut analyzer = LppLocationRequestAnalyzer::new();
         let event = analyzer
-            .analyze_information_element(&nas_transport(false, &from_hex(PROVIDE_LOCATION_END)), 1)
+            .analyze_information_element(
+                &nas_transport(false, &from_hex(PROVIDE_LOCATION_END)),
+                1,
+                ts(),
+            )
             .expect("must produce an event");
         assert_eq!(event.event_type, EventType::Low);
         assert!(
@@ -1104,20 +1117,24 @@ mod tests {
         let mut analyzer = LppLocationRequestAnalyzer::new();
 
         let request = analyzer
-            .analyze_information_element(&nas_transport(true, &from_hex(REQUEST_LOCATION)), 1)
+            .analyze_information_element(&nas_transport(true, &from_hex(REQUEST_LOCATION)), 1, ts())
             .unwrap();
         assert_eq!(request.event_type, EventType::Low);
 
         // Same transaction (locationServer, 5), so no second warning — but
         // this report ends the transaction...
         let report = analyzer
-            .analyze_information_element(&nas_transport(false, &from_hex(PROVIDE_LOCATION_END)), 2)
+            .analyze_information_element(
+                &nas_transport(false, &from_hex(PROVIDE_LOCATION_END)),
+                2,
+                ts(),
+            )
             .unwrap();
         assert_eq!(report.event_type, EventType::Informational);
 
         // ...which frees the number for a genuinely new exchange.
         let repeat = analyzer
-            .analyze_information_element(&nas_transport(true, &from_hex(REQUEST_LOCATION)), 3)
+            .analyze_information_element(&nas_transport(true, &from_hex(REQUEST_LOCATION)), 3, ts())
             .unwrap();
         assert_eq!(repeat.event_type, EventType::Low);
     }
@@ -1128,7 +1145,11 @@ mod tests {
     fn an_unpaired_report_still_warns() {
         let mut analyzer = LppLocationRequestAnalyzer::new();
         let event = analyzer
-            .analyze_information_element(&nas_transport(false, &from_hex(PROVIDE_LOCATION_END)), 1)
+            .analyze_information_element(
+                &nas_transport(false, &from_hex(PROVIDE_LOCATION_END)),
+                1,
+                ts(),
+            )
             .unwrap();
         assert_eq!(event.event_type, EventType::Low);
     }
@@ -1141,7 +1162,7 @@ mod tests {
             (false, PROVIDE_CAPABILITIES_SEQ),
         ] {
             let event = analyzer
-                .analyze_information_element(&nas_transport(downlink, &from_hex(hex)), 1)
+                .analyze_information_element(&nas_transport(downlink, &from_hex(hex)), 1, ts())
                 .expect("must produce an event");
             assert_eq!(event.event_type, EventType::Informational, "for {hex}");
         }
@@ -1152,7 +1173,7 @@ mod tests {
     fn unreadable_lpp_is_reported_informationally() {
         let mut analyzer = LppLocationRequestAnalyzer::new();
         let event = analyzer
-            .analyze_information_element(&nas_transport(true, &[0xff]), 1)
+            .analyze_information_element(&nas_transport(true, &[0xff]), 1, ts())
             .expect("must produce an event");
         assert_eq!(event.event_type, EventType::Informational);
         assert!(event.message.contains("could not be read"));
@@ -1165,7 +1186,7 @@ mod tests {
         // An EMM identity request, which belongs to a different analyzer.
         let nas = NASMessage::parse(&[0x07, 0x55, 0x01]).unwrap();
         let ie = InformationElement::LTE(Box::new(LteInformationElement::NAS(nas)));
-        assert_eq!(analyzer.analyze_information_element(&ie, 1), None);
+        assert_eq!(analyzer.analyze_information_element(&ie, 1, ts()), None);
     }
 
     /// A Generic NAS Transport whose container is *not* LPP (type 2, location
@@ -1179,11 +1200,11 @@ mod tests {
         let nas = NASMessage::parse(&[0x07, 0x68, 0x02, 0x00, 0x01, 0x00])
             .expect("test NAS message must parse");
         let ie = InformationElement::LTE(Box::new(LteInformationElement::NAS(nas)));
-        assert_eq!(analyzer.analyze_information_element(&ie, 1), None);
+        assert_eq!(analyzer.analyze_information_element(&ie, 1, ts()), None);
 
         // The deep tracking analyzer already ignores it too.
         let mut tracking = LppLocationTrackingAnalyzer::new();
-        assert_eq!(tracking.analyze_information_element(&ie, 1), None);
+        assert_eq!(tracking.analyze_information_element(&ie, 1, ts()), None);
     }
 
     // --- The deep tracking analyzer ---
@@ -1192,7 +1213,7 @@ mod tests {
     fn tracking_flags_continuous_requests_at_medium() {
         let mut analyzer = LppLocationTrackingAnalyzer::new();
         let event = analyzer
-            .analyze_information_element(&nas_transport(true, &from_hex(REQ_PERIODIC)), 1)
+            .analyze_information_element(&nas_transport(true, &from_hex(REQ_PERIODIC)), 1, ts())
             .expect("must produce an event");
         assert_eq!(event.event_type, EventType::Medium);
         assert!(
@@ -1206,7 +1227,7 @@ mod tests {
     fn tracking_reports_a_one_off_request_at_low_with_its_method() {
         let mut analyzer = LppLocationTrackingAnalyzer::new();
         let event = analyzer
-            .analyze_information_element(&nas_transport(true, &from_hex(REQ_METHOD_ECID)), 1)
+            .analyze_information_element(&nas_transport(true, &from_hex(REQ_METHOD_ECID)), 1, ts())
             .expect("must produce an event");
         assert_eq!(event.event_type, EventType::Low);
         assert!(
@@ -1223,12 +1244,20 @@ mod tests {
         // First continuous request warns Medium. Uses the open-transaction
         // vector: an ongoing session does not end its transaction each message.
         let first = analyzer
-            .analyze_information_element(&nas_transport(true, &from_hex(REQ_PERIODIC_OPEN)), 1)
+            .analyze_information_element(
+                &nas_transport(true, &from_hex(REQ_PERIODIC_OPEN)),
+                1,
+                ts(),
+            )
             .unwrap();
         assert_eq!(first.event_type, EventType::Medium);
         // Same transaction again: informational, not another Medium.
         let repeat = analyzer
-            .analyze_information_element(&nas_transport(true, &from_hex(REQ_PERIODIC_OPEN)), 2)
+            .analyze_information_element(
+                &nas_transport(true, &from_hex(REQ_PERIODIC_OPEN)),
+                2,
+                ts(),
+            )
             .unwrap();
         assert_eq!(repeat.event_type, EventType::Informational);
     }
@@ -1240,13 +1269,13 @@ mod tests {
     fn tracking_rewarns_after_a_transaction_ends() {
         let mut analyzer = LppLocationTrackingAnalyzer::new();
         let first = analyzer
-            .analyze_information_element(&nas_transport(true, &from_hex(REQ_PERIODIC)), 1)
+            .analyze_information_element(&nas_transport(true, &from_hex(REQ_PERIODIC)), 1, ts())
             .unwrap();
         assert_eq!(first.event_type, EventType::Medium);
         // REQ_PERIODIC ends its transaction, so the same bytes again are a new
         // session and warn afresh.
         let again = analyzer
-            .analyze_information_element(&nas_transport(true, &from_hex(REQ_PERIODIC)), 2)
+            .analyze_information_element(&nas_transport(true, &from_hex(REQ_PERIODIC)), 2, ts())
             .unwrap();
         assert_eq!(again.event_type, EventType::Medium);
     }
@@ -1255,7 +1284,7 @@ mod tests {
     fn tracking_notes_a_declined_response_informationally() {
         let mut analyzer = LppLocationTrackingAnalyzer::new();
         let event = analyzer
-            .analyze_information_element(&nas_transport(false, &from_hex(PROV_ERROR)), 1)
+            .analyze_information_element(&nas_transport(false, &from_hex(PROV_ERROR)), 1, ts())
             .expect("must produce an event");
         assert_eq!(event.event_type, EventType::Informational);
         assert!(
@@ -1269,7 +1298,7 @@ mod tests {
     fn tracking_flags_a_position_report_at_low() {
         let mut analyzer = LppLocationTrackingAnalyzer::new();
         let event = analyzer
-            .analyze_information_element(&nas_transport(false, &from_hex(PROV_GNSS)), 1)
+            .analyze_information_element(&nas_transport(false, &from_hex(PROV_GNSS)), 1, ts())
             .expect("must produce an event");
         assert_eq!(event.event_type, EventType::Low);
         assert!(
@@ -1287,7 +1316,8 @@ mod tests {
         assert_eq!(
             analyzer.analyze_information_element(
                 &nas_transport(true, &from_hex(REQUEST_CAPABILITIES)),
-                1
+                1,
+                ts()
             ),
             None
         );
@@ -1299,7 +1329,11 @@ mod tests {
     fn tracking_is_self_sufficient() {
         let mut analyzer = LppLocationTrackingAnalyzer::new();
         let event = analyzer
-            .analyze_information_element(&nas_transport(true, &from_hex(REQ_TYPE_ESTIMATE_REQ)), 1)
+            .analyze_information_element(
+                &nas_transport(true, &from_hex(REQ_TYPE_ESTIMATE_REQ)),
+                1,
+                ts(),
+            )
             .expect("a location request must always produce a visible event");
         assert!(event.event_type >= EventType::Low);
     }

@@ -17,6 +17,7 @@ export interface AnalyzerConfig {
     flash_catch: boolean;
     test_analyzer: boolean;
     diagnostic_analyzer: boolean;
+    no_nas_messages: boolean;
 }
 
 export enum enabled_notifications {

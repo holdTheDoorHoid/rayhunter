@@ -735,8 +735,10 @@ mod tests {
         assert!(config.analyzers.lpp_location_tracking);
         assert!(config.analyzers.rrlp_location_request);
         assert!(config.analyzers.incomplete_sib);
-        // The testing analyzer stays off by default even when unlisted.
+        // The testing analyzer stays off by default even when unlisted, and so
+        // does the experimental no-NAS one.
         assert!(!config.analyzers.test_analyzer);
+        assert!(!config.analyzers.no_nas_messages);
     }
 
     #[test]

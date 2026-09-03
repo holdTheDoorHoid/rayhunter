@@ -72,6 +72,7 @@
   - [Location Requested on 2G (RRLP)](./detectors/rrlp.md)
   - [A Tower That Seems to Have Moved](./detectors/timing-advance.md)
   - [Identity Taken, Then Forged Authentication (FlashCatch)](./detectors/flash-catch.md)
+  - [No Conversation With the Network](./detectors/no-nas-messages.md)
 - [Writing a New Detector](./detectors/writing-a-detector.md)
 - [How We Validate Detectors](./detectors/validation.md)
 

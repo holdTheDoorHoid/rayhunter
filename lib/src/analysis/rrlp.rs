@@ -22,6 +22,8 @@
 
 use std::borrow::Cow;
 
+use chrono::{DateTime, FixedOffset};
+
 use super::analyzer::{Analyzer, Event, EventType};
 use super::information_element::InformationElement;
 
@@ -160,6 +162,7 @@ impl Analyzer for RrlpLocationAnalyzer {
         &mut self,
         ie: &InformationElement,
         _packet_num: usize,
+        _timestamp: DateTime<FixedOffset>,
     ) -> Option<Event> {
         let InformationElement::GSM(gsm) = ie else {
             return None;
@@ -202,6 +205,11 @@ impl Analyzer for RrlpLocationAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Any fixed time will do: none of these detectors read the clock.
+    fn ts() -> DateTime<FixedOffset> {
+        DateTime::parse_from_rfc3339("2025-01-01T00:00:00+00:00").unwrap()
+    }
     use crate::analysis::information_element::GsmInformationElement;
     use crate::gsmtap::UmSubtype;
 
@@ -280,7 +288,7 @@ mod tests {
     fn a_2g_location_request_warns() {
         let mut analyzer = RrlpLocationAnalyzer {};
         let event = analyzer
-            .analyze_information_element(&gsm(APP_MSR_REQ), 1)
+            .analyze_information_element(&gsm(APP_MSR_REQ), 1, ts())
             .expect("must produce an event");
         assert_eq!(event.event_type, EventType::Low);
         assert!(
@@ -296,7 +304,7 @@ mod tests {
     fn a_2g_location_report_warns() {
         let mut analyzer = RrlpLocationAnalyzer {};
         let event = analyzer
-            .analyze_information_element(&gsm(APP_MSR_RSP), 1)
+            .analyze_information_element(&gsm(APP_MSR_RSP), 1, ts())
             .expect("must produce an event");
         assert_eq!(event.event_type, EventType::Low);
         assert!(event.message.contains("reported its position"));
@@ -307,7 +315,7 @@ mod tests {
         let mut analyzer = RrlpLocationAnalyzer {};
         for hex in [APP_ASSIST, APP_ACK] {
             let event = analyzer
-                .analyze_information_element(&gsm(hex), 1)
+                .analyze_information_element(&gsm(hex), 1, ts())
                 .expect("must produce an event");
             assert_eq!(event.event_type, EventType::Informational, "for {hex}");
         }
@@ -318,12 +326,15 @@ mod tests {
         let mut analyzer = RrlpLocationAnalyzer {};
         // A non-RRLP APPLICATION INFORMATION (ETWS).
         assert_eq!(
-            analyzer.analyze_information_element(&gsm(APP_ETWS), 1),
+            analyzer.analyze_information_element(&gsm(APP_ETWS), 1, ts()),
             None
         );
         // An ordinary GSM message that is not APPLICATION INFORMATION at all:
         // a System Information Type 5 on SACCH (message type 0x35, PD RR).
-        assert_eq!(analyzer.analyze_information_element(&gsm("0635"), 1), None);
+        assert_eq!(
+            analyzer.analyze_information_element(&gsm("0635"), 1, ts()),
+            None
+        );
     }
 
     /// Truncated frames and APDUs must fail cleanly, never panic. This is 2G
@@ -334,7 +345,7 @@ mod tests {
         for hex in [APP_MSR_REQ, APP_ERROR, APP_ETWS] {
             let bytes = from_hex(hex);
             for n in 0..bytes.len() {
-                let _ = analyzer.analyze_information_element(&gsm(&hex[..n * 2]), 1);
+                let _ = analyzer.analyze_information_element(&gsm(&hex[..n * 2]), 1, ts());
                 let _ = rrlp_apdu_from_application_information(&bytes[..n]);
                 let _ = decode_rrlp_apdu(&bytes[..n]);
             }

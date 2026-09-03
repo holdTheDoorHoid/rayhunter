@@ -26,6 +26,8 @@
 //! treated as no data at all.
 
 use std::borrow::Cow;
+
+use chrono::{DateTime, FixedOffset};
 use std::collections::HashMap;
 
 use telcom_parser::lte_rrc::{BCCH_DL_SCH_MessageType, BCCH_DL_SCH_MessageType_c1};
@@ -147,6 +149,7 @@ impl Analyzer for TimingAdvanceAnalyzer {
         &mut self,
         ie: &InformationElement,
         _packet_num: usize,
+        _timestamp: DateTime<FixedOffset>,
     ) -> Option<Event> {
         let InformationElement::LTE(lte) = ie else {
             return None;

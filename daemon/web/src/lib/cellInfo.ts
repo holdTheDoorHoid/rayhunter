@@ -349,6 +349,22 @@ export function sim_health_summary(health: SimHealth | undefined): {
     }
 }
 
+/** How long the modem may go quiet before the panel says so. */
+export const DIAG_SILENCE_MINUTES = 5;
+
+/**
+ * Whole minutes since the modem last sent anything, once that is long enough
+ * to be worth saying; null while it is not.
+ *
+ * `now` should be the device's clock, since `last_activity` came from it. A
+ * device whose clock has jumped backwards produces a negative gap, which is
+ * not silence and is reported as null.
+ */
+export function diag_silence_minutes(last_activity: Date, now: Date): number | null {
+    const minutes = Math.floor((now.getTime() - last_activity.getTime()) / 60_000);
+    return minutes >= DIAG_SILENCE_MINUTES ? minutes : null;
+}
+
 /**
  * The timing advance verdict in words, or null when there is nothing to say.
  *

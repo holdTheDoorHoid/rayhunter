@@ -157,6 +157,17 @@ export const HEURISTICS: HeuristicInfo[] = [
         noise: 'A SIM with a mismatched key, such as a badly provisioned or test SIM, fails this check on every connection and would trip it constantly, but such a phone also has no service, so the situation is obvious. A single rejection is not counted, and a sequence-number mismatch on its own is normal housekeeping; three of those in a row raise a medium warning, since they suggest a tower replaying authentication data it captured earlier. The pattern comes from the paper describing the attack; it has not yet been confirmed against a recording of the attack itself.',
     },
     {
+        key: 'no_nas_messages',
+        title: 'No conversation with the network (experimental)',
+        summary:
+            'Warns once per recording when five minutes of modem traffic go by without the SIM and the network exchanging a single message.',
+        detects:
+            'Every message the modem logs carries a time. This check watches that clock through the recording and, if five minutes pass with modem traffic flowing but nothing exchanged between the SIM and the network core, writes one low warning and then stays quiet for the rest of that recording. The moment such an exchange appears, it stands down.',
+        matters:
+            'A SIM that is dead, unactivated or badly seated looks exactly like a quiet night: the device runs, the screen stays green, and nothing will ever be found, because a fake tower has to talk to the SIM to be caught. The cell-site panel already gives a live verdict on the SIM. This leaves the same finding in the saved recording, where it survives export and re-analysis.',
+        noise: 'Off by default while it is being tried out. It can fire on a healthy device that was turned away by the only network it can hear, or that has no network to reach at all, and a recording started after the device gave up trying is flagged even though the SIM is fine. A recording with no modem traffic at all cannot trigger it; the cell-site panel warns about that separately.',
+    },
+    {
         key: 'diagnostic_analyzer',
         title: 'Identity exposure diary',
         summary:

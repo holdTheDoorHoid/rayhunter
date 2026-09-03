@@ -73,7 +73,6 @@ impl Report {
         if let Some(reason) = row.skipped_message_reason {
             *self.skipped_reasons.entry(reason).or_insert(0) += 1;
             self.skipped += 1;
-            return;
         }
         for maybe_event in row.events {
             let Some(event) = maybe_event else { continue };
@@ -159,6 +158,36 @@ async fn recorded_device_metadata(capture_path: &str) -> DeviceMetadata {
             );
             DeviceMetadata::default()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::DateTime;
+
+    /// A packet the analysers could not decode can still carry a warning from
+    /// a detector that watches the clock, so a skipped row is counted as
+    /// skipped and its events are still reported.
+    #[test]
+    fn process_row_records_skip_reason_and_event() {
+        let mut report = Report::new("test");
+        report.process_row(AnalysisRow {
+            packet_num: Some(1),
+            packet_timestamp: Some(
+                DateTime::parse_from_rfc3339("2025-01-01T00:00:00+00:00").unwrap(),
+            ),
+            skipped_message_reason: Some("parse error".to_string()),
+            events: vec![Some(Event {
+                event_type: EventType::Low,
+                message: "warning".to_string(),
+            })],
+        });
+
+        assert_eq!(report.skipped, 1);
+        assert_eq!(report.skipped_reasons["parse error"], 1);
+        assert_eq!(report.warnings, 1);
+        assert_eq!(report.events.len(), 1);
     }
 }
 

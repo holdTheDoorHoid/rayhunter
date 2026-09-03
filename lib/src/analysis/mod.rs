@@ -7,6 +7,7 @@ pub mod incomplete_sib;
 pub mod information_element;
 pub mod lpp;
 pub mod nas_null_cipher;
+pub mod no_nas_messages;
 pub mod null_cipher;
 pub mod priority_2g_downgrade;
 pub mod rrlp;

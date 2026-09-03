@@ -69,6 +69,12 @@ around it, live:
   has not managed to register with any of them. The distinction it draws is
   between hearing a network and talking to one: a SIM-less modem still decodes
   the towers around it, so seeing cells proves only that the radio works.
+- **Whether the modem is saying anything at all**, shown just under the SIM
+  verdict when it is not: "Nothing from the modem for N minutes" appears once a
+  running recording has gone five minutes without a single diagnostic message,
+  and disappears when messages resume. The SIM verdict judges from traffic;
+  this is for when there is none to judge from, which usually means the
+  diagnostic stream itself has stalled rather than anything about the network.
 - **This device's own identity**, its IMSI, IMEI, and temporary identity, but
   **only if you have turned that on**, under **Configuration → Security**. It
   is off by default: the IMSI is exactly what an IMSI catcher wants, and

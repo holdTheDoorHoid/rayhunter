@@ -415,7 +415,7 @@
                 </div>
             {/if}
             <SystemStatsTable stats={system_stats!} {gps_data} {gps_mode} />
-            <CellInfoView info={cell_info} recording={!!current_entry} />
+            <CellInfoView info={cell_info} recording={!!current_entry} entry={current_entry} />
         </div>
         <div class="flex flex-col gap-2">
             <div class="flex flex-row gap-2">
