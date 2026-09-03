@@ -940,10 +940,10 @@ pub async fn trigger_demo_warning(
 pub async fn get_cell_info(State(state): State<Arc<ServerState>>) -> Json<CellInfo> {
     let tracker = state.cell_tracker.read().await;
     let mut info = tracker.snapshot();
-    // Attached only when the operator asked for it. This endpoint needs no
-    // credentials, so on a hotspot it is readable by anyone on the WiFi, and an
-    // IMSI is precisely what an IMSI catcher is trying to collect. Off by
-    // default means the default build cannot be turned into one.
+    // Attached only when the operator asked for it. Every paired browser can
+    // read this endpoint, and an IMSI is precisely what an IMSI catcher is
+    // trying to collect. Off by default means the default build cannot be
+    // turned into one.
     if state.config.show_subscriber_identity {
         // Sent even when empty, so the interface can say that nothing has been
         // seen yet and why. Omitting it left a setting that appeared to do

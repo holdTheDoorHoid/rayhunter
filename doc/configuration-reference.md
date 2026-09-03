@@ -70,7 +70,7 @@ not have, and **(not in template)** marks a key absent from the shipped
 |---|---|---|---|
 | `[analyzers]` table | booleans | all on except `test_analyzer` | Enables each detector. Keys: `imsi_requested`, `connection_redirect_2g_downgrade`, `lte_sib6_and_7_downgrade`, `null_cipher`, `nas_null_cipher`, `incomplete_sib`, `lpp_location_request` (**Fork**), `lpp_location_tracking` (**Fork**), `rrlp_location_request` (**Fork**), `timing_advance` (**Fork**), `flash_catch` (**Fork**), `diagnostic_analyzer`, `test_analyzer`. Missing keys default on (except `test_analyzer`). See the [Detector Reference](./detectors/index.md). |
 | `demo_mode` | boolean | `false` | Enables the demo warning button, which injects a clearly-labelled synthetic warning into the current recording. See [Your First Warning](./first-warning.md). **Fork, (not in template)** |
-| `show_subscriber_identity` | boolean | `false` | Whether the web interface discloses this device's own IMSI, IMEI and temporary identity. Off by default because the interface may be unauthenticated. **Fork, (not in template)** |
+| `show_subscriber_identity` | boolean | `false` | Whether the web interface discloses this device's own IMSI, IMEI and temporary identity. Off by default: the IMSI is what an IMSI catcher collects, and anything the interface serves can be read from every paired device. Set under *Security* on the settings page. **Fork, (not in template)** |
 | `terminal_enabled` | boolean | `false` | Whether the web interface may run a command on the device. Only settable at install time (`--enable-terminal`), never from the interface. **Fork, (not in template)** |
 
 ## Recording management

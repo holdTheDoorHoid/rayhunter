@@ -203,8 +203,10 @@
      * The sections of the configuration page.
      *
      * Named for what somebody came to change rather than for how the code is
-     * organised, which is why storage and GPS sit together under Recordings
-     * and the demo control sits with the heuristics it fakes.
+     * organised, which is why storage and GPS sit together under Recordings,
+     * the demo control sits with the heuristics it fakes, and USB debugging
+     * sits under Security rather than Network: it is about who gets root on
+     * the device, not about connecting it to anything.
      */
     const TABS = [
         { id: 'display', label: 'Display', hint: 'What the device shows on its own screen' },
@@ -220,6 +222,11 @@
             hint: 'Being told when something happens',
         },
         { id: 'network', label: 'Network', hint: 'Connecting the device to a WiFi network' },
+        {
+            id: 'security',
+            label: 'Security',
+            hint: 'Who can use this interface, and what the device gives away',
+        },
     ] as const;
 
     let active = $state<(typeof TABS)[number]['id']>('display');
@@ -499,7 +506,7 @@
 
             <!-- Tabs rather than one long scroll. The page had grown past
                  the point where anything could be found by scrolling, and
-                 these five names are how people actually describe what they
+                 these six names are how people actually describe what they
                  came to change. They wrap rather than scroll sideways, so
                  every section stays visible on a phone. -->
             <div
@@ -547,15 +554,16 @@
                             </button>
                             {#if lowPowerApplied}
                                 <span class="text-xs text-green-700 dark:text-green-300">
-                                    Applied below. Review and save.
+                                    Applied under Display, Notifications and Network. Review and
+                                    save.
                                 </span>
                             {/if}
                         </div>
                         <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
                             Turns the device display off, stops Rayhunter holding the screen awake,
                             stops the periodic update check, and allows switching WiFi off from the
-                            buttons. It changes the settings below rather than saving them, so you
-                            can see what it did.
+                            buttons. It changes settings under Display, Notifications and Network
+                            rather than saving them, so you can see what it did.
                         </p>
                         <Explainer summary="What actually uses the battery, measured.">
                             <p>
@@ -661,387 +669,6 @@
                                     Pick "while plugged in" unless you have a reason not to.
                                 </p>
                             {/if}
-                            <!-- Only offered for the levels that actually cover the
-                                 device's own screens. Mirrors covers_the_screen in
-                                 daemon/src/display/generic_framebuffer.rs. In Subtle
-                                 a thin line was never hiding anything, so there would
-                                 be nothing to step aside from and this would be a
-                                 control that visibly does nothing. -->
-                            <div class="border-t border-gray-200 dark:border-gray-700 pt-3 mt-4">
-                                <h4 class="text-sm font-medium text-gray-700 dark:text-gray-200">
-                                    Who can use this interface
-                                </h4>
-                                <p class="mt-1 text-xs text-gray-600 dark:text-gray-300">
-                                    Only phones and computers paired with this unit. Add one with a
-                                    code from here, or with the owner passphrase on the pairing
-                                    page.
-                                </p>
-
-                                <h5
-                                    class="mt-3 text-sm font-medium text-gray-700 dark:text-gray-200"
-                                >
-                                    Trusted devices
-                                </h5>
-                                {#if devices.length === 0}
-                                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                        None paired yet.
-                                    </p>
-                                {:else}
-                                    <ul class="mt-1 space-y-1">
-                                        {#each devices as d (d.id)}
-                                            <li
-                                                class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm"
-                                            >
-                                                {#if renaming === d.id}
-                                                    <input
-                                                        type="text"
-                                                        bind:value={renameValue}
-                                                        maxlength="64"
-                                                        class="w-44 rounded-md border border-gray-300 px-2 py-0.5 text-sm dark:border-gray-600"
-                                                    />
-                                                    <button
-                                                        type="button"
-                                                        onclick={() => commit_rename(d.id)}
-                                                        class="text-xs underline"
-                                                    >
-                                                        save
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onclick={() => (renaming = null)}
-                                                        class="text-xs underline"
-                                                    >
-                                                        cancel
-                                                    </button>
-                                                {:else}
-                                                    <span>{d.name}</span>
-                                                    {#if d.current}
-                                                        <span
-                                                            class="rounded bg-blue-100 px-1 text-xs text-blue-800 dark:bg-blue-900 dark:text-blue-100"
-                                                        >
-                                                            this browser
-                                                        </span>
-                                                    {/if}
-                                                    <span
-                                                        class="text-xs text-gray-500 dark:text-gray-400"
-                                                    >
-                                                        added {short_date(d.created)}, last seen {short_date(
-                                                            d.last_seen
-                                                        )}
-                                                    </span>
-                                                    <button
-                                                        type="button"
-                                                        onclick={() => start_rename(d)}
-                                                        class="text-xs underline"
-                                                    >
-                                                        rename
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onclick={() => revoke(d)}
-                                                        class="text-xs text-red-600 underline dark:text-red-400"
-                                                    >
-                                                        remove
-                                                    </button>
-                                                {/if}
-                                            </li>
-                                        {/each}
-                                    </ul>
-                                {/if}
-
-                                <button
-                                    type="button"
-                                    onclick={make_pair_code}
-                                    class="mt-2 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
-                                >
-                                    Add a phone or computer
-                                </button>
-                                {#if pairCode}
-                                    <div class="mt-2 flex items-start gap-3">
-                                        <div class="w-32 shrink-0 rounded bg-white p-1">
-                                            <!-- The SVG comes from the unit itself, not from anything typed. -->
-                                            <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                                            {@html pairCode.svg}
-                                        </div>
-                                        <div class="text-sm">
-                                            <p>
-                                                On the new device, join this unit's WiFi and scan
-                                                this, or open the pairing page and type
-                                                <code class="font-mono text-base tracking-widest"
-                                                    >{pairCode.code.slice(0, 3)}
-                                                    {pairCode.code.slice(3)}</code
-                                                >.
-                                            </p>
-                                            <p
-                                                class="mt-1 text-xs text-gray-500 dark:text-gray-400"
-                                            >
-                                                Good for {Math.round(pairCode.expires_in_secs / 60)} minutes
-                                                and one device. Making another replaces it.
-                                            </p>
-                                            <p
-                                                class="mt-1 font-mono text-xs break-all text-gray-500 dark:text-gray-400"
-                                            >
-                                                {pairCode.url.toLowerCase()}
-                                            </p>
-                                        </div>
-                                    </div>
-                                {/if}
-
-                                <h5
-                                    class="mt-4 text-sm font-medium text-gray-700 dark:text-gray-200"
-                                >
-                                    Owner passphrase
-                                </h5>
-                                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                    Adds a device from the pairing page, and opens the terminal.
-                                    Changing it does not sign anything out.
-                                </p>
-                                <div class="mt-2 flex flex-wrap items-end gap-2">
-                                    <div>
-                                        <label
-                                            for="current_passphrase"
-                                            class="block text-xs text-gray-600 dark:text-gray-300"
-                                            >Current</label
-                                        >
-                                        <input
-                                            id="current_passphrase"
-                                            type="password"
-                                            bind:value={currentPassphrase}
-                                            autocomplete="current-password"
-                                            class="w-36 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label
-                                            for="new_passphrase"
-                                            class="block text-xs text-gray-600 dark:text-gray-300"
-                                            >New</label
-                                        >
-                                        <input
-                                            id="new_passphrase"
-                                            type="password"
-                                            bind:value={newPassphrase}
-                                            autocomplete="new-password"
-                                            class="w-36 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label
-                                            for="new_passphrase_again"
-                                            class="block text-xs text-gray-600 dark:text-gray-300"
-                                            >New again</label
-                                        >
-                                        <input
-                                            id="new_passphrase_again"
-                                            type="password"
-                                            bind:value={newPassphraseAgain}
-                                            autocomplete="new-password"
-                                            class="w-36 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
-                                        />
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onclick={save_passphrase}
-                                        disabled={savingPassphrase ||
-                                            !currentPassphrase ||
-                                            newPassphrase.length < 8}
-                                        class="rounded-md border border-gray-300 px-2 py-1 text-sm disabled:opacity-40 dark:border-gray-600"
-                                    >
-                                        {savingPassphrase ? 'Saving…' : 'Change'}
-                                    </button>
-                                </div>
-                                {#if pairMessage}
-                                    <p class="mt-1 text-xs text-green-700 dark:text-green-300">
-                                        {pairMessage}
-                                    </p>
-                                {/if}
-                                {#if pairError}
-                                    <p class="mt-1 text-xs text-red-600 dark:text-red-400">
-                                        {pairError}
-                                    </p>
-                                {/if}
-
-                                {#if tlsInfo}
-                                    <h5
-                                        class="mt-4 text-sm font-medium text-gray-700 dark:text-gray-200"
-                                    >
-                                        This unit's certificate
-                                    </h5>
-                                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                        Made by the unit itself, which is why browsers warn about it
-                                        once. Its fingerprint, to compare with what your browser
-                                        shows:
-                                    </p>
-                                    <code class="block font-mono text-xs break-all"
-                                        >authority {tlsInfo.ca_fingerprint_sha256}</code
-                                    >
-                                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                        The server certificate under it runs until
-                                        {short_date(tlsInfo.leaf_not_after ?? '')} and is renewed by the
-                                        unit itself.
-                                    </p>
-                                    <CertificateTrust tls={tlsInfo} />
-                                {/if}
-
-                                {#if config.web_users.length > 0}
-                                    <h5
-                                        class="mt-4 text-sm font-medium text-gray-700 dark:text-gray-200"
-                                    >
-                                        Accounts from before pairing
-                                    </h5>
-                                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                        These no longer open the interface on their own. Signing in
-                                        with one on the pairing page pairs that browser, once.
-                                        Remove them when every device has been paired.
-                                    </p>
-                                    <ul class="mt-1 space-y-1">
-                                        {#each config.web_users as user (user.username)}
-                                            <li class="flex items-center gap-2 text-sm">
-                                                <span class="font-mono">{user.username}</span>
-                                                <button
-                                                    type="button"
-                                                    onclick={() => remove_user(user.username)}
-                                                    disabled={savingUser}
-                                                    class="text-xs text-red-600 underline disabled:opacity-40 dark:text-red-400"
-                                                >
-                                                    remove
-                                                </button>
-                                            </li>
-                                        {/each}
-                                    </ul>
-                                    {#if userMessage}
-                                        <p class="mt-1 text-xs text-green-700 dark:text-green-300">
-                                            {userMessage}
-                                        </p>
-                                    {/if}
-                                    {#if userError}
-                                        <p class="mt-1 text-xs text-red-600 dark:text-red-400">
-                                            {userError}
-                                        </p>
-                                    {/if}
-                                {/if}
-
-                                <Explainer
-                                    summary="How pairing protects this unit, and what it does not."
-                                >
-                                    <p>
-                                        Every request to this interface travels over an encrypted
-                                        connection to the unit, and only a browser the unit has
-                                        paired with is answered. Pairing happens once per browser:
-                                        by scanning the code on the unit's screen when it is new,
-                                        with a code made here, or with the owner passphrase.
-                                    </p>
-                                    <p>
-                                        What this protects against is anyone else on the WiFi: a
-                                        guest, a family member, whoever was given the hotspot
-                                        password for another reason. They can no longer read the
-                                        recordings or change anything, even if they can capture the
-                                        traffic.
-                                    </p>
-                                    <p>
-                                        What it does not protect against is someone holding the
-                                        unit. The USB cable is root, and a button press on a unit
-                                        that nobody has paired with yet lets its holder pair. If
-                                        every paired device and the passphrase are lost, the pairing
-                                        records are removed over USB and the unit starts over.
-                                    </p>
-                                </Explainer>
-                            </div>
-
-                            <div class="mt-3 flex items-center">
-                                <input
-                                    id="show_subscriber_identity"
-                                    type="checkbox"
-                                    bind:checked={config.show_subscriber_identity}
-                                    class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
-                                />
-                                <label
-                                    for="show_subscriber_identity"
-                                    class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
-                                >
-                                    Show this device's own IMSI, IMEI and temporary identity
-                                </label>
-                            </div>
-                            {#if config.show_subscriber_identity}
-                                <p class="mt-1 text-xs text-amber-600 dark:text-amber-400">
-                                    The web interface has no password. While this is on, anyone who
-                                    can reach this page can read your IMSI, and on a hotspot that
-                                    means anyone on its WiFi.
-                                </p>
-                            {/if}
-                            <Explainer
-                                summary="Why this is off by default, and what the numbers are worth watching for."
-                            >
-                                <p>
-                                    Your IMSI identifies you as a subscriber and never changes. It
-                                    is the identifier an IMSI catcher exists to collect, which is
-                                    why a detector that published it unasked would be working
-                                    against its own purpose.
-                                </p>
-                                <p>
-                                    What is worth watching is not the number but how often it was
-                                    sent. A network normally issues a temporary identity and uses
-                                    that, rotating it so sessions cannot be linked. Being asked for
-                                    the permanent one repeatedly is what a device collecting IMSIs
-                                    makes happen.
-                                </p>
-                                <p>
-                                    Turn it on when you want to see that count, and off again
-                                    afterwards. Nothing is recorded differently either way; this
-                                    only decides whether the web interface will say it.
-                                </p>
-                            </Explainer>
-
-                            {#if [2, 3, 4, 5].includes(config.ui_level)}
-                                <div class="mt-3 flex items-center">
-                                    <input
-                                        id="pause_display_on_keypress"
-                                        type="checkbox"
-                                        bind:checked={config.pause_display_on_keypress}
-                                        class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
-                                    />
-                                    <label
-                                        for="pause_display_on_keypress"
-                                        class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
-                                    >
-                                        Step aside briefly when a button is pressed
-                                    </label>
-                                </div>
-                                <Explainer
-                                    summary="Lets you read the device's own screens, the wifi password included, without losing the status indicator."
-                                >
-                                    <p>
-                                        Rayhunter paints over the device's own interface. In the
-                                        display levels that fill the screen, a custom image or high
-                                        visibility, that interface is completely hidden, and that
-                                        includes the pages showing the wifi name and password.
-                                        Somebody who has not written the password down can end up
-                                        locked out of their own hotspot, which is a steep price for
-                                        a change to the colour of a status light.
-                                    </p>
-                                    <p>
-                                        With this on, pressing a button shrinks Rayhunter to its
-                                        thin status line for twenty seconds, which is enough to find
-                                        a password and type it somewhere. It does not go dark: a
-                                        button press must never be able to hide a high severity
-                                        warning, so the line stays and keeps its colour. Pressing
-                                        more buttons extends the twenty seconds rather than cutting
-                                        it short.
-                                    </p>
-                                    <p>
-                                        Nothing about detection changes. Recording and analysis
-                                        carry on throughout, and this only affects the levels that
-                                        cover the screen; a thin line was never hiding anything to
-                                        begin with.
-                                    </p>
-                                    <p>
-                                        The line left behind uses the height set above. On a device
-                                        whose top rows are not visible, a two pixel line cannot be
-                                        seen at all, so raise it until it can.
-                                    </p>
-                                </Explainer>
-                            {/if}
-
                             <Explainer
                                 summary="Why the screen goes dark while Rayhunter is plainly running."
                             >
@@ -1067,6 +694,60 @@
                                 </p>
                             </Explainer>
                         </div>
+
+                        <!-- Only offered for the levels that actually cover the
+                             device's own screens. Mirrors covers_the_screen in
+                             daemon/src/display/generic_framebuffer.rs. In Subtle
+                             a thin line was never hiding anything, so there would
+                             be nothing to step aside from and this would be a
+                             control that visibly does nothing. -->
+                        {#if [2, 3, 4, 5].includes(config.ui_level)}
+                            <div class="mt-3 flex items-center">
+                                <input
+                                    id="pause_display_on_keypress"
+                                    type="checkbox"
+                                    bind:checked={config.pause_display_on_keypress}
+                                    class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
+                                />
+                                <label
+                                    for="pause_display_on_keypress"
+                                    class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                                >
+                                    Step aside briefly when a button is pressed
+                                </label>
+                            </div>
+                            <Explainer
+                                summary="Lets you read the device's own screens, the wifi password included, without losing the status indicator."
+                            >
+                                <p>
+                                    Rayhunter paints over the device's own interface. In the display
+                                    levels that fill the screen, a custom image or high visibility,
+                                    that interface is completely hidden, and that includes the pages
+                                    showing the wifi name and password. Somebody who has not written
+                                    the password down can end up locked out of their own hotspot,
+                                    which is a steep price for a change to the colour of a status
+                                    light.
+                                </p>
+                                <p>
+                                    With this on, pressing a button shrinks Rayhunter to its thin
+                                    status line for twenty seconds, which is enough to find a
+                                    password and type it somewhere. It does not go dark: a button
+                                    press must never be able to hide a high severity warning, so the
+                                    line stays and keeps its colour. Pressing more buttons extends
+                                    the twenty seconds rather than cutting it short.
+                                </p>
+                                <p>
+                                    Nothing about detection changes. Recording and analysis carry on
+                                    throughout, and this only affects the levels that cover the
+                                    screen; a thin line was never hiding anything to begin with.
+                                </p>
+                                <p>
+                                    The line left behind uses the height set above. On a device
+                                    whose top rows are not visible, a two pixel line cannot be seen
+                                    at all, so raise it until it can.
+                                </p>
+                            </Explainer>
+                        {/if}
                     </div>
                 {:else if active === 'detection'}
                     <div
@@ -1991,72 +1672,6 @@
                             {/if}
                         </div>
 
-                        {#if adbState && adbState !== 'not_adjustable'}
-                            <div
-                                class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3"
-                            >
-                                <h3
-                                    class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4"
-                                >
-                                    USB debugging (ADB)
-                                </h3>
-
-                                <div class="flex items-center">
-                                    <input
-                                        id="adb_enabled"
-                                        type="checkbox"
-                                        checked={config.adb_enabled ?? adbState === 'enabled'}
-                                        onchange={(e) => {
-                                            if (config)
-                                                config.adb_enabled = e.currentTarget.checked;
-                                        }}
-                                        class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
-                                    />
-                                    <label
-                                        for="adb_enabled"
-                                        class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
-                                    >
-                                        Enable ADB over USB
-                                    </label>
-                                </div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400">
-                                    Currently <strong
-                                        >{adbState === 'enabled' ? 'on' : 'off'}</strong
-                                    >. Changing this takes effect at the next restart, because the
-                                    USB mode is chosen when the device boots.
-                                </p>
-
-                                <div
-                                    class="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200"
-                                >
-                                    ADB on this device runs as <strong>root</strong>. Anyone who can
-                                    plug a cable into it gets complete control of it, without
-                                    needing this page, the WiFi password or anything else. Worth
-                                    having on if you are installing over USB or debugging; worth
-                                    turning off before carrying the device somewhere.
-                                </div>
-
-                                <Explainer summary="Why this only appears on some devices.">
-                                    <p>
-                                        Devices pick their USB mode at boot from a number in a file,
-                                        and the numbers mean different things on different hardware.
-                                        A Moxee uses one value for the mode that includes ADB; an
-                                        Orbic has a different value in the same file for a mode that
-                                        also includes ADB.
-                                    </p>
-                                    <p>
-                                        So this only offers to change a value that has been checked
-                                        on real hardware. On anything else it does not appear, and
-                                        whatever ADB the device already has is left exactly as it
-                                        is. Writing the wrong number would select a USB mode nobody
-                                        has tried, and getting that wrong takes the device off USB
-                                        entirely, which is the one problem that needs a cable to
-                                        fix.
-                                    </p>
-                                </Explainer>
-                            </div>
-                        {/if}
-
                         {#if config.device === 'orbic' || config.device === 'moxee' || config.device === 'tmobile' || config.device === 'wingtech'}
                             <div
                                 class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3"
@@ -2224,8 +1839,469 @@
                                         </p>
                                     </div>
                                 {/if}
+
+                                <div
+                                    class="border-t border-gray-200 dark:border-gray-700 pt-3 mt-4"
+                                >
+                                    <div class="flex items-center">
+                                        <input
+                                            id="serve_wifi_client_address"
+                                            type="checkbox"
+                                            bind:checked={config.serve_wifi_client_address}
+                                            class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
+                                        />
+                                        <label
+                                            for="serve_wifi_client_address"
+                                            class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                                        >
+                                            Answer on that network too
+                                        </label>
+                                    </div>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400">
+                                        On by default. While the device is joined to another WiFi
+                                        network, this interface also answers at the address it has
+                                        there, so it can be reached from across that network. Paired
+                                        devices only, as everywhere. Off keeps it to the device's
+                                        own WiFi and USB.
+                                    </p>
+                                </div>
                             </div>
                         {/if}
+                    </div>
+                {:else if active === 'security'}
+                    <div
+                        id="panel-security"
+                        role="tabpanel"
+                        aria-labelledby="tab-security"
+                        class="space-y-4"
+                    >
+                        <p class="text-xs text-gray-500 dark:text-gray-400">
+                            Who can use this interface, what it discloses, and what a USB cable
+                            gets. Nothing here changes what is recorded or detected.
+                        </p>
+
+                        <div class="space-y-3">
+                            <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-2">
+                                Who can use this interface
+                            </h3>
+
+                            <p class="mt-1 text-xs text-gray-600 dark:text-gray-300">
+                                Only phones and computers paired with this unit. Add one with a code
+                                from here, or with the owner passphrase on the pairing page.
+                            </p>
+
+                            <h4 class="mt-3 text-sm font-medium text-gray-700 dark:text-gray-200">
+                                Trusted devices
+                            </h4>
+                            {#if devices.length === 0}
+                                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                    None paired yet.
+                                </p>
+                            {:else}
+                                <ul class="mt-1 space-y-1">
+                                    {#each devices as d (d.id)}
+                                        <li
+                                            class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm"
+                                        >
+                                            {#if renaming === d.id}
+                                                <input
+                                                    type="text"
+                                                    bind:value={renameValue}
+                                                    maxlength="64"
+                                                    class="w-44 rounded-md border border-gray-300 px-2 py-0.5 text-sm dark:border-gray-600"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onclick={() => commit_rename(d.id)}
+                                                    class="text-xs underline"
+                                                >
+                                                    save
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onclick={() => (renaming = null)}
+                                                    class="text-xs underline"
+                                                >
+                                                    cancel
+                                                </button>
+                                            {:else}
+                                                <span>{d.name}</span>
+                                                {#if d.current}
+                                                    <span
+                                                        class="rounded bg-blue-100 px-1 text-xs text-blue-800 dark:bg-blue-900 dark:text-blue-100"
+                                                    >
+                                                        this browser
+                                                    </span>
+                                                {/if}
+                                                <span
+                                                    class="text-xs text-gray-500 dark:text-gray-400"
+                                                >
+                                                    added {short_date(d.created)}, last seen {short_date(
+                                                        d.last_seen
+                                                    )}
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    onclick={() => start_rename(d)}
+                                                    class="text-xs underline"
+                                                >
+                                                    rename
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onclick={() => revoke(d)}
+                                                    class="text-xs text-red-600 underline dark:text-red-400"
+                                                >
+                                                    remove
+                                                </button>
+                                            {/if}
+                                        </li>
+                                    {/each}
+                                </ul>
+                            {/if}
+
+                            <button
+                                type="button"
+                                onclick={make_pair_code}
+                                class="mt-2 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
+                            >
+                                Add a phone or computer
+                            </button>
+                            {#if pairCode}
+                                <div class="mt-2 flex items-start gap-3">
+                                    <div class="w-32 shrink-0 rounded bg-white p-1">
+                                        <!-- The SVG comes from the unit itself, not from anything typed. -->
+                                        <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                                        {@html pairCode.svg}
+                                    </div>
+                                    <div class="text-sm">
+                                        <p>
+                                            On the new device, join this unit's WiFi and scan this,
+                                            or open the pairing page and type
+                                            <code class="font-mono text-base tracking-widest"
+                                                >{pairCode.code.slice(0, 3)}
+                                                {pairCode.code.slice(3)}</code
+                                            >.
+                                        </p>
+                                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                            Good for {Math.round(pairCode.expires_in_secs / 60)} minutes
+                                            and one device. Making another replaces it.
+                                        </p>
+                                        <p
+                                            class="mt-1 font-mono text-xs break-all text-gray-500 dark:text-gray-400"
+                                        >
+                                            {pairCode.url.toLowerCase()}
+                                        </p>
+                                    </div>
+                                </div>
+                            {/if}
+
+                            <h4 class="mt-4 text-sm font-medium text-gray-700 dark:text-gray-200">
+                                Owner passphrase
+                            </h4>
+                            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                Adds a device from the pairing page, and opens the terminal.
+                                Changing it does not sign anything out.
+                            </p>
+                            <div class="mt-2 flex flex-wrap items-end gap-2">
+                                <div>
+                                    <label
+                                        for="current_passphrase"
+                                        class="block text-xs text-gray-600 dark:text-gray-300"
+                                        >Current</label
+                                    >
+                                    <input
+                                        id="current_passphrase"
+                                        type="password"
+                                        bind:value={currentPassphrase}
+                                        autocomplete="current-password"
+                                        class="w-36 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
+                                    />
+                                </div>
+                                <div>
+                                    <label
+                                        for="new_passphrase"
+                                        class="block text-xs text-gray-600 dark:text-gray-300"
+                                        >New</label
+                                    >
+                                    <input
+                                        id="new_passphrase"
+                                        type="password"
+                                        bind:value={newPassphrase}
+                                        autocomplete="new-password"
+                                        class="w-36 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
+                                    />
+                                </div>
+                                <div>
+                                    <label
+                                        for="new_passphrase_again"
+                                        class="block text-xs text-gray-600 dark:text-gray-300"
+                                        >New again</label
+                                    >
+                                    <input
+                                        id="new_passphrase_again"
+                                        type="password"
+                                        bind:value={newPassphraseAgain}
+                                        autocomplete="new-password"
+                                        class="w-36 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600"
+                                    />
+                                </div>
+                                <button
+                                    type="button"
+                                    onclick={save_passphrase}
+                                    disabled={savingPassphrase ||
+                                        !currentPassphrase ||
+                                        newPassphrase.length < 8}
+                                    class="rounded-md border border-gray-300 px-2 py-1 text-sm disabled:opacity-40 dark:border-gray-600"
+                                >
+                                    {savingPassphrase ? 'Saving…' : 'Change'}
+                                </button>
+                            </div>
+                            {#if pairMessage}
+                                <p class="mt-1 text-xs text-green-700 dark:text-green-300">
+                                    {pairMessage}
+                                </p>
+                            {/if}
+                            {#if pairError}
+                                <p class="mt-1 text-xs text-red-600 dark:text-red-400">
+                                    {pairError}
+                                </p>
+                            {/if}
+
+                            {#if tlsInfo}
+                                <h4
+                                    class="mt-4 text-sm font-medium text-gray-700 dark:text-gray-200"
+                                >
+                                    This unit's certificate
+                                </h4>
+                                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                    Made by the unit itself, which is why browsers warn about it
+                                    once. Its fingerprint, to compare with what your browser shows:
+                                </p>
+                                <code class="block font-mono text-xs break-all"
+                                    >authority {tlsInfo.ca_fingerprint_sha256}</code
+                                >
+                                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                    The server certificate under it runs until
+                                    {short_date(tlsInfo.leaf_not_after ?? '')} and is renewed by the unit
+                                    itself.
+                                </p>
+                                <CertificateTrust tls={tlsInfo} />
+                            {/if}
+
+                            {#if config.web_users.length > 0}
+                                <h4
+                                    class="mt-4 text-sm font-medium text-gray-700 dark:text-gray-200"
+                                >
+                                    Accounts from before pairing
+                                </h4>
+                                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                    These no longer open the interface on their own. Signing in with
+                                    one on the pairing page pairs that browser, once. Remove them
+                                    when every device has been paired.
+                                </p>
+                                <ul class="mt-1 space-y-1">
+                                    {#each config.web_users as user (user.username)}
+                                        <li class="flex items-center gap-2 text-sm">
+                                            <span class="font-mono">{user.username}</span>
+                                            <button
+                                                type="button"
+                                                onclick={() => remove_user(user.username)}
+                                                disabled={savingUser}
+                                                class="text-xs text-red-600 underline disabled:opacity-40 dark:text-red-400"
+                                            >
+                                                remove
+                                            </button>
+                                        </li>
+                                    {/each}
+                                </ul>
+                                {#if userMessage}
+                                    <p class="mt-1 text-xs text-green-700 dark:text-green-300">
+                                        {userMessage}
+                                    </p>
+                                {/if}
+                                {#if userError}
+                                    <p class="mt-1 text-xs text-red-600 dark:text-red-400">
+                                        {userError}
+                                    </p>
+                                {/if}
+                            {/if}
+
+                            <Explainer
+                                summary="How pairing protects this unit, and what it does not."
+                            >
+                                <p>
+                                    Every request to this interface travels over an encrypted
+                                    connection to the unit, and only a browser the unit has paired
+                                    with is answered. Pairing happens once per browser: by scanning
+                                    the code on the unit's screen when it is new, with a code made
+                                    here, or with the owner passphrase.
+                                </p>
+                                <p>
+                                    What this protects against is anyone else on the WiFi: a guest,
+                                    a family member, whoever was given the hotspot password for
+                                    another reason. They can no longer read the recordings or change
+                                    anything, even if they can capture the traffic.
+                                </p>
+                                <p>
+                                    What it does not protect against is someone holding the unit.
+                                    The USB cable is root, and a button press on a unit that nobody
+                                    has paired with yet lets its holder pair. If every paired device
+                                    and the passphrase are lost, the pairing records are removed
+                                    over USB and the unit starts over.
+                                </p>
+                            </Explainer>
+                        </div>
+
+                        <div
+                            class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3"
+                        >
+                            <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
+                                This device's own identity
+                            </h3>
+
+                            <div class="flex items-center">
+                                <input
+                                    id="show_subscriber_identity"
+                                    type="checkbox"
+                                    bind:checked={config.show_subscriber_identity}
+                                    class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 dark:border-gray-600 rounded-sm"
+                                />
+                                <label
+                                    for="show_subscriber_identity"
+                                    class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                                >
+                                    Show this device's own IMSI, IMEI and temporary identity
+                                </label>
+                            </div>
+                            {#if config.show_subscriber_identity}
+                                <p class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                                    While this is on, every phone or computer paired with this unit
+                                    can read your IMSI from its main page. Turn it off again once
+                                    you have seen what you needed.
+                                </p>
+                            {/if}
+                            <Explainer
+                                summary="Why this is off by default, and what the numbers are worth watching for."
+                            >
+                                <p>
+                                    Your IMSI identifies you as a subscriber and never changes. It
+                                    is the identifier an IMSI catcher exists to collect, which is
+                                    why a detector that published it unasked would be working
+                                    against its own purpose.
+                                </p>
+                                <p>
+                                    What is worth watching is not the number but how often it was
+                                    sent. A network normally issues a temporary identity and uses
+                                    that, rotating it so sessions cannot be linked. Being asked for
+                                    the permanent one repeatedly is what a device collecting IMSIs
+                                    makes happen.
+                                </p>
+                                <p>
+                                    Turn it on when you want to see that count, and off again
+                                    afterwards. Nothing is recorded differently either way; this
+                                    only decides whether the web interface will say it.
+                                </p>
+                            </Explainer>
+                        </div>
+
+                        {#if adbState && adbState !== 'not_adjustable'}
+                            <div
+                                class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3"
+                            >
+                                <h3
+                                    class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4"
+                                >
+                                    USB debugging (ADB)
+                                </h3>
+
+                                <div class="flex items-center">
+                                    <input
+                                        id="adb_enabled"
+                                        type="checkbox"
+                                        checked={config.adb_enabled ?? adbState === 'enabled'}
+                                        onchange={(e) => {
+                                            if (config)
+                                                config.adb_enabled = e.currentTarget.checked;
+                                        }}
+                                        class="h-4 w-4 text-rayhunter-blue focus:ring-rayhunter-blue border-gray-300 rounded-sm"
+                                    />
+                                    <label
+                                        for="adb_enabled"
+                                        class="ml-2 block text-sm text-gray-700 dark:text-gray-200"
+                                    >
+                                        Enable ADB over USB
+                                    </label>
+                                </div>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">
+                                    Currently <strong
+                                        >{adbState === 'enabled' ? 'on' : 'off'}</strong
+                                    >. Changing this takes effect at the next restart, because the
+                                    USB mode is chosen when the device boots.
+                                </p>
+
+                                <div
+                                    class="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+                                >
+                                    ADB on this device runs as <strong>root</strong>. Anyone who can
+                                    plug a cable into it gets complete control of it, without
+                                    needing this page, the WiFi password or anything else. Worth
+                                    having on if you are installing over USB or debugging; worth
+                                    turning off before carrying the device somewhere.
+                                </div>
+
+                                <Explainer summary="Why this only appears on some devices.">
+                                    <p>
+                                        Devices pick their USB mode at boot from a number in a file,
+                                        and the numbers mean different things on different hardware.
+                                        A Moxee uses one value for the mode that includes ADB; an
+                                        Orbic has a different value in the same file for a mode that
+                                        also includes ADB.
+                                    </p>
+                                    <p>
+                                        So this only offers to change a value that has been checked
+                                        on real hardware. On anything else it does not appear, and
+                                        whatever ADB the device already has is left exactly as it
+                                        is. Writing the wrong number would select a USB mode nobody
+                                        has tried, and getting that wrong takes the device off USB
+                                        entirely, which is the one problem that needs a cable to
+                                        fix.
+                                    </p>
+                                </Explainer>
+                            </div>
+                        {/if}
+
+                        <div
+                            class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-6 space-y-3"
+                        >
+                            <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
+                                Terminal
+                            </h3>
+                            {#if config.terminal_enabled}
+                                <p class="text-sm text-gray-700 dark:text-gray-200">
+                                    <strong>On.</strong> This interface can run commands on the device
+                                    as root.
+                                </p>
+                                <div
+                                    class="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+                                >
+                                    Using it takes the owner passphrase and then a code shown on the
+                                    device's own screen, every time, and the screen says TERMINAL
+                                    ACTIVE while a terminal is open.
+                                </div>
+                            {:else}
+                                <p class="text-sm text-gray-700 dark:text-gray-200">
+                                    <strong>Off.</strong> This interface cannot run commands on the device.
+                                </p>
+                            {/if}
+                            <p class="text-xs text-gray-500 dark:text-gray-400">
+                                Not changeable here, by design. It is set when the device is
+                                flashed, with the installer's <code>--enable-terminal</code> flag, so
+                                that switching it on takes the device in hand. Rayhunter runs as root,
+                                so this is the difference between an interface that reads data and one
+                                that can do anything at all.
+                            </p>
+                        </div>
                     </div>
                 {/if}
 

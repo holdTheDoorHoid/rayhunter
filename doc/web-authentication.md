@@ -34,9 +34,9 @@ thirty seconds. The page then asks for the passphrase as above.
 
 ## Adding another phone or computer
 
-From a device that is already paired, open **Configuration** and find **Who
-can use this interface**. Choose **Add a phone or computer**. The page shows a
-six-digit code, and the same code as a square to scan. On the new device, join
+From a device that is already paired, open **Configuration → Security** and
+find **Who can use this interface**. Choose **Add a phone or computer**. The
+page shows a six-digit code, and the same code as a square to scan. On the new device, join
 the Rayhunter's WiFi, then scan the square or open the pairing page and type
 the code. The code is good for five minutes and one device.
 
@@ -48,8 +48,8 @@ browser unless you name it yourself.
 
 ## The list of trusted devices
 
-**Configuration → Who can use this interface** lists every paired device, when
-it was added, and when it was last seen. The one you are using is marked. From
+**Configuration → Security → Who can use this interface** lists every paired
+device, when it was added, and when it was last seen. The one you are using is marked. From
 here you can:
 
 - **Rename** a device, so "Android (Chrome)" becomes "Sam's phone".
@@ -78,8 +78,8 @@ Recordings and settings are untouched.
 
 ## The terminal
 
-If the terminal was enabled when the unit was flashed, using it takes one
-more step each time: the passphrase, and then a four-digit code that the
+If the terminal was enabled when the unit was flashed (the installer's
+`--enable-terminal` flag), using it takes one more step each time: the passphrase, and then a four-digit code that the
 Rayhunter shows on its own screen (or a press of its button, on a unit with no
 screen). This proves the person at the browser can also see the unit. The
 terminal then stays open for five minutes, longer while it is being used,
@@ -97,7 +97,7 @@ address. You are asked to accept the warning once per browser, or you can
 
 If you want to check you are talking to your own unit, compare the
 fingerprint the browser shows with the one on the pairing page or under
-**Configuration**. They are the same forty hex digits.
+**Configuration → Security**. They are the same forty hex digits.
 
 ## Stopping the warning for good (optional)
 
@@ -107,8 +107,8 @@ on it, the padlock is shown, and `https://rayhunter.local` opens like any
 other site. This is optional, and it is one device at a time; the unit never
 asks for it.
 
-Open the pairing page, or **Configuration → Who can use this interface**, and
-expand **Stop the certificate warning for good**. The steps for your device
+Open the pairing page, or **Configuration → Security → Who can use this
+interface**, and expand **Stop the certificate warning for good**. The steps for your device
 are there; in short:
 
 - **iPhone or iPad:** download the profile, install it under **Settings →

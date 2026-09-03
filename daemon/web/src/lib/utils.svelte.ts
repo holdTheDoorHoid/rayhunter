@@ -145,6 +145,8 @@ export interface Config {
     web_users: { username: string; password_hash: string }[];
     /** Whether the terminal is available. Only settable when flashing. */
     terminal_enabled: boolean;
+    /** Also answer, to paired browsers, on the address the unit has as a WiFi client. */
+    serve_wifi_client_address: boolean;
     /** Shrink to the thin status line briefly after a button press. */
     pause_display_on_keypress: boolean;
     /** Whether ADB should be on after the next restart. Null leaves it alone. */

@@ -70,10 +70,10 @@ around it, live:
   between hearing a network and talking to one: a SIM-less modem still decodes
   the towers around it, so seeing cells proves only that the radio works.
 - **This device's own identity**, its IMSI, IMEI, and temporary identity, but
-  **only if you have turned that on**. It is off by default, because the
-  interface may have no password and the IMSI is exactly what an IMSI catcher
-  wants. See [Securing the Web Interface](./web-authentication.md) before
-  enabling it.
+  **only if you have turned that on**, under **Configuration → Security**. It
+  is off by default: the IMSI is exactly what an IMSI catcher wants, and
+  anything this interface shows can be read from every paired device. See
+  [Securing the Web Interface](./web-authentication.md) before enabling it.
 
 A caution worth carrying: the radio measurements behind this panel arrive only
 when the modem is active, attaching, moving, recovering. An idle, stable device
@@ -90,7 +90,10 @@ struggling, any of which can affect recording.
 ## Settings
 
 The configuration form is where every setting lives, organised into sections (a
-fork layout change) rather than one long scroll. Each detector carries a
+fork layout change) rather than one long scroll: Display, Detection, Recordings,
+Notifications, Network, and Security. The last holds who may use the interface,
+the owner passphrase, the unit's certificate, USB debugging, and whether the
+device discloses its own identity. Each detector carries a
 plain-language description here, so you can decide whether to switch one off
 without needing to know what a name like "NAS null cipher" means, and there is a
 switch to hide those explanations once you know them.

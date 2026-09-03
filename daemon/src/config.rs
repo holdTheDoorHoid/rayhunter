@@ -260,11 +260,10 @@ pub struct Config {
     /// Whether to disclose this device's own IMSI, IMEI and temporary identity
     /// over the web API.
     ///
-    /// Off by default, and deliberately so. The web interface has no
-    /// authentication: anyone who can reach it, which on these devices means
-    /// anyone on the hotspot's WiFi, can read anything it serves. An IMSI is
-    /// the identifier an IMSI catcher exists to collect, so a detector that
-    /// hands it out unasked would be working against its own purpose.
+    /// Off by default, and deliberately so. Anything the web interface serves
+    /// can be read from every paired browser, and an IMSI is the identifier an
+    /// IMSI catcher exists to collect, so a detector that hands it out unasked
+    /// would be working against its own purpose.
     pub show_subscriber_identity: bool,
     /// Whether to stop the screen blanking on the device's own timer.
     ///

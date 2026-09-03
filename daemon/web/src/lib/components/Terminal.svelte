@@ -371,8 +371,8 @@
             <p>
                 This is off unless it was switched on when the device was flashed, and the web
                 interface cannot switch it on. If it is available here, someone chose that while
-                holding the device. Setting a password under Configuration is strongly worth doing
-                while it is on.
+                holding the device. Each use takes the owner passphrase and a code shown on the
+                device's screen, and the Security section of Configuration says whether it is on.
             </p>
         </Explainer>
     </div>

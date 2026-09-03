@@ -70,7 +70,7 @@ Through web UI you can set:
   **Restarting the device always brings WiFi back**, whatever these are set to. That is not something Rayhunter arranges, it is how the device behaves: the firmware starts the access point when it boots. So this cannot lock you out: the worst case is a power cycle, which needs no cable, no menu and no password. Doing the gesture again while WiFi is off also brings it back, by restarting, because on the hardware this was measured on restarting is the only thing that reliably works. That means bringing WiFi back interrupts recording for about half a minute; switching it off does not.
 
   Devices whose WiFi is run by something Rayhunter does not know how to stop report the setting as unavailable in the log rather than pretending to offer it.
-- **USB debugging (ADB)** (`adb_enabled`, under *Network*) turns ADB on or off. It appears only on devices where Rayhunter knows how to change it safely, and takes effect at the next restart, because the USB mode is chosen when the device boots.
+- **USB debugging (ADB)** (`adb_enabled`, under *Security*) turns ADB on or off. It appears only on devices where Rayhunter knows how to change it safely, and takes effect at the next restart, because the USB mode is chosen when the device boots.
 
   Leaving it unset leaves the device exactly as its installer left it, which is why a device that already has ADB keeps it. Setting it writes the value for the USB mode that includes ADB.
 
