@@ -179,8 +179,6 @@ export interface Config {
     wifi_security: 'wpa_psk' | 'sae' | null;
     wifi_enabled: boolean;
     dns_servers: string[] | null;
-    firewall_restrict_outbound: boolean;
-    firewall_allowed_ports: number[] | null;
     webdav: WebdavConfig;
     gps_mode: GpsMode;
     gps_fixed_latitude: number | null;
