@@ -28,6 +28,7 @@
     import { onMount } from 'svelte';
     import Modal from './Modal.svelte';
     import ExpandableInput from './ExpandableInput.svelte';
+    import CommunityDataset from './CommunityDataset.svelte';
     import DeviceColorSettings from './DeviceColorSettings.svelte';
     import DeviceGifSettings from './DeviceGifSettings.svelte';
     import Explainer from './Explainer.svelte';
@@ -220,6 +221,11 @@
             hint: 'Being told when something happens',
         },
         { id: 'network', label: 'Network', hint: 'Connecting the device to a WiFi network' },
+        {
+            id: 'community',
+            label: 'Community',
+            hint: 'Contributing recordings to a shared dataset',
+        },
     ] as const;
 
     let active = $state<(typeof TABS)[number]['id']>('display');
@@ -1853,6 +1859,15 @@
                                 </div>
                             </ExpandableInput>
                         </div>
+                    </div>
+                {:else if active === 'community'}
+                    <div
+                        id="panel-community"
+                        role="tabpanel"
+                        aria-labelledby="tab-community"
+                        class="space-y-4"
+                    >
+                        <CommunityDataset bind:telemetry={config.telemetry} />
                     </div>
                 {:else if active === 'network'}
                     <div

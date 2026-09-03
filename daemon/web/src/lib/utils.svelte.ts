@@ -36,6 +36,70 @@ export interface WebdavConfig {
     delete_on_upload: boolean;
 }
 
+/** Contributing recordings to a community-run dataset. See doc/community-dataset.md. */
+export interface TelemetryConfig {
+    enabled: boolean;
+    server_url: string;
+    server_name: string | null;
+    ingest_public_key: string | null;
+    archive_public_key: string | null;
+    tier: 'summary' | 'full';
+    full_tier_acknowledged_at: string | null;
+    min_severity: 'low' | 'medium' | 'high';
+    include_clean_recordings: boolean;
+    include_notes: boolean;
+    location: 'none' | 'coarse' | 'neighborhood' | 'exact';
+    network: 'wifi_only' | 'any';
+    allowed_networks: string[];
+    poll_interval_secs: number;
+    min_age_secs: number;
+    upload_timeout_secs: number;
+    key_rotation_days: number;
+}
+
+/** What GET /api/telemetry/status answers. */
+export interface TelemetryStatus {
+    enabled: boolean;
+    server_url: string;
+    server_name: string | null;
+    tier: 'summary' | 'full' | null;
+    location: string | null;
+    submitter_key_id: string | null;
+    key_created_at: string | null;
+    worker_running: boolean;
+    network: string;
+    queued: string[];
+    skipped: { name: string; reason: string }[];
+    busy: string | null;
+    last_attempt_at: string | null;
+    last_success_at: string | null;
+    last_error: string | null;
+    next_attempt_at: string | null;
+    submitted_count: number;
+    server_keys_changed: boolean;
+}
+
+/** What POST /api/telemetry/probe answers: a service's description and key fingerprints. */
+export interface TelemetryProbe {
+    info: {
+        format: string;
+        name: string;
+        description?: string;
+        contact?: string;
+        site_url?: string;
+        ingest_public_key: string;
+        archive_public_key?: string;
+        accepted_tiers: ('summary' | 'full')[];
+        max_summary_bytes: number;
+        max_capture_bytes: number;
+    };
+    ingest_key_id: string;
+    ingest_fingerprint: string;
+    archive_key_id: string | null;
+    archive_fingerprint: string | null;
+    matches_pinned: boolean | null;
+}
+
 export enum GpsMode {
     Disabled = 0,
     Fixed = 1,
@@ -180,6 +244,7 @@ export interface Config {
     firewall_restrict_outbound: boolean;
     firewall_allowed_ports: number[] | null;
     webdav: WebdavConfig;
+    telemetry: TelemetryConfig;
     gps_mode: GpsMode;
     gps_fixed_latitude: number | null;
     gps_fixed_longitude: number | null;
@@ -204,6 +269,31 @@ export async function get_wifi_status(): Promise<WifiStatus> {
 
 export async function scan_wifi_networks(): Promise<WifiNetwork[]> {
     return req_json<WifiNetwork[]>('POST', '/api/wifi-scan');
+}
+
+export async function get_telemetry_status(): Promise<TelemetryStatus> {
+    return req_json<TelemetryStatus>('GET', '/api/telemetry/status');
+}
+
+export async function probe_telemetry_server(url: string): Promise<TelemetryProbe> {
+    return req_json<TelemetryProbe>('POST', '/api/telemetry/probe', { url });
+}
+
+export async function telemetry_send_now(): Promise<void> {
+    await req('POST', '/api/telemetry/send-now');
+}
+
+export async function telemetry_rotate_key(): Promise<string> {
+    const answer = await req_json<{ key_id: string }>('POST', '/api/telemetry/rotate-key');
+    return answer.key_id;
+}
+
+export async function telemetry_withdraw(name: string): Promise<void> {
+    await req('POST', `/api/telemetry/withdraw/${name}`);
+}
+
+export async function telemetry_set_excluded(name: string, excluded: boolean): Promise<void> {
+    await req('POST', `/api/telemetry/exclude/${name}`, { excluded });
 }
 
 /**

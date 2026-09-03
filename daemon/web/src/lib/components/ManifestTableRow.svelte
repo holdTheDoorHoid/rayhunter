@@ -6,6 +6,7 @@
     import AnalysisStatus from './AnalysisStatus.svelte';
     import AnalysisView from './AnalysisView.svelte';
     import RecordingNotes from './RecordingNotes.svelte';
+    import ContributionStatus from './ContributionStatus.svelte';
     let {
         entry,
         current,
@@ -85,6 +86,9 @@
         <!-- Above the findings on purpose: this is what the recording was,
              which is the context for reading what was found in it. -->
         <RecordingNotes {entry} />
+        {#if !current}
+            <ContributionStatus {entry} />
+        {/if}
         <AnalysisView {entry} {manager} {current} />
     </td>
 </tr>

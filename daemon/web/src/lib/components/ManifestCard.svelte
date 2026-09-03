@@ -5,6 +5,7 @@
     import DeleteButton from '$lib/components/DeleteButton.svelte';
     import AnalysisStatus from './AnalysisStatus.svelte';
     import RecordingNotes from './RecordingNotes.svelte';
+    import ContributionStatus from './ContributionStatus.svelte';
     import AnalysisView from './AnalysisView.svelte';
     import RecordingControls from './RecordingControls.svelte';
     import RecordingDetails from './RecordingDetails.svelte';
@@ -96,6 +97,9 @@
     </div>
     <RecordingDetails {entry} />
     <RecordingNotes {entry} />
+    {#if !current}
+        <ContributionStatus {entry} />
+    {/if}
     {#if entry.stop_reason}
         <div
             class="bg-yellow-50 dark:bg-yellow-950 border border-yellow-300 dark:border-yellow-800 rounded-sm p-2 text-yellow-800 dark:text-yellow-200 text-sm"

@@ -17,6 +17,18 @@ interface JsonManifestEntry {
     gps_mode: GpsMode | null;
     display_name: string | null;
     notes: string | null;
+    telemetry_submission?: TelemetrySubmission | null;
+    telemetry_excluded?: boolean;
+}
+
+/** The record of a recording having been contributed to a community dataset. */
+export interface TelemetrySubmission {
+    submission_id: string;
+    tier: 'summary' | 'full';
+    submitted_at: string;
+    key_id: string;
+    server_url: string;
+    withdrawn_at?: string | null;
 }
 
 export class Manifest {
@@ -117,6 +129,10 @@ export class ManifestEntry {
     public display_name: string | null = $state(null);
     /** Free text about the circumstances of the recording. */
     public notes: string | null = $state(null);
+    /** Set once this recording was contributed to a community dataset. */
+    public telemetry_submission: TelemetrySubmission | null = $state(null);
+    /** The owner asked for this recording never to be contributed. */
+    public telemetry_excluded = $state(false);
 
     constructor(json: JsonManifestEntry) {
         this.name = json.name;
@@ -137,6 +153,8 @@ export class ManifestEntry {
         // A daemon older than this UI sends neither.
         this.display_name = json.display_name ?? null;
         this.notes = json.notes ?? null;
+        this.telemetry_submission = json.telemetry_submission ?? null;
+        this.telemetry_excluded = json.telemetry_excluded ?? false;
     }
 
     /** What to call this recording on screen. */
