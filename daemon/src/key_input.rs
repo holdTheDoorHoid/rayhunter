@@ -1,7 +1,10 @@
 use log::{error, info, warn};
+use std::io::Read;
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::OpenOptionsExt;
 use std::time::{Duration, Instant};
-use tokio::fs::File;
-use tokio::io::AsyncReadExt;
+use tokio::io::Interest;
+use tokio::io::unix::AsyncFd;
 use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
@@ -17,6 +20,9 @@ enum Event {
 }
 
 const INPUT_EVENT_SIZE: usize = 32;
+
+/// The power button on every supported device.
+const INPUT_DEVICE: &str = "/dev/input/event0";
 
 pub fn run_key_input_thread(
     task_tracker: &TaskTracker,
@@ -59,11 +65,10 @@ pub fn run_key_input_thread(
     }
 
     task_tracker.spawn(async move {
-        // Open the input device
-        let mut file = match File::open("/dev/input/event0").await {
+        let file = match open_input(INPUT_DEVICE) {
             Ok(file) => file,
             Err(e) => {
-                error!("Failed to open /dev/input/event0: {e}");
+                error!("Failed to open {INPUT_DEVICE}: {e}");
                 return;
             }
         };
@@ -78,7 +83,7 @@ pub fn run_key_input_thread(
                     info!("received key input shutdown");
                     return;
                 }
-                result = file.read_exact(&mut buffer) => {
+                result = read_full(&file, &mut buffer) => {
                     if let Err(e) = result {
                         error!("failed to read key input: {e}");
                         return;
@@ -201,6 +206,51 @@ fn toggle_access_point(mode: crate::wifi_ap::WifiApOffMode, off_minutes: u64) {
     }
 }
 
+/// Open the button node for the runtime's I/O driver to wait on.
+///
+/// Not `tokio::fs::File`: that runs every read on the blocking pool, and a
+/// read of an input node returns only when a button is pressed. On shutdown
+/// the `select!` in the reader dropped the read future but not the `read(2)`
+/// behind it, which stayed in `evdev_read` on a pool thread until the next
+/// press. Dropping the runtime at the end of `main` waits for the blocking
+/// pool, so the process never exited: `stop` returned, the log ended with
+/// "see you space cowboy", and the pid stayed until `kill -9`. A
+/// non-blocking descriptor registered with epoll costs no thread while it
+/// waits, and a dropped wait is simply forgotten.
+fn open_input(path: &str) -> std::io::Result<AsyncFd<std::fs::File>> {
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)?;
+    AsyncFd::with_interest(file, Interest::READABLE)
+}
+
+/// Fill `buf` completely, as `read_exact` did, so a key event and the
+/// SYN_REPORT the kernel sends after it are always consumed together.
+async fn read_full<T>(fd: &AsyncFd<T>, buf: &mut [u8]) -> std::io::Result<()>
+where
+    T: AsRawFd,
+    for<'a> &'a T: Read,
+{
+    let mut filled = 0;
+    while filled < buf.len() {
+        let mut guard = fd.readable().await?;
+        match guard.try_io(|inner| Read::read(&mut inner.get_ref(), &mut buf[filled..])) {
+            Ok(Ok(0)) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "input device closed",
+                ));
+            }
+            Ok(Ok(n)) => filled += n,
+            Ok(Err(e)) => return Err(e),
+            // Readiness was stale: wait for the next.
+            Err(_would_block) => {}
+        }
+    }
+    Ok(())
+}
+
 fn parse_event(input: [u8; INPUT_EVENT_SIZE]) -> Event {
     if input[12] == 0 {
         Event::KeyUp
@@ -212,6 +262,71 @@ fn parse_event(input: [u8; INPUT_EVENT_SIZE]) -> Event {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+
+    /// Two connected sockets, the far end standing in for the kernel: what
+    /// it writes is what a button press would deliver.
+    fn input_pair() -> (AsyncFd<UnixStream>, UnixStream) {
+        let (near, far) = UnixStream::pair().unwrap();
+        near.set_nonblocking(true).unwrap();
+        (
+            AsyncFd::with_interest(near, Interest::READABLE).unwrap(),
+            far,
+        )
+    }
+
+    #[tokio::test]
+    async fn read_full_gathers_a_whole_buffer_across_short_reads() {
+        let (near, mut far) = input_pair();
+        let mut buf = [0u8; INPUT_EVENT_SIZE];
+        far.write_all(&[1u8; 16]).unwrap();
+        // The second half arrives later, as a SYN_REPORT after its key event
+        // could.
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            far.write_all(&[2u8; 16]).unwrap();
+            far
+        });
+        read_full(&near, &mut buf).await.unwrap();
+        assert_eq!(&buf[..16], &[1u8; 16]);
+        assert_eq!(&buf[16..], &[2u8; 16]);
+        // A closed device is an error, not a spin.
+        drop(writer.join().unwrap());
+        let err = read_full(&near, &mut buf).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+    }
+
+    /// The bug this guards against: a wait for a press that never comes must
+    /// not outlive the reader. With `tokio::fs::File` the abandoned read sat
+    /// on a blocking-pool thread, and dropping the runtime, which waits for
+    /// that pool, hung the process at exit.
+    #[test]
+    fn an_abandoned_wait_does_not_hold_the_runtime() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let far = rt.block_on(async {
+            let (near, far) = input_pair();
+            let mut buf = [0u8; INPUT_EVENT_SIZE];
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_millis(20)) => {}
+                res = read_full(&near, &mut buf) => panic!("nothing was written, got {res:?}"),
+            }
+            far
+        });
+        let dropped = std::thread::spawn(move || drop(rt));
+        let started = Instant::now();
+        while !dropped.is_finished() {
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "runtime drop is waiting on the abandoned read"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(far);
+    }
 
     #[test]
     fn test_parse_event_keydown_m7350_v5() {
