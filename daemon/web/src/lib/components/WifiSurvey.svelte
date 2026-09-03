@@ -576,7 +576,8 @@
             {/if}
             <p>
                 Scanning happens on the same radio that serves the hotspot, so it is deliberately
-                rate limited. Repeating every fifteen seconds is safe; faster is refused.
+                rate limited: the device refuses a scan within five seconds of the last one.
+                Repeating every fifteen seconds is comfortably safe.
             </p>
         </Explainer>
     </div>

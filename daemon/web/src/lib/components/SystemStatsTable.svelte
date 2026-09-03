@@ -284,15 +284,17 @@
 
     {#if stats.health}
         <div class="mt-2">
-            <Explainer summary="What load, uptime and temperature tell you about this device.">
+            <Explainer
+                summary="What the processor, uptime and temperature tell you about this device."
+            >
                 <p>
-                    <strong>Load</strong> is how much work is queued, measured against the
-                    {stats.health.cpu_count === 1
-                        ? 'single processor core this device has'
-                        : `${stats.health.cpu_count} cores this device has`}. Below one per core the
-                    device is keeping up. Above it, work is waiting, and a device that falls far
-                    enough behind can drop radio messages it never gets back. That matters here more
-                    than on an ordinary computer: a missed message looks exactly like a quiet night.
+                    <strong>Processor</strong> is how much of the {stats.health.cpu_count === 1
+                        ? 'single core this device has'
+                        : `${stats.health.cpu_count} cores this device has`} is in use, measured between
+                    refreshes of this page, with Rayhunter's own share shown beside it. Up to half is
+                    comfortable. Past three quarters it is stretched, and past nine tenths a device can
+                    fall far enough behind to drop radio messages it never gets back. That matters here
+                    more than on an ordinary computer: a missed message looks exactly like a quiet night.
                 </p>
                 <p>
                     <strong>Uptime</strong> is how long the device has been running since it last booted.

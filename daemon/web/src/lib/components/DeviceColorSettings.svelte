@@ -157,7 +157,7 @@
         The colored line Rayhunter draws on the device's own screen to show what it is doing. It
         appears in every mode except Invisible.
         {#if config.ui_level === CUSTOM_GIF}
-            In Custom GIF mode it is only used for states that have no GIF.
+            In Custom image mode it is only used for states that have no image.
         {/if}
         These settings do not affect the colors on this page.
     </p>

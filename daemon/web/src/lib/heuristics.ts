@@ -94,11 +94,12 @@ export const HEURISTICS: HeuristicInfo[] = [
         key: 'incomplete_sib',
         title: 'Tower broadcasting only a fragment of its details',
         summary:
-            'Watches for towers that broadcast far less information about themselves than a real one does.',
+            "Notes when a tower's first broadcast schedules almost none of the others a real tower sends. Notes, not alarms.",
         detects:
-            'A genuine tower continuously broadcasts a series of information blocks describing itself, its neighbours and how to use it. This test checks whether the first block promises the others, and whether they are actually there.',
+            'A genuine tower continuously broadcasts a series of information blocks describing itself, its neighbours and how to use it. The first block carries a schedule of the rest. This test reads that schedule and notes when it lists fewer than two further blocks, less than a working tower needs.',
         matters:
-            'Fake towers commonly send only the first block or two. The rest takes effort and brings whoever is operating it no benefit, since they only need your phone to connect briefly. On its own this can simply be a badly configured tower. Alongside an identity request it becomes a strong signal that the tower is not what it claims to be.',
+            'Fake towers commonly send only the first block or two. The rest takes effort and brings whoever is operating it no benefit, since they only need your phone to connect briefly. On its own this can simply be a badly configured tower, which is why it is written as an informational note rather than a warning, and a note only reaches the history when another detector warns about the same message. Next to such a warning it is a strong sign that the tower is not what it claims to be.',
+        tag: 'informational',
     },
     {
         key: 'lpp_location_request',
@@ -153,7 +154,7 @@ export const HEURISTICS: HeuristicInfo[] = [
             'When a tower wants to prove it is real, it sends your phone a challenge signed with a key only your carrier and your SIM know. A fake tower does not have that key, so your phone rejects the challenge as forged. This check counts those rejections. Two in a row raises a warning; if the tower had asked for your permanent identity (IMSI) just before, it is raised as a high warning, because that is the whole sequence of the attack.',
         matters:
             'A conventional fake tower holds your phone after taking its identity, and you lose service until the phone gives up, which you might notice. The FlashCatch attack, described by researchers in 2025, avoids that: it takes the identity and then deliberately fails authentication three times, so your phone treats the tower as broken, leaves within a second, and reconnects to the real network with no visible interruption. Nothing on the phone shows it happened. The rejections are the one trace it leaves, and they are something a real network essentially never produces.',
-        noise: 'A SIM with a mismatched key, such as a badly provisioned or test SIM, fails this check on every connection and would trip it constantly, but such a phone also has no service, so the situation is obvious. A single rejection, or a sequence-number mismatch on its own, is normal housekeeping and is not counted. The pattern comes from the published description of the attack; it has not yet been confirmed against a recording of the attack itself.',
+        noise: 'A SIM with a mismatched key, such as a badly provisioned or test SIM, fails this check on every connection and would trip it constantly, but such a phone also has no service, so the situation is obvious. A single rejection is not counted, and a sequence-number mismatch on its own is normal housekeeping; three of those in a row raise a medium warning, since they suggest a tower replaying authentication data it captured earlier. The pattern comes from the published description of the attack; it has not yet been confirmed against a recording of the attack itself.',
     },
     {
         key: 'diagnostic_analyzer',

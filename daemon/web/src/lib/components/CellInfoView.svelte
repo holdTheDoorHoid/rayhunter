@@ -327,9 +327,10 @@
                         phone gives up the permanent one.
                     </p>
                     <p>
-                        This panel is off unless you switch it on, because the web interface has no
-                        password. Anything on this page is readable by anyone who can reach it,
-                        which on a hotspot means anyone on its WiFi.
+                        This panel is off unless you switch it on, under Configuration → Security.
+                        Anything on this page can be read from every phone or computer paired with
+                        this unit, and the IMSI is exactly what an IMSI catcher collects, so it is
+                        not shown without being asked for.
                     </p>
                 </Explainer>
             </div>

@@ -141,8 +141,9 @@ anyone else on the WiFi. Now the connection is encrypted, and only paired
 devices are answered. A guest, a family member, or anyone who was given the
 WiFi for another reason gets the pairing page and nothing else.
 
-It does not protect against someone holding the unit. The USB cable is root
-on these devices, and that is by design: it is also how you recover. A unit
+It does not protect against someone holding the unit. Physical access is root
+on these devices, over USB where ADB is on and with the admin password
+otherwise, and that is by design: it is also how you recover. A unit
 that nobody has paired with yet can be paired by whoever presses its button
 during the ten-minute window, so pair a new unit before handing it to anyone.
 And a phone that is paired is trusted until you remove it; a lost or stolen

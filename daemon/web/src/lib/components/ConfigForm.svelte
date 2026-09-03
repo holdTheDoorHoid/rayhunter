@@ -689,8 +689,9 @@
                                     power the moment you unplug it.
                                 </p>
                                 <p>
-                                    Currently implemented for the Orbic. Other devices accept the
-                                    setting and ignore it rather than failing.
+                                    Implemented for the Orbic and the Moxee, which share the same
+                                    screen hardware. Other devices accept the setting and ignore it
+                                    rather than failing.
                                 </p>
                             </Explainer>
                         </div>
@@ -836,13 +837,15 @@
                                 summary="Adds a button to the main page that fakes a surveillance detection, for showing Rayhunter to an audience."
                             >
                                 <p>
-                                    The button injects a synthetic message into the recording that
-                                    looks to Rayhunter like a tower switching encryption off, which
-                                    is one of the clearest signs of a fake base station. It goes
-                                    through the real detectors, so the warning appears in the
-                                    history and turns the device red exactly as a genuine one would.
-                                    That is the point: it demonstrates how Rayhunter actually works
-                                    rather than painting a warning on screen.
+                                    Each press injects two short synthetic exchanges into the
+                                    recording, drawn from the attacks Rayhunter watches for: a tower
+                                    switching encryption off, an identity demand, a push down to 2G,
+                                    a location request and others. One of the two always rates high,
+                                    so the device turns red, and consecutive presses differ. They go
+                                    through the real detectors, so the warnings appear in the
+                                    history exactly as genuine ones would. That is the point: it
+                                    demonstrates how Rayhunter actually works rather than painting a
+                                    warning on screen.
                                 </p>
                                 <p>
                                     <strong>The fake message is written into your recording.</strong
@@ -1191,9 +1194,11 @@
                                 </select>
                                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                     {#if config.gps_mode === GpsMode.Api}
-                                        POST latitude and longitude to <code>/api/gps</code> from any
-                                        device on the network. Timestamp is derived from packet capture
-                                        timing.
+                                        Location is accepted by POST to <code>/api/gps</code>,
+                                        stamped with the time of the latest captured packet. Since
+                                        pairing, the API answers only paired browsers and
+                                        connections over USB, so a separate GPS app on the WiFi
+                                        cannot feed it on its own.
                                     {:else if config.gps_mode === GpsMode.Fixed}
                                         GPS coordinates are fixed to the values below.
                                     {:else}
@@ -1254,8 +1259,9 @@
                             </h3>
                             <p class="text-xs text-gray-500 dark:text-gray-400">
                                 Once a recording has been closed for at least the configured age,
-                                both the .qmdl and .ndjson files are uploaded in the background to
-                                the WebDAV server.
+                                its files are uploaded in the background: the capture (.qmdl, or
+                                .qmdl.gz once compressed), the analysis (.ndjson), and the GPS log
+                                and device-details file where they exist.
                             </p>
 
                             <ExpandableInput
@@ -1876,8 +1882,8 @@
                         class="space-y-4"
                     >
                         <p class="text-xs text-gray-500 dark:text-gray-400">
-                            Who can use this interface, what it discloses, and what a USB cable
-                            gets. Nothing here changes what is recorded or detected.
+                            Who can use this interface, what it discloses, and what someone holding
+                            the device can do. Nothing here changes what is recorded or detected.
                         </p>
 
                         <div class="space-y-3">
@@ -2145,10 +2151,11 @@
                                 </p>
                                 <p>
                                     What it does not protect against is someone holding the unit.
-                                    The USB cable is root, and a button press on a unit that nobody
-                                    has paired with yet lets its holder pair. If every paired device
-                                    and the passphrase are lost, the pairing records are removed
-                                    over USB and the unit starts over.
+                                    Physical access is root on these devices, over a USB cable where
+                                    ADB is on and with the admin password otherwise, and a button
+                                    press on a unit that nobody has paired with yet lets its holder
+                                    pair. If every paired device and the passphrase are lost, the
+                                    pairing records are removed over USB and the unit starts over.
                                 </p>
                             </Explainer>
                         </div>

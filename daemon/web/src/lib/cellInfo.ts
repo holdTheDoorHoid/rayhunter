@@ -87,9 +87,9 @@ export interface DetectionHealth {
 /**
  * Identities this device has sent about itself.
  *
- * Absent unless switched on in the configuration. The web interface has no
- * authentication, so on a hotspot anything it serves is readable by anyone on
- * the WiFi, and an IMSI is the identifier an IMSI catcher exists to collect.
+ * Absent unless switched on in the configuration. Anything the interface
+ * serves can be read from every paired browser, and an IMSI is the identifier
+ * an IMSI catcher exists to collect.
  */
 export interface SubscriberIdentities {
     imsi?: string;
