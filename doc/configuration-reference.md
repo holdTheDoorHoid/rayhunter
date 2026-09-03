@@ -122,6 +122,36 @@ are uploaded in the background once old enough.
 | `webdav.min_age_secs` | integer | `86400` | How old a recording must be before it is eligible (default one day). |
 | `webdav.delete_on_upload` | boolean | `false` | Delete the local copy after a successful upload. |
 
+## Community dataset
+
+Present under a `[telemetry]` table. Off unless `enabled` is true, and best set
+up from the web interface, which fetches and pins the service's keys. See
+[Contributing Recordings to a Community Dataset](./community-dataset.md). All
+**Fork**.
+
+| Key | Type | Default | Effect |
+|---|---|---|---|
+| `telemetry.enabled` | boolean | `false` | Run the contribution worker. Saving with it on is refused unless `server_url` is HTTPS and `ingest_public_key` is set. |
+| `telemetry.server_url` | string | empty | The collection service. `https://` required, except plain `http://` to localhost for testing. |
+| `telemetry.server_name` | string or unset | unset | The service's name as it described itself, for display. |
+| `telemetry.ingest_public_key` | string or unset | unset | The service's ingest key, base64, pinned when the owner checked the server. Uploads stop if the service presents a different one. |
+| `telemetry.archive_public_key` | string or unset | unset | The service's archive key, pinned the same way. Needed for the full tier. |
+| `telemetry.tier` | `summary` or `full` | `summary` | What is sent. `full` also needs `archive_public_key` and `full_tier_acknowledged_at`, or saving is refused. |
+| `telemetry.full_tier_acknowledged_at` | string or unset | unset | When the owner ticked the acknowledgement in the interface. Sent with every full submission. |
+| `telemetry.min_severity` | `low`, `medium`, `high` | `low` | The lowest severity a recording must have raised. |
+| `telemetry.include_clean_recordings` | boolean | `false` | Also send recordings that raised no warning. |
+| `telemetry.include_notes` | boolean | `false` | Full tier only: include the recording's name and notes. |
+| `telemetry.location` | `none`, `coarse`, `neighborhood`, `exact` | `coarse` | How far to round the location: not sent, about 10 km, about 1 km, as recorded. Applies to the point in the summary and, in the full tier, to the track. |
+| `telemetry.network` | `wifi_only` or `any` | `wifi_only` | Upload only while the WiFi client is joined to a network, or also over the cellular modem. |
+| `telemetry.allowed_networks` | list of strings | `[]` | With `wifi_only`, upload only from these network names. Empty means any. |
+| `telemetry.poll_interval_secs` | integer | `900` | How often the worker looks for recordings to send. 30 to 604800. |
+| `telemetry.min_age_secs` | integer | `3600` | How long a recording must have been closed. 0 to 315360000. |
+| `telemetry.upload_timeout_secs` | integer | `600` | Timeout per upload request. 1 to 14400. |
+| `telemetry.key_rotation_days` | integer | `30` | How often the unit's signing key is replaced. 0 never rotates. At most 3650. |
+
+Per-recording choices (kept out, contributed, withdrawn) live in the
+recordings manifest, not in this file.
+
 ## Pairing and web accounts
 
 Which browsers may use the interface is not in this file at all. Paired

@@ -132,6 +132,15 @@ send, and to whom, is still yours:
   presented as a detection. Start a fresh recording after any demo. See [Your
   First Warning](./first-warning.md).
 
+## Contributing automatically
+
+If you would rather the device did this for you, it can send the shareable
+bundle of every recording that raised a warning to a community-run collection,
+encrypted on the device and only over your own WiFi. It is off until you turn it
+on, and everything on this page about what the redaction does and does not
+promise applies to it. See [Contributing Recordings to a Community
+Dataset](./community-dataset.md).
+
 ## Where to report
 
 What to do with a verified finding depends on your situation:

@@ -10,6 +10,10 @@ If you're using Rayhunter (or trying to), we'd love to hear from you! Check out 
   If you're unfamiliar with Signal, feel free to check out our [Security Self
   Defense guide on it](https://ssd.eff.org/module/how-to-use-signal).
 
+* This fork can also contribute the shareable version of a recording to a
+  community-run collection automatically, if you turn that on and trust
+  whoever runs it. See [Contributing Recordings to a Community
+  Dataset](./community-dataset.md). EFF does not run such a service.
 * If you're having issues installing or using Rayhunter, consider checking the [Frequently Asked Questions](./faq.md) page for answers to common questions.
 * If your question isn't answered there, please [open an issue](https://github.com/EFForg/rayhunter/issues) on our Github repo.
 * If you'd like to propose a feature, heuristic, or device for Rayhunter, [start a discussion](https://github.com/EFForg/rayhunter/discussions) in our Github repo

@@ -216,6 +216,31 @@ its two call sites).
 end, because the test device only sees LTE. Anyone with 2G or 3G service
 should confirm before this goes up.
 
+### community-dataset
+Opt-in contribution of recordings to a community-run collection, with the
+service to run one.
+**Upstream:** [#108](https://github.com/EFForg/rayhunter/issues/108) (open,
+labelled unplanned), [discussion #673](https://github.com/EFForg/rayhunter/discussions/673),
+[#154](https://github.com/EFForg/rayhunter/issues/154) for what to strip and
+keep. A maintainer said on #673 that EFF will never run this but "someone
+else is welcome to", and on #108 that a design was the missing piece. So:
+**talk first, and offer the design (`telemetry/DESIGN.md`), not the code.**
+The device side might be welcome once a community service exists; the
+collector belongs in its own repository if upstream wants the device side.
+**Commits:** see `git log --grep="^Feature: community-dataset"`.
+**Files:** `telemetry/format` (the envelope crate), `telemetry/collector`
+(the service), `daemon/src/telemetry/` (config in `config.rs`, manifest
+fields in `qmdl_store.rs`, routes in `main.rs` and `lib.rs`),
+`daemon/web/src/lib/components/CommunityDataset.svelte`,
+`ContributionStatus.svelte`, `doc/community-dataset.md`,
+`doc/concepts/community-dataset.md`.
+**Depends on:** the shareable zip (`redact.rs`, the redacted PCAP path) and
+the recording sidecar.
+**Note:** the maintainers' two stated objections, breach exposure and
+identifiers in raw captures, are what the two-key design answers: the
+server holds ciphertext for every raw capture and cannot open it. The
+open question for them is whether they would link to a community instance.
+
 ## Already done upstream, nothing to send
 
 ### check-json-output

@@ -21,6 +21,7 @@
 - [Why Detection Is Hard](./concepts/why-detection-is-hard.md)
 - [Reading Warnings Without Panicking](./concepts/interpreting-warnings.md)
 - [What This Tool Cannot Tell You](./concepts/limitations.md)
+- [How the Community Dataset Protects You](./concepts/community-dataset.md)
 - [Legal and Personal Risk](./concepts/risk.md)
 
 # Installing
@@ -56,6 +57,7 @@
 - [The Packet Explorer](./packet-explorer.md)
 - [Securing the Web Interface](./web-authentication.md)
 - [Sharing What You Find](./sharing-findings.md)
+- [Contributing Recordings to a Community Dataset](./community-dataset.md)
 
 # The detectors
 

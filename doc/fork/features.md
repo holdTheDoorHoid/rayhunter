@@ -57,6 +57,16 @@ Notice](./differences.md).
   recordings that found nothing, never a named one. See
   [Recordings](../recordings.md).
 
+## Contributing to a community dataset
+
+- **Opt-in contribution of recordings.** Send recordings that raised a warning
+  to a community-run collection, encrypted and signed on the device, in a
+  shareable tier by default or a full tier after acknowledging what it
+  contains, with a rounded location, only over WiFi, and withdrawable later.
+  Comes with the service and site generator to run one. See [Contributing
+  Recordings to a Community Dataset](../community-dataset.md) and [How the
+  Community Dataset Protects You](../concepts/community-dataset.md).
+
 ## The device screen
 
 - **Custom colours and status-line height.** Override the colour for each
