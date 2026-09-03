@@ -1,0 +1,49 @@
+# /etc/systemd/system/rayhunter-collector.service
+#
+# The ingest service. Runs as its own user, can write only its data
+# directory, and listens on loopback for Caddy to forward to. Edit the
+# --name, --contact and --site-url arguments; add --accept-full only if
+# archive.pub is in the key directory and you have somewhere safe to keep
+# archive.key.
+
+[Unit]
+Description=Rayhunter community dataset ingest
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=rayhunter
+Group=rayhunter
+Environment=RUST_LOG=info
+ExecStart=/usr/local/bin/rayhunter-collector serve \
+    --data /var/lib/rayhunter-collector/data \
+    --keys /var/lib/rayhunter-collector/keys \
+    --bind 127.0.0.1:8090 \
+    --name "Your Community Rayhunter Dataset" \
+    --contact "you@example.org" \
+    --site-url "https://data.example.org" \
+    --behind-proxy \
+    --max-summary-mb 64 \
+    --max-capture-mb 512 \
+    --max-disk-gb 30
+Restart=on-failure
+RestartSec=5
+
+# Confinement: nothing here needs more than its data directory.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/rayhunter-collector/data
+
+[Install]
+WantedBy=multi-user.target

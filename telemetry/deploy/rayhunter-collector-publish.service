@@ -1,0 +1,23 @@
+# /etc/systemd/system/rayhunter-collector-publish.service
+#
+# Rewrites the public site from every verified submission. Started by the
+# timer beside it, or by hand after a review: systemctl start
+# rayhunter-collector-publish.service
+
+[Unit]
+Description=Publish the Rayhunter community dataset site
+
+[Service]
+Type=oneshot
+User=rayhunter
+Group=rayhunter
+ExecStart=/usr/local/bin/rayhunter-collector publish \
+    --data /var/lib/rayhunter-collector/data \
+    --out /var/www/rayhunter-data \
+    --title "Your Community Rayhunter Dataset" \
+    --base-url "https://data.example.org"
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/www/rayhunter-data

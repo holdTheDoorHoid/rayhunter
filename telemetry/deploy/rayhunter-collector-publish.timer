@@ -1,0 +1,12 @@
+# /etc/systemd/system/rayhunter-collector-publish.timer
+
+[Unit]
+Description=Publish the Rayhunter community dataset site every 15 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

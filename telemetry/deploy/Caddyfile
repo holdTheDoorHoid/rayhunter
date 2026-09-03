@@ -1,0 +1,43 @@
+# Caddy serves the public site as plain files and forwards the two paths a
+# unit talks to. Replace data.example.org with your domain. Caddy obtains and
+# renews the TLS certificate from Let's Encrypt on its own.
+#
+# The DNS record for the domain must point straight at this server (no
+# Cloudflare proxy), or another party terminates TLS in front of you.
+
+data.example.org {
+	encode gzip
+
+	# The service is designed not to keep client addresses. Do not undo that
+	# at the proxy: no access log.
+	log {
+		output discard
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		Strict-Transport-Security "max-age=31536000"
+	}
+
+	# A full-tier capture can be a few hundred megabytes. Keep this above
+	# the collector's --max-capture-mb.
+	request_body {
+		max_size 600MB
+	}
+
+	# What units talk to.
+	handle /v1/* {
+		reverse_proxy 127.0.0.1:8090
+	}
+	handle /.well-known/rayhunter-telemetry {
+		reverse_proxy 127.0.0.1:8090
+	}
+
+	# Everything else is the published site: files, nothing dynamic.
+	handle {
+		root * /var/www/rayhunter-data
+		file_server
+	}
+}
