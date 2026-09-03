@@ -53,7 +53,7 @@ it.
 | [Continuous Location Tracking (LPP)](./lpp.md) | `lpp_location_tracking` | Medium, Low, Informational | On | **Fork.** Reference-encoder vectors. Never confirmed against real traffic. |
 | [Location Requested on 2G (RRLP)](./rrlp.md) | `rrlp_location_request` | Low, Informational | On | **Fork.** Reference-encoder vectors. Never seen against real 2G traffic. |
 | [A Tower That Seems to Have Moved](./timing-advance.md) | `timing_advance` | Low | On | **Fork.** Unit-tested; silent on the Orbic and any modem that reports no timing advance. Never seen against a real cell-site simulator. |
-| [Identity Taken, Then Forged Authentication (FlashCatch)](./flash-catch.md) | `flash_catch` | High, Medium, Informational | On | **Fork.** Synthetic messages and a demo scenario, built from the published description of the attack. Never confirmed against a recording of the attack. |
+| [Identity Taken, Then Forged Authentication (FlashCatch)](./flash-catch.md) | `flash_catch` | High, Medium, Informational | On | **Fork.** Synthetic messages and a demo scenario, built from the paper's description of the exchange. Never confirmed against a recording of the attack. |
 | [Identity Exposure Diary](./imsi-requested.md) | `diagnostic_analyzer` | Informational only | On | Inherited. Informational-only, so invisible in a report on its own. |
 | Alert on Every Tower (testing) | `test_analyzer` | Low | Off | A self-test, not a detector. Fires on every tower beacon; leave it off while hunting. |
 

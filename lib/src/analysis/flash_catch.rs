@@ -1,18 +1,22 @@
 //! FlashCatch: a fake tower that takes the phone's identity and then makes
 //! the phone reject *it*, so the phone walks away on its own.
 //!
-//! Described by Paci, Bologna, Palamà and Bianchi in "FlashCatch: Sub-Second
-//! IMSI Catching with No Service Disruption" (ACM WiSec 2025). A conventional
-//! IMSI catcher holds a phone after taking its identity, and the phone loses
-//! service until it gives up, which a person can notice. FlashCatch avoids
-//! that. Posing as a tower of the phone's own network, it asks for the
-//! permanent identity (IMSI) the moment the phone checks in, and then sends
-//! authentication challenges it has deliberately signed wrongly. The phone
-//! answers each with AUTHENTICATION FAILURE, cause "MAC failure", and after
-//! the third it treats the tower as having failed authentication (3GPP TS
-//! 24.301 §5.4.2.6), bars the cell (TS 36.304 §5.3.1), and goes back to the
-//! real network with its keys intact. The whole exchange takes under a second
-//! and the phone never shows a loss of service.
+//! Described by Paci, Bologna, Palamà and Bianchi in "FlashCatch: Minimizing
+//! Disruption in IMSI Catcher Operations" (ACM WiSec 2025,
+//! doi:10.1145/3734477.3734705). A conventional IMSI catcher holds a phone
+//! after taking its identity, and the phone loses service until it gives up,
+//! which a person can notice. FlashCatch avoids that. Posing as a tower of the
+//! phone's own network, on a frequency that network really uses, it asks for
+//! the permanent identity (IMSI) the moment the phone checks in with a
+//! tracking area update or service request, and then sends authentication
+//! challenges it has deliberately signed wrongly. The phone answers each with
+//! AUTHENTICATION FAILURE, cause "MAC failure" (3GPP TS 24.301 §5.4.2.6),
+//! and after the third it treats the tower as having failed authentication
+//! (§5.4.2.7), bars the cell for five minutes (TS 36.304 §5.3.1), and goes
+//! back to the real network with its keys and temporary identity intact. The
+//! paper measured the identity leaving the phone within tens of milliseconds
+//! of the check-in, and nothing a person could notice beyond a latency blip
+//! of about a second.
 //!
 //! Rayhunter sees both halves. The identity request is the same message the
 //! [identity detector](super::imsi_requested) watches for, but that detector
@@ -21,6 +25,13 @@
 //! keys on the part no other one reads, the run of AUTHENTICATION FAILURE
 //! messages from the phone. A real network knows the SIM's key and passes
 //! this check; a network that fails it twice in a row does not know the key.
+//!
+//! The standard counts three failures of any of causes #20 "MAC failure",
+//! #21 "Synch failure" and #26 "non-EPS authentication unacceptable" towards
+//! barring the cell. The first and the last need no key to provoke, so the
+//! detector counts them together as forged challenges. A synch failure needs
+//! a genuine challenge, replayed, and one on its own is ordinary
+//! housekeeping, so those are counted apart and more leniently.
 //!
 //! The design follows the paper's description of the exchange and the
 //! standard's handling of authentication failure; it has not been checked
@@ -36,15 +47,15 @@ use pycrate_rs::nas::generated::emm::emm_identity_request::IDTypeV;
 use super::analyzer::{Analyzer, Event, EventType};
 use super::information_element::{InformationElement, LteInformationElement};
 
-/// How many packets an identity request or a failure stays relevant. The
-/// attack completes within a second, a few dozen log records; the window is
-/// generous because the modem logs other traffic in between.
+/// How many packets a check-in, an identity request or a rejection stays
+/// relevant. The attack completes within a second, a few dozen log records;
+/// the window is generous because the modem logs other traffic in between.
 const WINDOW: usize = 200;
 
 /// Consecutive forged-challenge rejections that make a warning. The standard
 /// lets the phone bar the cell after three; two in a row is already something
 /// a real network does not do.
-const MAC_FAILURES_TO_WARN: usize = 2;
+const FORGED_CHALLENGES_TO_WARN: usize = 2;
 
 /// Sequence-number failures that make a warning. One is ordinary housekeeping
 /// (the phone and network resynchronise), so more are needed.
@@ -53,11 +64,13 @@ const SYNCH_FAILURES_TO_WARN: usize = 3;
 pub struct FlashCatchAnalyzer {
     /// The packet where the tower last asked for the IMSI.
     imsi_requested_at: Option<usize>,
-    /// The packet where the phone last began a tracking area update.
-    tau_requested_at: Option<usize>,
-    /// Packets where the phone rejected a challenge as forged, within the
-    /// window, oldest first.
-    mac_failures: Vec<usize>,
+    /// The packet where the phone last checked in with a tracking area
+    /// update or a service request.
+    checked_in_at: Option<usize>,
+    /// Packets where the phone rejected a challenge as forged (MAC failure
+    /// or non-EPS authentication unacceptable), within the window, oldest
+    /// first.
+    forged_challenges: Vec<usize>,
     /// Packets where the phone reported the sequence number out of step.
     synch_failures: Vec<usize>,
     /// Whether the current run of failures has been reported, so a burst
@@ -75,8 +88,8 @@ impl FlashCatchAnalyzer {
     pub fn new() -> Self {
         Self {
             imsi_requested_at: None,
-            tau_requested_at: None,
-            mac_failures: Vec::new(),
+            checked_in_at: None,
+            forged_challenges: Vec::new(),
             synch_failures: Vec::new(),
             reported: false,
         }
@@ -85,8 +98,8 @@ impl FlashCatchAnalyzer {
     /// Forget everything: the exchange ended, one way or another.
     fn reset(&mut self) {
         self.imsi_requested_at = None;
-        self.tau_requested_at = None;
-        self.mac_failures.clear();
+        self.checked_in_at = None;
+        self.forged_challenges.clear();
         self.synch_failures.clear();
         self.reported = false;
     }
@@ -94,11 +107,11 @@ impl FlashCatchAnalyzer {
     /// Drop failures older than the window. When that empties the list, the
     /// earlier run is over and a new one may be reported.
     fn prune(&mut self, now: usize) {
-        self.mac_failures
+        self.forged_challenges
             .retain(|&at| now.saturating_sub(at) <= WINDOW);
         self.synch_failures
             .retain(|&at| now.saturating_sub(at) <= WINDOW);
-        if self.mac_failures.is_empty() && self.synch_failures.is_empty() {
+        if self.forged_challenges.is_empty() && self.synch_failures.is_empty() {
             self.reported = false;
         }
     }
@@ -111,15 +124,22 @@ impl FlashCatchAnalyzer {
             .join(", ")
     }
 
-    fn on_mac_failure(&mut self, packet_num: usize) -> Option<Event> {
+    /// The phone checking in with a tower it already has keys for. A new
+    /// exchange begins; what came before it is over.
+    fn on_check_in(&mut self, packet_num: usize) {
+        self.reset();
+        self.checked_in_at = Some(packet_num);
+    }
+
+    fn on_forged_challenge(&mut self, packet_num: usize) -> Option<Event> {
         self.prune(packet_num);
-        self.mac_failures.push(packet_num);
-        if self.reported || self.mac_failures.len() < MAC_FAILURES_TO_WARN {
+        self.forged_challenges.push(packet_num);
+        if self.reported || self.forged_challenges.len() < FORGED_CHALLENGES_TO_WARN {
             return None;
         }
         self.reported = true;
-        let count = self.mac_failures.len();
-        let packets = Self::packet_list(&self.mac_failures);
+        let count = self.forged_challenges.len();
+        let packets = Self::packet_list(&self.forged_challenges);
         if let Some(requested_at) = self
             .imsi_requested_at
             .filter(|&at| packet_num.saturating_sub(at) <= WINDOW)
@@ -131,8 +151,10 @@ impl FlashCatchAnalyzer {
                      {requested_at}, then failed its own authentication {count} times in a row \
                      (packets {packets}): the phone rejected each challenge as forged. This is \
                      the FlashCatch pattern. A fake tower takes the identity and then fails \
-                     authentication on purpose, so the phone leaves within a second and goes \
-                     back to the real network with no visible interruption."
+                     authentication on purpose; after the third rejection the phone bars the \
+                     tower for five minutes and goes back to the real network with no visible \
+                     interruption, keeping the temporary identity the tower can now tie to the \
+                     IMSI."
                 ),
             });
         }
@@ -169,16 +191,17 @@ impl FlashCatchAnalyzer {
 
     fn on_imsi_request(&mut self, packet_num: usize) -> Option<Event> {
         self.imsi_requested_at = Some(packet_num);
-        let tau_at = self
-            .tau_requested_at
+        let checked_in_at = self
+            .checked_in_at
             .filter(|&at| packet_num.saturating_sub(at) <= WINDOW)?;
         Some(Event {
             event_type: EventType::Informational,
             message: format!(
-                "The tower asked for the permanent identity (IMSI) while the phone was only \
-                 updating its location (tracking area update at packet {tau_at}). Real networks \
-                 do this when they have lost the phone's record; a fake tower does it to every \
-                 phone. Noted only. This detector warns if forged authentication follows."
+                "The tower asked for the permanent identity (IMSI) as soon as the phone checked \
+                 in (tracking area update or service request at packet {checked_in_at}). Real \
+                 networks do this when they have lost the phone's record; a fake tower does it \
+                 to every phone. Noted only. This detector warns if forged authentication \
+                 follows."
             ),
         })
     }
@@ -200,7 +223,7 @@ impl Analyzer for FlashCatchAnalyzer {
     }
 
     fn get_version(&self) -> u32 {
-        1
+        2
     }
 
     fn analyze_information_element(
@@ -215,16 +238,21 @@ impl Analyzer for FlashCatchAnalyzer {
             return None;
         };
         match emm {
-            // The phone checking in. A new exchange begins; what came before
-            // it is over.
-            EMMMessage::EMMTrackingAreaUpdateRequest(_) => {
-                self.reset();
-                self.tau_requested_at = Some(packet_num);
-                None
-            }
-            EMMMessage::EMMAttachRequest(_)
+            // The phone checking in. The paper's phone sends a tracking area
+            // update when the fake tower advertises a different tracking area
+            // and a service request when it copies the real one. The short
+            // SERVICE REQUEST has no plain form for the parser to decode, so
+            // only the extended and control-plane forms are seen here; the
+            // warnings do not depend on it, only the informational note.
+            EMMMessage::EMMTrackingAreaUpdateRequest(_)
             | EMMMessage::EMMExtServiceRequest(_)
             | EMMMessage::EMMCPServiceRequest(_) => {
+                self.on_check_in(packet_num);
+                None
+            }
+            // Starting from scratch is not checking in: the identity detector
+            // covers an identity request during an attach.
+            EMMMessage::EMMAttachRequest(_) => {
                 self.reset();
                 None
             }
@@ -233,7 +261,10 @@ impl Analyzer for FlashCatchAnalyzer {
                 _ => None,
             },
             EMMMessage::EMMAuthenticationFailure(failure) => match failure.emm_cause.inner {
-                EMMCauseEMMCause::MACFailure => self.on_mac_failure(packet_num),
+                EMMCauseEMMCause::MACFailure
+                | EMMCauseEMMCause::NonEPSAuthenticationUnacceptable => {
+                    self.on_forged_challenge(packet_num)
+                }
                 EMMCauseEMMCause::SynchFailure => self.on_synch_failure(packet_num),
                 _ => None,
             },
@@ -268,6 +299,9 @@ mod tests {
     const IDENTITY_REQUEST_IMEI: &[u8] = &[0x07, 0x55, 0x02];
     /// AUTHENTICATION FAILURE (0x5C), cause 20 "MAC failure" (§9.9.3.9).
     const AUTH_FAILURE_MAC: &[u8] = &[0x07, 0x5C, 0x14];
+    /// AUTHENTICATION FAILURE, cause 26 "non-EPS authentication
+    /// unacceptable": the challenge was not even built for a 4G network.
+    const AUTH_FAILURE_NON_EPS: &[u8] = &[0x07, 0x5C, 0x1A];
     /// AUTHENTICATION FAILURE, cause 21 "Synch failure", with the AUTS
     /// parameter (tag 0x30, 14 bytes) the phone sends for resynchronisation.
     const AUTH_FAILURE_SYNCH: &[u8] = &[
@@ -291,6 +325,9 @@ mod tests {
     const TAU_REQUEST: &[u8] = &[
         0x07, 0x48, 0x00, 0x0B, 0xF6, 0x00, 0xF1, 0x10, 0x00, 0x01, 0x01, 0xC0, 0x00, 0x00, 0x01,
     ];
+    /// EXTENDED SERVICE REQUEST (0x4C): key set 0 and service type 0, then
+    /// the M-TMSI (5 bytes: 0xF4 marks a TMSI, then 0xC0000001).
+    const EXT_SERVICE_REQUEST: &[u8] = &[0x07, 0x4C, 0x00, 0x05, 0xF4, 0xC0, 0x00, 0x00, 0x01];
     /// SECURITY MODE COMMAND (0x5D), as the demo uses.
     const SECURITY_MODE_COMMAND: &[u8] = &[0x07, 0x5D, 0x00, 0x00, 0x02, 0x80, 0x00, 0x00];
 
@@ -330,10 +367,12 @@ mod tests {
         expect(IDENTITY_REQUEST_IMSI, "EMMMessage(EMMIdentityRequest");
         expect(IDENTITY_REQUEST_IMEI, "EMMMessage(EMMIdentityRequest");
         expect(AUTH_FAILURE_MAC, "EMMMessage(EMMAuthenticationFailure");
+        expect(AUTH_FAILURE_NON_EPS, "EMMMessage(EMMAuthenticationFailure");
         expect(AUTH_FAILURE_SYNCH, "EMMMessage(EMMAuthenticationFailure");
         expect(AUTH_REQUEST, "EMMMessage(EMMAuthenticationRequest");
         expect(AUTH_RESPONSE, "EMMMessage(EMMAuthenticationResponse");
         expect(TAU_REQUEST, "EMMMessage(EMMTrackingAreaUpdateRequest");
+        expect(EXT_SERVICE_REQUEST, "EMMMessage(EMMExtServiceRequest");
         expect(SECURITY_MODE_COMMAND, "EMMMessage(EMMSecurityModeCommand");
     }
 
@@ -374,9 +413,60 @@ mod tests {
     }
 
     #[test]
+    fn the_exchange_after_a_service_request_is_the_same() {
+        // The paper's phone sends a service request instead of a tracking
+        // area update when the fake tower copies the real tracking area.
+        let mut analyzer = FlashCatchAnalyzer::new();
+        let events = run(
+            &mut analyzer,
+            0,
+            &[
+                EXT_SERVICE_REQUEST,
+                IDENTITY_REQUEST_IMSI,
+                AUTH_FAILURE_MAC,
+                AUTH_FAILURE_MAC,
+            ],
+        );
+        assert_eq!(
+            severities(&events),
+            vec![
+                None,
+                Some(EventType::Informational),
+                None,
+                Some(EventType::High)
+            ]
+        );
+    }
+
+    #[test]
     fn forged_challenges_without_an_identity_request_are_medium() {
         let mut analyzer = FlashCatchAnalyzer::new();
         let events = run(&mut analyzer, 0, &[AUTH_FAILURE_MAC, AUTH_FAILURE_MAC]);
+        assert_eq!(severities(&events), vec![None, Some(EventType::Medium)]);
+    }
+
+    #[test]
+    fn a_non_eps_rejection_counts_as_a_forged_challenge() {
+        // The standard counts causes 20 and 26 alike towards barring the
+        // cell, and neither needs the key to provoke.
+        let mut analyzer = FlashCatchAnalyzer::new();
+        let events = run(
+            &mut analyzer,
+            0,
+            &[
+                IDENTITY_REQUEST_IMSI,
+                AUTH_FAILURE_NON_EPS,
+                AUTH_FAILURE_MAC,
+            ],
+        );
+        assert_eq!(severities(&events), vec![None, None, Some(EventType::High)]);
+
+        let mut analyzer = FlashCatchAnalyzer::new();
+        let events = run(
+            &mut analyzer,
+            0,
+            &[AUTH_FAILURE_NON_EPS, AUTH_FAILURE_NON_EPS],
+        );
         assert_eq!(severities(&events), vec![None, Some(EventType::Medium)]);
     }
 
@@ -492,15 +582,25 @@ mod tests {
     }
 
     #[test]
-    fn an_identity_request_during_a_tracking_area_update_is_only_noted() {
+    fn an_identity_request_on_check_in_is_only_noted() {
         let mut analyzer = FlashCatchAnalyzer::new();
         let events = run(&mut analyzer, 0, &[TAU_REQUEST, IDENTITY_REQUEST_IMSI]);
         assert_eq!(
             severities(&events),
             vec![None, Some(EventType::Informational)]
         );
-        // Without the tracking area update there is nothing to note: the
-        // identity detector covers a bare identity request.
+        let mut analyzer = FlashCatchAnalyzer::new();
+        let events = run(
+            &mut analyzer,
+            0,
+            &[EXT_SERVICE_REQUEST, IDENTITY_REQUEST_IMSI],
+        );
+        assert_eq!(
+            severities(&events),
+            vec![None, Some(EventType::Informational)]
+        );
+        // Without a check-in there is nothing to note: the identity detector
+        // covers a bare identity request.
         let mut analyzer = FlashCatchAnalyzer::new();
         let events = run(&mut analyzer, 0, &[IDENTITY_REQUEST_IMSI]);
         assert_eq!(severities(&events), vec![None]);
@@ -530,9 +630,11 @@ mod tests {
             IDENTITY_REQUEST_IMSI,
             AUTH_REQUEST,
             AUTH_FAILURE_MAC,
+            AUTH_FAILURE_NON_EPS,
             AUTH_FAILURE_SYNCH,
             AUTH_RESPONSE,
             TAU_REQUEST,
+            EXT_SERVICE_REQUEST,
             SECURITY_MODE_COMMAND,
         ] {
             for len in 0..bytes.len() {
