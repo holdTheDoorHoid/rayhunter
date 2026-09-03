@@ -22,4 +22,16 @@
     [role='button']:not(:disabled) {
         cursor: pointer;
     }
+
+    /* The reset leaves selects transparent with inherited text colour. The
+     * closed control then looks right in either theme, but the opened list is
+     * drawn by the browser from the control's own colours, and a transparent
+     * background comes out white while the inherited text stays light. Give
+     * the control and its options real colours in both themes so the list is
+     * readable everywhere. */
+    select,
+    option,
+    optgroup {
+        @apply bg-white text-gray-900 dark:bg-gray-800 dark:text-gray-100;
+    }
 }
