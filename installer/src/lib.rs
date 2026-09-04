@@ -13,6 +13,7 @@ pub(crate) use files::*;
 
 mod moxee;
 mod moxee_adb;
+mod netgear;
 #[cfg(not(target_os = "android"))]
 mod orbic;
 mod orbic_auth;
@@ -73,6 +74,8 @@ enum Command {
     Tplink(InstallTpLink),
     /// Install rayhunter on the Wingtech CT2MHS01.
     Wingtech(WingtechArgs),
+    /// Install rayhunter on the Netgear Nighthawk M6 / M6 Pro (MR6xxx).
+    Netgear(NetgearArgs),
     /// Developer utilities.
     Util(Util),
 }
@@ -327,6 +330,10 @@ enum UtilSubCommand {
     /// Before running this utility, you need to make telnet accessible with `installer util
     /// wingtech-start-telnet`.
     WingtechSendFile(WingtechSendFile),
+    /// Root the Netgear M6/M6 Pro (or use an already-open telnet) and launch telnetd.
+    NetgearStartTelnet(NetgearArgs),
+    /// Root the Netgear M6/M6 Pro (or use an already-open telnet) and open an interactive shell.
+    NetgearShell(NetgearArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -394,6 +401,37 @@ struct Serial {
     command: Vec<String>,
 }
 
+#[derive(Parser, Debug)]
+struct NetgearArgs {
+    /// IP address for the Netgear admin interface, if custom.
+    #[arg(long, default_value = "192.168.1.1")]
+    admin_ip: String,
+
+    /// Admin (web UI) password. Needed only to enable telnet over the web UI.
+    /// If you have already opened root telnet another way (e.g. B.Kerler's
+    /// mrCONFIG, or older firmware that ships it), this can be omitted and the
+    /// installer will use the open port.
+    #[arg(long)]
+    admin_password: Option<String>,
+
+    /// Overwrite config.toml even if it already exists on the device.
+    #[arg(long)]
+    reset_config: bool,
+
+    /// Override the data directory path. Defaults to /data/rayhunter-data.
+    /// Must not be /data/rayhunter.
+    #[arg(long)]
+    data_dir: Option<String>,
+
+    /// Let the web interface run commands on the device.
+    ///
+    /// Off unless given here, and deliberately not settable from the web
+    /// interface: the daemon runs as root, so this is the difference between an
+    /// interface that reads data and one that can do anything at all.
+    #[arg(long)]
+    enable_terminal: bool,
+}
+
 async fn run(args: Args) -> Result<(), Error> {
     match args.command {
         Command::Tmobile(args) => tmobile::install(args).await.context("Failed to install rayhunter on the Tmobile TMOHS1. Make sure your computer is connected to the hotspot using USB tethering or WiFi.")?,
@@ -410,6 +448,7 @@ async fn run(args: Args) -> Result<(), Error> {
         #[cfg(not(target_os = "android"))]
         Command::MoxeeAdb(args) => moxee_adb::install(args.data_dir, args.reset_config, args.enable_terminal).await.context("\nFailed to install rayhunter on the Moxee Hotspot over ADB")?,
         Command::Wingtech(args) => wingtech::install(args).await.context("\nFailed to install rayhunter on the Wingtech CT2MHS01")?,
+        Command::Netgear(args) => netgear::install(args).await.context("\nFailed to install rayhunter on the Netgear M6/M6 Pro. Make sure your computer can reach the hotspot and that root telnet (port 23) is open — see doc/netgear-m6pro.md.")?,
         Command::Util(subcommand) => {
             match subcommand.command {
             #[cfg(not(target_os = "android"))]
@@ -452,6 +491,8 @@ async fn run(args: Args) -> Result<(), Error> {
             UtilSubCommand::WingtechSendFile(options) => {
                 util::send_file(&options.admin_ip, &options.local_path, &options.remote_path).await?;
             }
+            UtilSubCommand::NetgearStartTelnet(args) => netgear::start_telnet(&args.admin_ip, args.admin_password.as_deref()).await.context("\nFailed to start telnet on the Netgear M6/M6 Pro")?,
+            UtilSubCommand::NetgearShell(args) => netgear::shell(&args.admin_ip, args.admin_password.as_deref()).await.context("\nFailed to open shell on the Netgear M6/M6 Pro")?,
             UtilSubCommand::WingtechStartTelnet(args) => wingtech::start_telnet(&args.admin_ip, &args.admin_password).await.context("\nFailed to start telnet on the Wingtech CT2MHS01")?,
             UtilSubCommand::WingtechStartAdb(args) => wingtech::start_adb(&args.admin_ip, &args.admin_password).await.context("\nFailed to start adb on the Wingtech CT2MHS01")?,
             UtilSubCommand::WingtechPersistAdb(args) => persist_adb::wingtech(&args.admin_ip, &args.admin_password, args.revert, "Wingtech CT2MHS01").await.context("\nFailed to make adb persistent on the Wingtech CT2MHS01")?,
