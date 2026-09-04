@@ -1,0 +1,30 @@
+=== moxee-c440 fleettest 2026-09-04T19:11:26Z ===
+PASS moxee-c440 T1 one daemon running (pid 11215)
+PASS moxee-c440 T1 system-stats: 0.12.3 True enabled 
+PASS moxee-c440 T1 config: orbic ui 4 key 0 tls 8443 term True
+PASS moxee-c440 T2 recording 1788548804-0 growing 330136 -> 348671 bytes/15s
+PASS moxee-c440 T3 analysis status: {"queued":[],"running":null,"finished":["1781879901","1781879904","1781879885","1781879905","1788483201","1788483303-0"]
+PASS moxee-c440 T3 analysis-report/1788548804-0 200
+PASS moxee-c440 T3 packets/1788548804-0: {"packets":[{"packet_num":1,"timestamp":"2026-09-04T19:06:45.187+00:00","protocol":"unknown","channe
+PASS moxee-c440 T3 pcap/1788548804-0 pcapng magic
+PASS moxee-c440 T3 zip/1788548804-0 is a zip
+PASS moxee-c440 T3 recording-metadata: {"sidecar_version":1,"recording":"1788548804-0","software":{"rayhunter_version":"0.12.3","system_os":"Linux 3.18.48","arch":"armv7l","kernel":"Linux version 3.1
+PASS moxee-c440 T3 cell-info: {"serving":{"search_threshold":0,"pci":427,"earfcn":2125,"band":4,"signal":{"rsrp_dbm":-88.5,"rsrq_db":-9.5625,"rssi_dbm
+PASS moxee-c440 T3 log http/bytes: 200 256578
+PASS moxee-c440 T3 setup/status: {"setup_complete":false,"window_open":true,"seconds_left":284,"paired_devices":0,"has_passphrase":false,"has_accounts":false,"tls_port":8443}
+PASS moxee-c440 T3 tls-info: {"port":8443,"fingerprint_sha256":"65:8C:C5:A9:BB:9F:E6:2C:51:68:67:13:BB:C5:F8:30:50:A0:F2:7A:1A:A9:0A:DE:01:16:C9:4C:9A:91:E9:7A","subject_alt_names":["DNS:rayhunter.local","IP:192.168.1.1","IP:192.
+PASS moxee-c440 T3 wifi-status: {"state":"disabled"}
+PASS moxee-c440 T3 time: {"system_time":"2026-09-04T15:12:00.568007336-04:00","adjusted_time":"2026-09-04T15:12:00.568028951-04:00","offset_secon
+PASS moxee-c440 T4 index.html: 200 123572
+PASS moxee-c440 T5 wifi/survey: {"scanned_at":"2026-09-04T15:12:05.238267803-04:00","interface":"wlan0","networks":[{"bssid":"3c:52:a1:fe:c9:8b","ssid":"Fios-X42QE","hidden":false,"frequency_mhz":2417,"channel":2,"band":"2.4 GHz","signal_dbm":-30,"elements":[0,1,3,7,42,50,48,45,61,127],"security":"WPA2","unprotected":false,"wps":f
+shot /tmp/claude-1000/-home-hoid-Desktop/45ca8f70-c99c-44ee-86c6-941dd006ff27/scratchpad/evidence/fleettest/moxee-c440-1-baseline.png
+shot /tmp/claude-1000/-home-hoid-Desktop/45ca8f70-c99c-44ee-86c6-941dd006ff27/scratchpad/evidence/fleettest/moxee-c440-2-warning-high.png
+shot /tmp/claude-1000/-home-hoid-Desktop/45ca8f70-c99c-44ee-86c6-941dd006ff27/scratchpad/evidence/fleettest/moxee-c440-3-recording.png
+PASS moxee-c440 T7 demo-warning produced 1 warning line(s): demo mode is not enabled; switch it on in the configuration first
+shot /tmp/claude-1000/-home-hoid-Desktop/45ca8f70-c99c-44ee-86c6-941dd006ff27/scratchpad/evidence/fleettest/moxee-c440-4-after-demo.png
+== log tail:
+[2026-09-04T19:12:00Z ERROR rayhunter_daemon::server] Error generating ZIP file: broken pipe
+[2026-09-04T19:12:00Z WARN  rayhunter::diag] warning: 3 leftover bytes when parsing Message
+[2026-09-04T19:12:00Z WARN  rayhunter::diag] warning: 3 leftover bytes when parsing Message
+[2026-09-04T19:12:00Z WARN  rayhunter::diag] warning: 3 leftover bytes when parsing Message
+=== moxee-c440 done ===

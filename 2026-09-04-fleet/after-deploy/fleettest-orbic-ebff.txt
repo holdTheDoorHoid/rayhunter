@@ -1,0 +1,30 @@
+=== orbic-ebff fleettest 2026-09-04T19:11:26Z ===
+PASS orbic-ebff T1 one daemon running (pid 29762)
+PASS orbic-ebff T1 system-stats: 0.12.3 True not_adjustable 
+PASS orbic-ebff T1 config: orbic ui 1 key 0 tls 8443 term False
+PASS orbic-ebff T2 recording 1788548805-0 growing 28408 -> 29957 bytes/15s
+PASS orbic-ebff T3 analysis status: {"queued":[],"running":null,"finished":["1754959093","1754959109","1755461318","1755461383","1755803504","1755803657","1
+PASS orbic-ebff T3 analysis-report/1788548805-0 200
+PASS orbic-ebff T3 packets/1788548805-0: {"packets":[{"packet_num":1,"timestamp":"2026-09-04T19:06:45.882+00:00","protocol":"unknown","channe
+PASS orbic-ebff T3 pcap/1788548805-0 pcapng magic
+PASS orbic-ebff T3 zip/1788548805-0 is a zip
+PASS orbic-ebff T3 recording-metadata: {"sidecar_version":1,"recording":"1788548805-0","software":{"rayhunter_version":"0.12.3","system_os":"Linux 3.18.48","arch":"armv7l","kernel":"Linux version 3.1
+PASS orbic-ebff T3 cell-info: {"serving":{"search_threshold":78047,"pci":427,"earfcn":2125,"band":4,"signal":{"rsrp_dbm":-82.9375,"rsrq_db":-10.6875,"
+PASS orbic-ebff T3 log http/bytes: 200 6119
+PASS orbic-ebff T3 setup/status: {"setup_complete":false,"window_open":true,"seconds_left":284,"paired_devices":0,"has_passphrase":false,"has_accounts":false,"tls_port":8443}
+PASS orbic-ebff T3 tls-info: {"port":8443,"fingerprint_sha256":"72:CD:7C:AB:CB:7B:F2:5B:31:47:4A:43:06:8D:AF:7E:5B:14:6C:80:C0:E5:AF:8A:87:13:3C:90:03:79:41:CD","subject_alt_names":["DNS:rayhunter.local","IP:192.168.1.1","IP:192.
+PASS orbic-ebff T3 wifi-status: {"state":"disabled"}
+PASS orbic-ebff T3 time: {"system_time":"2026-09-04T15:12:00.556929082-04:00","adjusted_time":"2026-09-04T15:12:00.556951425-04:00","offset_secon
+PASS orbic-ebff T4 index.html: 200 123572
+PASS orbic-ebff T5 wifi/survey: {"scanned_at":"2026-09-04T15:12:10.801163609-04:00","interface":"wlan0","networks":[],"alerting":0,"builtin_rules_enabled":14,"user_rules_enabled":0,"limitations":["Only access points that are transmitting appear here. A device that is merely listening, or that only sends probe requests, cannot be s
+shot /tmp/claude-1000/-home-hoid-Desktop/45ca8f70-c99c-44ee-86c6-941dd006ff27/scratchpad/evidence/fleettest/orbic-ebff-1-baseline.png
+shot /tmp/claude-1000/-home-hoid-Desktop/45ca8f70-c99c-44ee-86c6-941dd006ff27/scratchpad/evidence/fleettest/orbic-ebff-2-warning-high.png
+shot /tmp/claude-1000/-home-hoid-Desktop/45ca8f70-c99c-44ee-86c6-941dd006ff27/scratchpad/evidence/fleettest/orbic-ebff-3-recording.png
+PASS orbic-ebff T7 demo-warning produced 1 warning line(s): demo mode is not enabled; switch it on in the configuration first
+shot /tmp/claude-1000/-home-hoid-Desktop/45ca8f70-c99c-44ee-86c6-941dd006ff27/scratchpad/evidence/fleettest/orbic-ebff-4-after-demo.png
+== log tail:
+        broken pipe
+[2026-09-04T19:12:16Z WARN  rayhunter::diag] warning: 1 leftover bytes when parsing Message
+[2026-09-04T19:12:16Z WARN  rayhunter::diag] warning: 1 leftover bytes when parsing Message
+[2026-09-04T19:12:16Z WARN  rayhunter::diag] warning: 1 leftover bytes when parsing Message
+=== orbic-ebff done ===
