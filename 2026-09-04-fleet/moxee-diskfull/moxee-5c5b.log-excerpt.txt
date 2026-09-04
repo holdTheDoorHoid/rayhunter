@@ -1,0 +1,43 @@
+### moxee-5c5b rayhunter.log excerpt (16689969 bytes, 181410 lines)
+
+#### line histogram (timestamps and numbers normalised)
+ 181375 warning: N leftover bytes when parsing Message
+      7 enabled logging for log type N
+      2 The orca is hunting for stingrays... (N.N.N.N:N, TLS)
+      2 The orca is hunting for stingrays... (N.N.N.N:N)
+      2 setup window open for N minutes
+      1 Using configuration for device: Orbic
+      1 TLS identity: authority NA:NF:NC:NF:NC:NE:N:NB:N:NC:BD:NC:NB:N:EN:N:NF:NF:NF:BB:NE:ND:FB:N:ND:NA:AF:N:N:EN:N:NC, server certificate for ["DNS:rayhunter.local", "IP:N.N.N.N", "IP:N.N.N.N"] until N-N-NTN:N:N+N:N
+      1 this unit has no owner yet; setup token NRNB HNVN
+
+#### head
+R A Y H U N T E R 🐳
+[2026-09-04T00:56:13Z INFO  rayhunter_daemon::frontdoor] rayhunter.local is 192.168.1.254 on bridge0; its ports 80 and 443 reach the daemon
+[2026-09-04T00:56:13Z INFO  rayhunter_daemon::tls] made this unit's certificate authority, fingerprint 7A:9F:0C:5F:1C:3E:38:0B:57:8C:BD:9C:1B:72:E4:14:6F:7F:6F:BB:2E:2D:FB:13:8D:8A:AF:60:00:E5:71:6C
+[2026-09-04T00:56:13Z INFO  rayhunter_daemon::tls] TLS identity: authority 7A:9F:0C:5F:1C:3E:38:0B:57:8C:BD:9C:1B:72:E4:14:6F:7F:6F:BB:2E:2D:FB:13:8D:8A:AF:60:00:E5:71:6C, server certificate for ["DNS:rayhunter.local", "IP:192.168.1.1", "IP:192.168.1.254"] until 2028-11-11T00:56:13+00:00
+[2026-09-04T00:56:14Z INFO  rayhunter_daemon::pairing] pairing: setup not done, 0 trusted device(s)
+[2026-09-04T00:56:14Z INFO  rayhunter_daemon::pairing] setup window open for 10 minutes
+[2026-09-04T00:56:14Z INFO  rayhunter_daemon] this unit has no owner yet; setup token NR0B H6VN
+[2026-09-04T00:56:14Z INFO  rayhunter_daemon] Starting Diag Thread
+[2026-09-04T00:56:14Z INFO  rayhunter_daemon] Starting UI
+[2026-09-04T00:56:14Z INFO  rayhunter_daemon] Starting Key Input service
+[2026-09-04T00:56:14Z INFO  rayhunter_daemon] create shutdown thread
+[2026-09-04T00:56:14Z INFO  rayhunter_daemon] spinning up server
+[2026-09-04T00:56:14Z INFO  rayhunter_daemon] serving the web interface over TLS on port 8443
+[2026-09-04T00:56:14Z INFO  rayhunter_daemon] serving the web interface on port 8080, addresses [127.0.0.1, 192.168.1.1]
+[2026-09-04T00:56:14Z INFO  rayhunter_daemon::diag] Using configuration for device: Orbic
+[2026-09-04T00:56:14Z INFO  rayhunter::diag_device] Diag device initialization succeeded after 0 retries
+[2026-09-04T00:56:14Z INFO  rayhunter::diag_device] retrieving diag logging capabilities...
+[2026-09-04T00:56:14Z WARN  rayhunter::diag] warning: 329 leftover bytes when parsing Message
+[2026-09-04T00:56:14Z INFO  rayhunter::diag_device] enabled logging for log type 1
+[2026-09-04T00:56:14Z WARN  rayhunter::diag] warning: 298 leftover bytes when parsing Message
+...
+#### tail
+[2026-09-04T07:07:47Z WARN  rayhunter::diag] warning: 3 leftover bytes when parsing Message
+[2026-09-04T07:07:47Z WARN  rayhunter::diag] warning: 3 leftover bytes when parsing Message
+[2026-09-04T07:07:47Z WARN  rayhunter::diag] warning: 3 leftover bytes when parsing Message
+[2026-09-04T07:07:47Z WARN  rayhunter::diag] warning: 3 leftover bytes when parsing Message
+[2026-09-04T07:07:47Z WARN  rayhunter::diag] warning: 3 leftover bytes when parsing Message
+[2026-09-04T07:07:48Z ERROR rayhunter_daemon::diag] Disk space critically low (0MB free), recording stopped automatically
+[2026-09-04T13:28:40Z INFO  rayhunter_daemon::pairing] setup window open for 10 minutes
+[2026-09-04T13:28:40Z INFO  rayhunter_daemon::pairing] button press re-armed the setup window
