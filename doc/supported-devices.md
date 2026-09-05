@@ -28,6 +28,13 @@ Rayhunter is confirmed to work on these devices.
 | [FY UZ801](./uz801.md) | Asia, Europe |
 | [Moxee hotspot](./moxee.md) | Americas |
 
+## 3. In progress
+These devices have a scaffold in the installer but are **not yet confirmed working**. Help testing on hardware is welcome.
+
+| Device | Notes |
+| ------ | ------ |
+| [Netgear Nighthawk M6 / M6 Pro](./netgear-m6pro.md) | Qualcomm SDX55/SDX65, ARMv7; root step not yet verified |
+
 ## Adding new devices
 Rayhunter was built and tested primarily on the Orbic RC400L mobile hotspot, but the community has been working hard at adding support for other devices. Theoretically, if a device runs a Qualcomm modem and exposes a `/dev/diag` interface, Rayhunter may work on it.
 

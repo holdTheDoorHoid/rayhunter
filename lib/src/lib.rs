@@ -48,6 +48,7 @@ pub enum Device {
     Pinephone,
     Uz801,
     Moxee,
+    Netgear,
 }
 
 /// Facts about the device rayhunter is running on, gathered at runtime and

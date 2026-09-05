@@ -512,7 +512,7 @@ pub fn screen_geometry(device: &rayhunter::Device) -> Option<ScreenGeometry> {
             height: 128,
             top_inset: 0,
         }),
-        Device::Tmobile | Device::Pinephone | Device::Uz801 => None,
+        Device::Tmobile | Device::Pinephone | Device::Uz801 | Device::Netgear => None,
     }
 }
 

@@ -881,6 +881,9 @@ async fn run_with_config(
             Device::Wingtech => display::wingtech::update_ui,
             Device::Pinephone => display::headless::update_ui,
             Device::Uz801 => display::uz801::update_ui,
+            // M6 Pro has a color touchscreen, but its framebuffer is not yet
+            // integrated; run headless for now (see doc/netgear-m6pro.md).
+            Device::Netgear => display::headless::update_ui,
         };
         update_ui(
             &task_tracker,
