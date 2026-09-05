@@ -30,10 +30,11 @@ jobs:
 
   main:
     needs: check_version_same
+    # Ceiling for the reusable workflow: main.yml's jobs each declare their own,
+    # narrower permissions. Nothing in it publishes a package, so no packages:write.
     permissions:
-      contents: write
+      contents: read
       id-token: write
-      packages: write
       pages: write
     uses: ./.github/workflows/main.yml
 
