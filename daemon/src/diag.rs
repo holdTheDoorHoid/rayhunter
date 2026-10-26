@@ -859,38 +859,29 @@ impl DiagTask {
 /// Pull the radio measurements out of a container and fold them into the
 /// shared cell tracker.
 ///
-/// These messages are decoded by the library already but nothing consumed
-/// them, so they were being parsed and dropped. Reading them here keeps
-/// this out of the analysis path, which stays focused on detection.
+/// Prefer ML1 measurements, but use dedicated RRC traffic to identify the cell
+/// when a modem does not report ML1. This stays outside the detection path.
 async fn update_cell_info(cell_tracker: &Arc<RwLock<CellTracker>>, container: &MessagesContainer) {
     use rayhunter::diag::diaglog::LogBody;
 
-    let mut serving: Option<(u16, u32, SignalMeasurements, Option<u32>)> = None;
-    let mut neighbors: Option<Vec<NeighborCell>> = None;
-    let mut timing_advance: Option<u16> = None;
-    let mut rrc_messages: Vec<Message> = Vec::new();
-    let mut seen: u64 = 0;
-    let mut skipped: u64 = 0;
+    use rayhunter::gsmtap::{GsmtapType, LteRrcSubtype};
 
-    for message in container.messages() {
-        seen += 1;
-        if message.is_err() {
-            skipped += 1;
-        }
-        let Ok(Message::Log {
-            body,
-            pending_msgs,
-            outer_length,
-            inner_length,
-            log_type,
-            timestamp,
-        }) = message
-        else {
+    let messages = container.messages();
+    let mut tracker = cell_tracker.write().await;
+    tracker.record_messages(
+        messages.len() as u64,
+        messages.iter().filter(|m| m.is_err()).count() as u64,
+    );
+
+    // Apply observations in wire order. Batching the last measurement and
+    // then all RRC messages can attach one cell's SIB1 to a different cell.
+    for message in messages.into_iter().flatten() {
+        let Message::Log { ref body, .. } = message else {
             continue;
         };
         match body {
             LogBody::LteMl1ServingCellMeasurementAndEvaluation { data } => {
-                serving = Some((
+                tracker.update_serving(
                     data.get_pci(),
                     data.get_earfcn(),
                     SignalMeasurements {
@@ -898,15 +889,14 @@ async fn update_cell_info(cell_tracker: &Arc<RwLock<CellTracker>>, container: &M
                         rsrq_db: data.get_meas_rsrq(),
                         rssi_dbm: data.get_meas_rssi(),
                         avg_rsrp_dbm: Some(data.get_avg_rsrp()),
-                        // The serving cell report carries no averaged quality.
                         avg_rsrq_db: None,
                     },
                     Some(data.get_s_search()),
-                ));
+                );
             }
             LogBody::LteMl1NeighborCellsMeasurements { data } => {
                 let earfcn = data.get_earfcn();
-                neighbors = Some(
+                tracker.update_neighbors(
                     data.cells
                         .iter()
                         .map(|cell| NeighborCell {
@@ -925,94 +915,61 @@ async fn update_cell_info(cell_tracker: &Arc<RwLock<CellTracker>>, container: &M
                 );
             }
             LogBody::LteMacRachResponse { packet } => {
-                // The random access response carries the timing advance, which
-                // is the device's only read on how far away the tower is.
                 for subpacket in &packet.subpackets {
                     if let rayhunter::diag::diaglog::mac::SubpacketBody::RachAttempt(attempt) =
                         &subpacket.body
                         && let Some(msg2) = attempt.get_msg2()
                     {
-                        timing_advance = Some(msg2.ta);
+                        tracker.update_timing_advance(msg2.ta);
                     }
                 }
             }
             LogBody::LteRrcOtaMessage { .. } | LogBody::Nas4GMessage { .. } => {
-                // Kept aside rather than decoded inline: these carry the cell
-                // identity and the agreed security algorithms, and decoding is
-                // the expensive part.
-                rrc_messages.push(Message::Log {
-                    pending_msgs,
-                    outer_length,
-                    inner_length,
-                    log_type,
-                    timestamp,
-                    body,
-                });
+                // Keep the full EARFCN from DIAG; GSMTAP truncates it to 14 bits.
+                let rrc_cell = match body {
+                    LogBody::LteRrcOtaMessage { packet, .. } => {
+                        Some((packet.get_pci(), packet.get_earfcn()))
+                    }
+                    _ => None,
+                };
+                let Ok(Some((_, gsmtap))) = rayhunter::gsmtap::parser::parse(message) else {
+                    continue;
+                };
+                // Paging and broadcast logs can describe cells heard while
+                // searching. Only dedicated connection traffic is evidence for
+                // the serving-cell fallback, not merely hearing a broadcast.
+                if matches!(
+                    gsmtap.header.gsmtap_type,
+                    GsmtapType::LteRrc(LteRrcSubtype::DlDcch | LteRrcSubtype::UlDcch)
+                ) && let Some((pci, earfcn)) = rrc_cell
+                {
+                    tracker.update_rrc_serving(pci, earfcn);
+                }
+                if matches!(gsmtap.header.gsmtap_type, GsmtapType::LteNas(_)) {
+                    tracker.update_nas_seen();
+                }
+                let Ok(element) = InformationElement::try_from(&gsmtap) else {
+                    continue;
+                };
+                if let Some((pci, earfcn)) = rrc_cell
+                    && let Some(identity) = identity_from_information_element(&element)
+                {
+                    tracker.update_identity_for_cell(pci, earfcn, identity);
+                }
+                if let Some((cipher, integrity)) = rrc_security_from_information_element(&element) {
+                    tracker.update_rrc_security(cipher, integrity);
+                }
+                if let Some((cipher, integrity)) = nas_security_from_information_element(&element) {
+                    tracker.update_nas_security(cipher, integrity);
+                }
+                if gsmtap.header.gsmtap_type
+                    == GsmtapType::LteNas(rayhunter::gsmtap::LteNasSubtype::Plain)
+                    && let Some(identity) = crate::subscriber_id::identity_from_nas(&gsmtap.payload)
+                {
+                    tracker.update_identity_sent(identity);
+                }
             }
             _ => {}
-        }
-    }
-
-    if serving.is_none()
-        && neighbors.is_none()
-        && timing_advance.is_none()
-        && rrc_messages.is_empty()
-    {
-        return;
-    }
-
-    let mut tracker = cell_tracker.write().await;
-    tracker.record_messages(seen, skipped);
-    if let Some((pci, earfcn, signal, search_threshold)) = serving {
-        tracker.update_serving(pci, earfcn, signal, search_threshold);
-    }
-    if let Some(neighbors) = neighbors {
-        tracker.update_neighbors(neighbors);
-    }
-    if let Some(ta) = timing_advance {
-        tracker.update_timing_advance(ta);
-    }
-
-    // RRC is decoded for two things: the cell identity, which is only needed
-    // until it is known, and the agreed cipher, which can change at any time.
-    let need_identity = tracker
-        .snapshot()
-        .serving
-        .is_some_and(|s| s.identity.is_none());
-    for message in rrc_messages {
-        let Ok(Some((_, gsmtap))) = rayhunter::gsmtap::parser::parse(message) else {
-            continue;
-        };
-        let Ok(element) = InformationElement::try_from(&gsmtap) else {
-            continue;
-        };
-        if need_identity && let Some(identity) = identity_from_information_element(&element) {
-            tracker.update_identity(identity);
-        }
-        if let Some((cipher, integrity)) = rrc_security_from_information_element(&element) {
-            tracker.update_rrc_security(cipher, integrity);
-        }
-        if let Some((cipher, integrity)) = nas_security_from_information_element(&element) {
-            tracker.update_nas_security(cipher, integrity);
-        }
-        // Any NAS at all means this SIM is being served by the network's core,
-        // which is the thing a dead or unaccepted SIM cannot produce. Recorded
-        // before the identity read below, which only fires for the few
-        // unciphered messages that carry one.
-        if matches!(
-            gsmtap.header.gsmtap_type,
-            rayhunter::gsmtap::GsmtapType::LteNas(_)
-        ) {
-            tracker.update_nas_seen();
-        }
-        // Identities the device sends about itself. Read from the raw payload
-        // rather than the parsed message, because the NAS parser generates the
-        // identity field as an empty struct and discards its bytes.
-        if gsmtap.header.gsmtap_type
-            == rayhunter::gsmtap::GsmtapType::LteNas(rayhunter::gsmtap::LteNasSubtype::Plain)
-            && let Some(identity) = crate::subscriber_id::identity_from_nas(&gsmtap.payload)
-        {
-            tracker.update_identity_sent(identity);
         }
     }
 }
@@ -1393,6 +1350,152 @@ pub async fn get_analysis_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn captured_frame(hex: &str) -> Vec<u8> {
+        let hex = hex.trim();
+        (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+            .collect()
+    }
+
+    fn container(frames: Vec<Vec<u8>>) -> MessagesContainer {
+        use rayhunter::diag::{DataType, HdlcEncapsulatedMessage};
+        MessagesContainer {
+            data_type: DataType::UserSpace,
+            num_messages: frames.len() as u32,
+            messages: frames
+                .into_iter()
+                .map(|data| HdlcEncapsulatedMessage {
+                    len: data.len() as u32,
+                    data,
+                })
+                .collect(),
+        }
+    }
+
+    const CAPTURED_RRC: &str = include_str!("../../lib/tests/fixtures/cell-site-rrc-v12.hex");
+    const CAPTURED_TIMING: &str = include_str!("../../lib/tests/fixtures/cell-site-timing-v1.hex");
+
+    #[tokio::test]
+    async fn captured_connected_rrc_populates_cell_without_ml1() {
+        let tracker = Arc::new(RwLock::new(CellTracker::new()));
+        let packets = container(vec![
+            captured_frame(CAPTURED_TIMING),
+            captured_frame(CAPTURED_RRC),
+        ]);
+        update_cell_info(&tracker, &packets).await;
+        let info = tracker.read().await.snapshot();
+        assert!(info.has_data);
+        let serving = info.serving.unwrap();
+        assert_eq!(serving.pci, 219);
+        assert_eq!(serving.earfcn, 3350);
+        assert_eq!(serving.band, Some(7));
+        assert!(serving.identity.is_none()); // No SIB1 in this capture.
+        assert!(serving.signal.is_none());
+        assert_eq!(info.history[0].best_rsrp_dbm, None);
+        assert_eq!(info.health.messages_seen, 2);
+        assert_eq!(info.health.messages_skipped, 0);
+    }
+
+    #[tokio::test]
+    async fn timing_only_and_failed_containers_still_update_health() {
+        let tracker = Arc::new(RwLock::new(CellTracker::new()));
+        update_cell_info(&tracker, &container(vec![captured_frame(CAPTURED_TIMING)])).await;
+        let mut corrupt = captured_frame(CAPTURED_TIMING);
+        corrupt[0] ^= 1; // Keep the original CRC, so this frame must fail.
+        update_cell_info(&tracker, &container(vec![corrupt])).await;
+        let info = tracker.read().await.snapshot();
+        assert!(!info.has_data); // Timing has neither PCI nor EARFCN.
+        assert_eq!(info.health.messages_seen, 2);
+        assert_eq!(info.health.messages_skipped, 1);
+        assert!(info.health.last_message.is_some());
+    }
+
+    #[tokio::test]
+    async fn rrc_fallback_excludes_paging_and_preserves_full_earfcn() {
+        use deku::DekuContainerWrite;
+        use rayhunter::diag::{
+            CRC_CCITT,
+            diaglog::{LogBody, rrc::LteRrcOtaPacket},
+        };
+        let tracker = Arc::new(RwLock::new(CellTracker::new()));
+        let mut message = Message::from_hdlc(&captured_frame(CAPTURED_RRC)).unwrap();
+        let frame =
+            |m: &Message| rayhunter::hdlc::hdlc_encapsulate(&m.to_bytes().unwrap(), &CRC_CCITT);
+        if let Message::Log {
+            body:
+                LogBody::LteRrcOtaMessage {
+                    packet: LteRrcOtaPacket::V8 { pdu_num, .. },
+                    ..
+                },
+            ..
+        } = &mut message
+        {
+            *pdu_num = 11; // Paging for version 12, not connected traffic.
+        } else {
+            panic!("expected captured RRC v12");
+        }
+        update_cell_info(&tracker, &container(vec![frame(&message)])).await;
+        assert!(!tracker.read().await.snapshot().has_data);
+
+        if let Message::Log {
+            body:
+                LogBody::LteRrcOtaMessage {
+                    packet:
+                        LteRrcOtaPacket::V8 {
+                            pdu_num, earfcn, ..
+                        },
+                    ..
+                },
+            ..
+        } = &mut message
+        {
+            *pdu_num = 15;
+            *earfcn = 67536; // A 32-bit EARFCN, larger than GSMTAP can hold.
+        }
+        update_cell_info(&tracker, &container(vec![frame(&message)])).await;
+        assert_eq!(
+            tracker.read().await.snapshot().serving.unwrap().earfcn,
+            67536
+        );
+    }
+
+    #[tokio::test]
+    async fn cell_changes_in_one_container_follow_wire_order() {
+        use deku::{DekuContainerRead, DekuContainerWrite};
+        use rayhunter::diag::{
+            CRC_CCITT,
+            diaglog::{LogBody, ml1::serving_cell::MeasurementAndEvaluation},
+        };
+        // The existing SCAT v4 measurement case, PCI 214 / EARFCN 6300.
+        let bytes = captured_frame(
+            "040100009c18d60aecc44e00e2244e00fffce30ffed80a0047ad56021d310100a2624100",
+        );
+        let (_, data) = MeasurementAndEvaluation::from_bytes((&bytes, 0)).unwrap();
+        let measurement = Message::Log {
+            pending_msgs: 0,
+            outer_length: 48,
+            inner_length: 48,
+            log_type: 0xb17f,
+            timestamp: rayhunter::diag::Timestamp { ts: 0 },
+            body: LogBody::LteMl1ServingCellMeasurementAndEvaluation { data },
+        };
+        let ml1 = rayhunter::hdlc::hdlc_encapsulate(&measurement.to_bytes().unwrap(), &CRC_CCITT);
+        let rrc = captured_frame(CAPTURED_RRC);
+        for (frames, expected_pci, measured) in [
+            (vec![ml1.clone(), rrc.clone()], 219, false),
+            (vec![rrc, ml1], 214, true),
+        ] {
+            let tracker = Arc::new(RwLock::new(CellTracker::new()));
+            update_cell_info(&tracker, &container(frames)).await;
+            let info = tracker.read().await.snapshot();
+            let serving = info.serving.unwrap();
+            assert_eq!(serving.pci, expected_pci);
+            assert_eq!(serving.signal.is_some(), measured);
+            assert_eq!(info.history.len(), 2);
+        }
+    }
 
     /// Zero has to mean "no limit", not "rotate immediately".
     ///

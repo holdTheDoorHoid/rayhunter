@@ -1,9 +1,7 @@
 //! Tracks what the modem currently sees on the air, so the web UI can show it.
 //!
-//! Rayhunter already decodes serving cell and neighbour measurements (added in
-//! upstream PR #1074) but nothing kept them, so they were parsed and dropped.
-//! This retains the most recent view plus a bounded history of the cells seen
-//! during a run. See upstream issue #326.
+//! Retains serving cell and neighbour measurements, with a connected-RRC
+//! fallback for modems that do not emit ML1 reports, plus a bounded history.
 //!
 //! # A warning about identity
 //!
@@ -82,7 +80,9 @@ pub struct ServingCell {
     pub earfcn: u32,
     /// Band derived from the EARFCN, when it falls in a known range.
     pub band: Option<u16>,
-    pub signal: SignalMeasurements,
+    /// Absent when the cell was observed in connected RRC traffic but the modem
+    /// did not emit an ML1 measurement report. Missing is not zero signal.
+    pub signal: Option<SignalMeasurements>,
     /// Present only once the cell's SIB1 broadcast has been seen.
     pub identity: Option<CellIdentity>,
     /// Raw timing advance from the most recent random access response.
@@ -124,7 +124,7 @@ pub struct CellObservation {
     #[cfg_attr(feature = "apidocs", schema(value_type = String))]
     pub last_seen: DateTime<Local>,
     /// Strongest RSRP seen while attached to this cell, in dBm.
-    pub best_rsrp_dbm: f32,
+    pub best_rsrp_dbm: Option<f32>,
 }
 
 /// Which cipher is protecting traffic right now.
@@ -212,9 +212,8 @@ pub struct CellInfo {
     /// hotspot's WiFi can load does not hand out an IMSI by default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identities: Option<SubscriberIdentities>,
-    /// False when no measurement has arrived yet, which is the normal state
-    /// while recording is stopped. Lets the UI explain the emptiness rather
-    /// than looking broken.
+    /// False until a serving cell is observed through ML1 or dedicated RRC
+    /// traffic. Lets the UI explain the emptiness rather than looking broken.
     pub has_data: bool,
     /// Whether the SIM looks like it is working. Hearing towers is not the
     /// same as being accepted by the network, and only the second means the
@@ -371,12 +370,45 @@ impl CellTracker {
             pci,
             earfcn,
             band: band_for_earfcn(earfcn),
-            signal,
+            signal: Some(signal),
             identity,
             timing_advance,
             last_seen: now,
         });
-        self.record_observation(pci, earfcn, signal.rsrp_dbm, now);
+        self.record_observation(pci, earfcn, Some(signal.rsrp_dbm), now);
+    }
+
+    /// Connected RRC traffic names a cell even on modems that never emit ML1.
+    /// Do not invent signal values, or carry another cell's identity or timing
+    /// across a change. RRC from the same cell must not freshen an old signal
+    /// measurement's timestamp.
+    pub fn update_rrc_serving(&mut self, pci: u16, earfcn: u32) {
+        if pci > 503 {
+            return;
+        }
+        let now = Local::now();
+        self.first_cell_seen.get_or_insert(now);
+        if let Some(serving) = self.serving.as_mut()
+            && serving.pci == pci
+            && serving.earfcn == earfcn
+        {
+            if serving.signal.is_none() {
+                serving.last_seen = now;
+            }
+        } else {
+            self.neighbors.clear();
+            self.serving = Some(ServingCell {
+                pci,
+                earfcn,
+                band: band_for_earfcn(earfcn),
+                signal: None,
+                search_threshold: None,
+                identity: None,
+                timing_advance: None,
+                last_seen: now,
+            });
+        }
+        self.record_observation(pci, earfcn, None, now);
     }
 
     /// Record the algorithms agreed for the radio link.
@@ -474,20 +506,37 @@ impl CellTracker {
         }
     }
 
+    /// A broadcast from another cell must not label the current serving cell.
+    pub fn update_identity_for_cell(&mut self, pci: u16, earfcn: u32, identity: CellIdentity) {
+        if self
+            .serving
+            .as_ref()
+            .is_some_and(|s| s.pci == pci && s.earfcn == earfcn)
+        {
+            self.update_identity(identity);
+        }
+    }
+
     /// Replace the neighbour list. Neighbours are a snapshot rather than an
     /// accumulation: a cell that has dropped out of range should disappear.
     pub fn update_neighbors(&mut self, neighbors: Vec<NeighborCell>) {
         self.neighbors = neighbors;
     }
 
-    fn record_observation(&mut self, pci: u16, earfcn: u32, rsrp: f32, now: DateTime<Local>) {
+    fn record_observation(
+        &mut self,
+        pci: u16,
+        earfcn: u32,
+        rsrp: Option<f32>,
+        now: DateTime<Local>,
+    ) {
         if let Some(existing) = self
             .history
             .iter_mut()
             .find(|e| e.pci == pci && e.earfcn == earfcn)
         {
             existing.last_seen = now;
-            if rsrp > existing.best_rsrp_dbm {
+            if rsrp.is_some() && rsrp > existing.best_rsrp_dbm {
                 existing.best_rsrp_dbm = rsrp;
             }
             return;
@@ -749,6 +798,75 @@ mod tests {
         assert!(snap.has_data);
     }
 
+    #[test]
+    fn rrc_fallback_has_no_invented_signal_and_can_gain_measurements() {
+        let mut t = CellTracker::new();
+        t.update_rrc_serving(219, 3350);
+        let info = t.snapshot();
+        assert!(info.has_data);
+        assert!(info.serving.unwrap().signal.is_none());
+        assert_eq!(info.history[0].best_rsrp_dbm, None);
+        let json = serde_json::to_value(info.history).unwrap();
+        assert!(json[0]["best_rsrp_dbm"].is_null());
+
+        t.update_serving(219, 3350, sig(-85.0), Some(10));
+        let measured = t.snapshot().serving.unwrap();
+        t.update_rrc_serving(219, 3350);
+        let info = t.snapshot();
+        let serving = info.serving.unwrap();
+        assert_eq!(serving.signal, Some(sig(-85.0)));
+        assert_eq!(serving.search_threshold, Some(10));
+        assert_eq!(serving.last_seen, measured.last_seen);
+        assert_eq!(info.history[0].best_rsrp_dbm, Some(-85.0));
+    }
+
+    #[test]
+    fn rrc_cell_change_drops_the_previous_cells_measurements_and_identity() {
+        let mut t = CellTracker::new();
+        t.update_serving_t(219, 3350, sig(-85.0));
+        t.update_identity(CellIdentity {
+            mcc: Some("310".into()),
+            mnc: Some("260".into()),
+            cell_id: Some(1),
+            tac: Some(42),
+        });
+        t.update_timing_advance(12);
+        t.update_rrc_serving(220, 3350);
+        let info = t.snapshot();
+        let serving = info.serving.unwrap();
+        assert_eq!(serving.pci, 220);
+        assert!(serving.signal.is_none());
+        assert!(serving.identity.is_none());
+        assert!(serving.timing_advance.is_none());
+        assert!(serving.search_threshold.is_none());
+        assert_eq!(info.history.len(), 2);
+        assert_eq!(
+            info.history
+                .iter()
+                .find(|h| h.pci == 219)
+                .unwrap()
+                .best_rsrp_dbm,
+            Some(-85.0)
+        );
+    }
+
+    #[test]
+    fn a_broadcast_identity_must_match_the_serving_cell() {
+        let mut t = CellTracker::new();
+        t.update_rrc_serving(219, 3350);
+        let identity = CellIdentity {
+            mcc: Some("310".into()),
+            mnc: Some("260".into()),
+            cell_id: Some(1),
+            tac: Some(42),
+        };
+        t.update_identity_for_cell(220, 3350, identity.clone());
+        t.update_identity_for_cell(219, 6300, identity.clone());
+        assert!(t.snapshot().serving.unwrap().identity.is_none());
+        t.update_identity_for_cell(219, 3350, identity.clone());
+        assert_eq!(t.snapshot().serving.unwrap().identity, Some(identity));
+    }
+
     /// The identity arrives on a broadcast far less often than measurements do,
     /// so it must survive them rather than being cleared each time.
     #[test]
@@ -794,7 +912,7 @@ mod tests {
         let history = t.snapshot().history;
         assert_eq!(history.len(), 2);
         let first = history.iter().find(|e| e.pci == 160).unwrap();
-        assert_eq!(first.best_rsrp_dbm, -80.0);
+        assert_eq!(first.best_rsrp_dbm, Some(-80.0));
     }
 
     #[test]

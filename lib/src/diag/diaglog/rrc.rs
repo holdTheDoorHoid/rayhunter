@@ -65,6 +65,15 @@ pub enum LteRrcOtaPacket {
 }
 
 impl LteRrcOtaPacket {
+    pub fn get_pci(&self) -> u16 {
+        match self {
+            Self::V0 { phy_cell_id, .. }
+            | Self::V5 { phy_cell_id, .. }
+            | Self::V8 { phy_cell_id, .. }
+            | Self::V25 { phy_cell_id, .. } => *phy_cell_id,
+        }
+    }
+
     fn get_sfn_subfn(&self) -> u16 {
         match self {
             LteRrcOtaPacket::V0 { sfn_subfn, .. } => *sfn_subfn,
