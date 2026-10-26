@@ -41,12 +41,12 @@
         poor: 'text-red-600 dark:text-red-400',
     } as const;
 
-    function dbm(value: number): string {
-        return `${value.toFixed(1)} dBm`;
+    function dbm(value: number | null | undefined): string {
+        return value == null ? 'not captured' : `${value.toFixed(1)} dBm`;
     }
 
-    function db(value: number): string {
-        return `${value.toFixed(1)} dB`;
+    function db(value: number | null | undefined): string {
+        return value == null ? 'not captured' : `${value.toFixed(1)} dB`;
     }
 
     function clock(iso: string): string {
@@ -54,6 +54,7 @@
     }
 
     let serving = $derived(info?.serving ?? null);
+    let signal = $derived(serving?.signal ?? null);
     let identity = $derived(serving?.identity ?? null);
     let split = $derived(identity?.cell_id != null ? split_cell_id(identity.cell_id) : null);
     let carrier = $derived(operator_name(identity?.mcc ?? null, identity?.mnc ?? null));
@@ -71,13 +72,13 @@
     let unencrypted = $derived(missing.length > 0);
     let verdict = $derived(info ? health_verdict(info.health, 120, now) : 'starting');
     let tacChanges = $derived(info ? tracking_area_changes(info.history) : []);
-    let quality = $derived(serving ? rsrp_quality(serving.signal.rsrp_dbm) : null);
+    let quality = $derived(signal ? rsrp_quality(signal.rsrp_dbm) : null);
     let bandInfo = $derived(serving ? band_for_earfcn(serving.earfcn) : null);
     let dl = $derived(serving ? downlink_mhz(serving.earfcn) : null);
     let ul = $derived(serving ? uplink_mhz(serving.earfcn) : null);
     let ulEarfcn = $derived(serving ? uplink_earfcn(serving.earfcn) : null);
-    let bars = $derived(serving ? signal_bars(serving.signal.rsrp_dbm) : 0);
-    let asu = $derived(serving ? asu_from_rsrp(serving.signal.rsrp_dbm) : null);
+    let bars = $derived(signal ? signal_bars(signal.rsrp_dbm) : null);
+    let asu = $derived(signal ? asu_from_rsrp(signal.rsrp_dbm) : null);
 
     /** Rows for the advanced table. Anything unknown is shown as such rather than hidden. */
     let advanced = $derived.by(() => {
@@ -108,21 +109,18 @@
                     : 'FDD, separate frequencies'
                 : unknown,
         });
-        rows.push({ label: 'RSRP', value: `${serving.signal.rsrp_dbm.toFixed(1)} dBm` });
-        rows.push({ label: 'RSRQ', value: `${serving.signal.rsrq_db.toFixed(1)} dB` });
-        rows.push({ label: 'RSSI', value: `${serving.signal.rssi_dbm.toFixed(1)} dBm` });
+        rows.push({ label: 'RSRP', value: dbm(signal?.rsrp_dbm) });
+        rows.push({ label: 'RSRQ', value: db(signal?.rsrq_db) });
+        rows.push({ label: 'RSSI', value: dbm(signal?.rssi_dbm) });
         rows.push({
             label: 'RSRP (averaged)',
-            value:
-                serving.signal.avg_rsrp_dbm !== null && serving.signal.avg_rsrp_dbm !== undefined
-                    ? `${serving.signal.avg_rsrp_dbm.toFixed(1)} dBm`
-                    : unknown,
+            value: signal?.avg_rsrp_dbm != null ? dbm(signal.avg_rsrp_dbm) : unknown,
         });
         rows.push({
             label: 'Reselection search threshold',
             value: serving.search_threshold?.toString() ?? unknown,
         });
-        rows.push({ label: 'Signal bars', value: `${bars} of 4` });
+        rows.push({ label: 'Signal bars', value: bars === null ? unknown : `${bars} of 4` });
         rows.push({ label: 'ASU', value: asu?.toString() ?? unknown });
         rows.push({
             label: 'Timing advance',
@@ -131,7 +129,10 @@
                     ? `${serving.timing_advance} (about ${timing_advance_metres(serving.timing_advance)} m away)`
                     : 'not seen yet',
         });
-        rows.push({ label: 'Last measurement', value: clock(serving.last_seen) });
+        rows.push({
+            label: signal ? 'Last measurement' : 'Last observation',
+            value: clock(serving.last_seen),
+        });
         return rows;
     });
 </script>
@@ -160,7 +161,8 @@
                     ? 'text-amber-600 dark:text-amber-400'
                     : 'text-gray-500 dark:text-gray-400'}"
             >
-                measured {reading_age(serving.last_seen, now)}
+                {signal ? 'measured' : 'observed'}
+                {reading_age(serving.last_seen, now)}
             </span>
         {/if}
     </div>
@@ -205,8 +207,8 @@
     {#if !info?.has_data}
         <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
             {#if recording}
-                Waiting for the first measurement from the radio. This usually appears within a
-                minute of starting a recording.
+                Waiting for cell measurements or connection traffic from the radio. Some modems do
+                not report signal measurements; an idle device may only send paging messages.
             {:else}
                 Nothing to show while recording is stopped. These readings come from the modem
                 diagnostic stream, which only runs during a recording. Start one to see the tower
@@ -219,13 +221,15 @@
             <div>
                 <div class="text-xs text-gray-500 dark:text-gray-400">Signal (RSRP)</div>
                 <div class="text-lg {quality ? QUALITY_CLASS[quality] : ''}">
-                    {dbm(serving.signal.rsrp_dbm)}
+                    {dbm(signal?.rsrp_dbm)}
                 </div>
-                <div class="text-xs text-gray-500 dark:text-gray-400 capitalize">{quality}</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 capitalize">
+                    {quality ?? 'unknown'}
+                </div>
             </div>
             <div>
                 <div class="text-xs text-gray-500 dark:text-gray-400">Quality (RSRQ)</div>
-                <div class="text-lg">{db(serving.signal.rsrq_db)}</div>
+                <div class="text-lg">{db(signal?.rsrq_db)}</div>
             </div>
             <div>
                 <div class="text-xs text-gray-500 dark:text-gray-400">Band</div>
@@ -248,6 +252,12 @@
                 {/if}
             </div>
         </div>
+
+        {#if !signal}
+            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                Cell observed in connection traffic. Signal measurements have not been captured.
+            </p>
+        {/if}
 
         <!-- Explanation only. The fact itself is already on screen and stays
              there either way: the "measured N ago" beside the heading turns
@@ -427,7 +437,7 @@
         {#if !identity}
             <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
                 This tower's identifying broadcast has not been captured yet, so its operator and
-                cell identity are still unknown. It usually arrives within a few seconds.
+                cell identity are still unknown. It may only be captured when the device reconnects.
             </p>
         {/if}
 

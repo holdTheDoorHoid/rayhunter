@@ -108,6 +108,15 @@ them, so the panel legitimately holds its last reading.
 updates again when the device next does radio work. A full power cycle brings the
 measurements back if you want to confirm.
 
+### The Cell Site panel shows a cell but says signal measurements were not captured
+
+Some modems emit connected LTE RRC traffic without the ML1 serving-cell or
+neighbour measurement logs. Rayhunter can still show the PCI, EARFCN and band
+from that traffic, but RSRP, RSRQ and RSSI remain **not captured**. Timing logs
+alone do not identify a cell, and paging alone does not establish a connection.
+The operator and global cell identity also remain unknown until a matching
+SIB1 broadcast is captured. These missing values are not zero signal readings.
+
 ### Rayhunter runs but records nothing, and the SIM panel says it may not be working
 
 **Cause:** a dead, unactivated, or badly seated SIM looks a lot like a quiet

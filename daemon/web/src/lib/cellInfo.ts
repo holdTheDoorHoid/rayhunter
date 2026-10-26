@@ -36,7 +36,7 @@ export interface ServingCell {
     pci: number;
     earfcn: number;
     band: number | null;
-    signal: SignalMeasurements;
+    signal: SignalMeasurements | null;
     identity: CellIdentity | null;
     /** Raw timing advance from the last random access, if one has happened. */
     timing_advance: number | null;
@@ -62,7 +62,7 @@ export interface CellObservation {
     identity: CellIdentity | null;
     first_seen: string;
     last_seen: string;
-    best_rsrp_dbm: number;
+    best_rsrp_dbm: number | null;
 }
 
 export interface EncryptionStatus {
@@ -142,7 +142,7 @@ export interface CellInfo {
     serving: ServingCell | null;
     neighbors: NeighborCell[];
     history: CellObservation[];
-    /** False before any measurement has arrived, which is normal when stopped. */
+    /** False before a serving cell has been observed, including in connected RRC. */
     has_data: boolean;
     /** Present only when the device is configured to disclose them. */
     identities?: SubscriberIdentities;
